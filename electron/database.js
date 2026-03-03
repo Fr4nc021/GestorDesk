@@ -291,6 +291,30 @@ function listarVendasPorPeriodo(dataInicio, dataFim) {
   return vendas
 }
 
+function excluirVenda(id) {
+  const updateEstoque = db.prepare(`
+    UPDATE produtos SET estoque = estoque + ? WHERE id = ?
+  `)
+  const insertMovEstoque = db.prepare(`
+    INSERT INTO movimentacoes_estoque (produto_id, tipo, quantidade, origem)
+    VALUES (?, 'entrada', ?, 'estorno')
+  `)
+  const deleteItens = db.prepare('DELETE FROM vendas_itens WHERE venda_id = ?')
+  const deleteVenda = db.prepare('DELETE FROM vendas WHERE id = ?')
+  const getItens = db.prepare('SELECT produto_id, quantidade FROM vendas_itens WHERE venda_id = ?')
+
+  db.transaction(() => {
+    const itens = getItens.all(id)
+    for (const item of itens) {
+      updateEstoque.run(item.quantidade, item.produto_id)
+      insertMovEstoque.run(item.produto_id, item.quantidade)
+    }
+    deleteItens.run(id)
+    deleteVenda.run(id)
+  })()
+  return { id }
+}
+
 // --- Caixa ---
 
 function criarMovimentacaoCaixa({ tipo, valor, forma_pagamento, descricao = null }) {
@@ -354,14 +378,258 @@ function listarMovimentacoesPorPeriodo(dataInicio, dataFim) {
 // Produtos mais vendidos por período (maior → menor)
 function listarProdutosMaisVendidosPorPeriodo(dataInicio, dataFim) {
   return db.prepare(`
-    SELECT p.id, p.nome, p.codigo_barras, p.estoque, p.variacao, SUM(vi.quantidade) as total_vendido
+    SELECT p.id, p.nome, p.codigo_barras, p.estoque, p.variacao, p.artesao_id, a.nome as artesao_nome, SUM(vi.quantidade) as total_vendido
     FROM vendas_itens vi
     JOIN vendas v ON v.id = vi.venda_id
     JOIN produtos p ON p.id = vi.produto_id
+    LEFT JOIN artesoes a ON a.id = p.artesao_id
     WHERE date(v.data) >= date(?) AND date(v.data) <= date(?)
     GROUP BY vi.produto_id
     ORDER BY total_vendido DESC
   `).all(dataInicio, dataFim)
+}
+
+// --- Relatórios ---
+
+/**
+ * Retorna resumo de vendas para um período, opcionalmente filtrado por artesão.
+ * @param {string} dataInicio - YYYY-MM-DD
+ * @param {string} dataFim - YYYY-MM-DD
+ * @param {number|null} artesaoId - ID do artesão ou null para todos
+ * @returns {{ totalVendas: number, qtdVendas: number, qtdItens: number, ticketMedio: number }}
+ */
+function obterResumoVendasPeriodo(dataInicio, dataFim, artesaoId = null) {
+  if (artesaoId == null) {
+    const row = db.prepare(`
+      SELECT
+        COALESCE(SUM(v.valor_total), 0) as total_vendas,
+        COUNT(DISTINCT v.id) as qtd_vendas,
+        COALESCE((SELECT SUM(vi.quantidade) FROM vendas_itens vi JOIN vendas v2 ON v2.id = vi.venda_id WHERE date(v2.data) >= date(?) AND date(v2.data) <= date(?)), 0) as qtd_itens
+      FROM vendas v
+      WHERE date(v.data) >= date(?) AND date(v.data) <= date(?)
+    `).get(dataInicio, dataFim, dataInicio, dataFim)
+    const totalVendas = row.total_vendas ?? 0
+    const qtdVendas = row.qtd_vendas ?? 0
+    const qtdItens = row.qtd_itens ?? 0
+    const ticketMedio = qtdVendas > 0 ? totalVendas / qtdVendas : 0
+    return { totalVendas, qtdVendas, qtdItens, ticketMedio }
+  }
+
+  const row = db.prepare(`
+    SELECT
+      COALESCE(SUM(vi.preco_unitario * vi.quantidade), 0) as total_vendas,
+      COUNT(DISTINCT v.id) as qtd_vendas,
+      COALESCE(SUM(vi.quantidade), 0) as qtd_itens
+    FROM vendas_itens vi
+    JOIN vendas v ON v.id = vi.venda_id
+    JOIN produtos p ON p.id = vi.produto_id
+    WHERE date(v.data) >= date(?) AND date(v.data) <= date(?)
+      AND p.artesao_id = ?
+  `).get(dataInicio, dataFim, artesaoId)
+  const totalVendas = row.total_vendas ?? 0
+  const qtdVendas = row.qtd_vendas ?? 0
+  const qtdItens = row.qtd_itens ?? 0
+  const ticketMedio = qtdVendas > 0 ? totalVendas / qtdVendas : 0
+  return { totalVendas, qtdVendas, qtdItens, ticketMedio }
+}
+
+/**
+ * Retorna vendas agregadas por dia no período, para gráfico.
+ * @param {string} dataInicio - YYYY-MM-DD
+ * @param {string} dataFim - YYYY-MM-DD
+ * @param {number|null} artesaoId - ID do artesão ou null para todos
+ * @returns {Array<{ data: string, valorTotal: number, qtdItens: number }>}
+ */
+function obterVendasPorDia(dataInicio, dataFim, artesaoId = null) {
+  if (artesaoId == null) {
+    return db.prepare(`
+      SELECT
+        date(v.data) as data,
+        COALESCE(SUM(v.valor_total), 0) as valor_total,
+        COALESCE(SUM(
+          (SELECT COALESCE(SUM(vi.quantidade), 0) FROM vendas_itens vi WHERE vi.venda_id = v.id)
+        ), 0) as qtd_itens
+      FROM vendas v
+      WHERE date(v.data) >= date(?) AND date(v.data) <= date(?)
+      GROUP BY date(v.data)
+      ORDER BY date(v.data) ASC
+    `).all(dataInicio, dataFim)
+  }
+
+  return db.prepare(`
+    SELECT
+      date(v.data) as data,
+      COALESCE(SUM(vi.preco_unitario * vi.quantidade), 0) as valor_total,
+      COALESCE(SUM(vi.quantidade), 0) as qtd_itens
+    FROM vendas_itens vi
+    JOIN vendas v ON v.id = vi.venda_id
+    JOIN produtos p ON p.id = vi.produto_id
+    WHERE date(v.data) >= date(?) AND date(v.data) <= date(?)
+      AND p.artesao_id = ?
+    GROUP BY date(v.data)
+    ORDER BY date(v.data) ASC
+  `).all(dataInicio, dataFim, artesaoId)
+}
+
+/**
+ * Retorna total de vendas do dia atual (hoje).
+ * @returns {{ totalVendas: number, qtdVendas: number, qtdItens: number }}
+ */
+function obterTotalVendasHoje() {
+  const row = db.prepare(`
+    SELECT
+      COALESCE(SUM(v.valor_total), 0) as total_vendas,
+      COUNT(v.id) as qtd_vendas,
+      COALESCE((SELECT SUM(vi.quantidade) FROM vendas_itens vi JOIN vendas v2 ON v2.id = vi.venda_id WHERE date(v2.data) = date('now', 'localtime')), 0) as qtd_itens
+    FROM vendas v
+    WHERE date(v.data) = date('now', 'localtime')
+  `).get()
+  return {
+    totalVendas: row.total_vendas ?? 0,
+    qtdVendas: row.qtd_vendas ?? 0,
+    qtdItens: row.qtd_itens ?? 0,
+  }
+}
+
+/**
+ * Calcula lucro no período: (preço venda - preço custo) × quantidade.
+ * @param {string} dataInicio - YYYY-MM-DD
+ * @param {string} dataFim - YYYY-MM-DD
+ * @returns {{ lucro: number, totalVendas: number, totalCusto: number, qtdItens: number }}
+ */
+function obterLucroPeriodo(dataInicio, dataFim) {
+  const row = db.prepare(`
+    SELECT
+      COALESCE(SUM((vi.preco_unitario - p.preco_custo) * vi.quantidade), 0) as lucro,
+      COALESCE(SUM(vi.preco_unitario * vi.quantidade), 0) as total_vendas,
+      COALESCE(SUM(p.preco_custo * vi.quantidade), 0) as total_custo,
+      COALESCE(SUM(vi.quantidade), 0) as qtd_itens
+    FROM vendas_itens vi
+    JOIN vendas v ON v.id = vi.venda_id
+    JOIN produtos p ON p.id = vi.produto_id
+    WHERE date(v.data) >= date(?) AND date(v.data) <= date(?)
+  `).get(dataInicio, dataFim)
+  return {
+    lucro: row.lucro ?? 0,
+    totalVendas: row.total_vendas ?? 0,
+    totalCusto: row.total_custo ?? 0,
+    qtdItens: row.qtd_itens ?? 0,
+  }
+}
+
+/**
+ * Produtos mais vendidos no período, opcionalmente filtrado por artesão.
+ * @param {string} dataInicio - YYYY-MM-DD
+ * @param {string} dataFim - YYYY-MM-DD
+ * @param {number|null} artesaoId - ID do artesão ou null para ranking geral
+ * @returns {Array}
+ */
+function listarProdutosMaisVendidosPorPeriodoEArtesao(dataInicio, dataFim, artesaoId = null) {
+  if (artesaoId == null) {
+    return db.prepare(`
+      SELECT p.id, p.nome, p.codigo_barras, p.estoque, p.variacao, p.artesao_id, a.nome as artesao_nome, SUM(vi.quantidade) as total_vendido
+      FROM vendas_itens vi
+      JOIN vendas v ON v.id = vi.venda_id
+      JOIN produtos p ON p.id = vi.produto_id
+      LEFT JOIN artesoes a ON a.id = p.artesao_id
+      WHERE date(v.data) >= date(?) AND date(v.data) <= date(?)
+      GROUP BY vi.produto_id
+      ORDER BY total_vendido DESC
+    `).all(dataInicio, dataFim)
+  }
+
+  return db.prepare(`
+    SELECT p.id, p.nome, p.codigo_barras, p.estoque, p.variacao, p.artesao_id, a.nome as artesao_nome, SUM(vi.quantidade) as total_vendido
+    FROM vendas_itens vi
+    JOIN vendas v ON v.id = vi.venda_id
+    JOIN produtos p ON p.id = vi.produto_id
+    LEFT JOIN artesoes a ON a.id = p.artesao_id
+    WHERE date(v.data) >= date(?) AND date(v.data) <= date(?)
+      AND p.artesao_id = ?
+    GROUP BY vi.produto_id
+    ORDER BY total_vendido DESC
+  `).all(dataInicio, dataFim, artesaoId)
+}
+
+/**
+ * Conta quantos produtos estão cadastrados para um artesão.
+ * @param {number} artesaoId
+ * @returns {number}
+ */
+function contarProdutosPorArtesao(artesaoId) {
+  const row = db.prepare(`
+    SELECT COUNT(*) as total FROM produtos WHERE artesao_id = ?
+  `).get(artesaoId)
+  return row?.total ?? 0
+}
+
+/**
+ * Relatório de custo e vendas por período: total de vendas, total de custo e tabela de produtos vendidos.
+ * @param {string} dataInicio - YYYY-MM-DD
+ * @param {string} dataFim - YYYY-MM-DD
+ * @param {number|null} artesaoId - ID do artesão ou null para todos
+ * @returns {{ totalVendas: number, totalCusto: number, produtos: Array }}
+ */
+function obterRelatorioCustoVendasPeriodo(dataInicio, dataFim, artesaoId = null) {
+  if (artesaoId == null) {
+    const row = db.prepare(`
+      SELECT
+        COALESCE(SUM(vi.preco_unitario * vi.quantidade), 0) as total_vendas,
+        COALESCE(SUM(p.preco_custo * vi.quantidade), 0) as total_custo
+      FROM vendas_itens vi
+      JOIN vendas v ON v.id = vi.venda_id
+      JOIN produtos p ON p.id = vi.produto_id
+      WHERE date(v.data) >= date(?) AND date(v.data) <= date(?)
+    `).get(dataInicio, dataFim)
+    const produtos = db.prepare(`
+      SELECT
+        p.id, p.nome, p.variacao, a.nome as artesao_nome, p.preco_custo,
+        SUM(vi.quantidade) as total_vendido,
+        SUM(p.preco_custo * vi.quantidade) as total_custo_produto
+      FROM vendas_itens vi
+      JOIN vendas v ON v.id = vi.venda_id
+      JOIN produtos p ON p.id = vi.produto_id
+      LEFT JOIN artesoes a ON a.id = p.artesao_id
+      WHERE date(v.data) >= date(?) AND date(v.data) <= date(?)
+      GROUP BY vi.produto_id
+      ORDER BY p.nome
+    `).all(dataInicio, dataFim)
+    return {
+      totalVendas: row.total_vendas ?? 0,
+      totalCusto: row.total_custo ?? 0,
+      produtos,
+    }
+  }
+
+  const row = db.prepare(`
+    SELECT
+      COALESCE(SUM(vi.preco_unitario * vi.quantidade), 0) as total_vendas,
+      COALESCE(SUM(p.preco_custo * vi.quantidade), 0) as total_custo
+    FROM vendas_itens vi
+    JOIN vendas v ON v.id = vi.venda_id
+    JOIN produtos p ON p.id = vi.produto_id
+    WHERE date(v.data) >= date(?) AND date(v.data) <= date(?)
+      AND p.artesao_id = ?
+  `).get(dataInicio, dataFim, artesaoId)
+  const produtos = db.prepare(`
+    SELECT
+      p.id, p.nome, p.variacao, a.nome as artesao_nome, p.preco_custo,
+      SUM(vi.quantidade) as total_vendido,
+      SUM(p.preco_custo * vi.quantidade) as total_custo_produto
+    FROM vendas_itens vi
+    JOIN vendas v ON v.id = vi.venda_id
+    JOIN produtos p ON p.id = vi.produto_id
+    LEFT JOIN artesoes a ON a.id = p.artesao_id
+    WHERE date(v.data) >= date(?) AND date(v.data) <= date(?)
+      AND p.artesao_id = ?
+    GROUP BY vi.produto_id
+    ORDER BY p.nome
+  `).all(dataInicio, dataFim, artesaoId)
+  return {
+    totalVendas: row.total_vendas ?? 0,
+    totalCusto: row.total_custo ?? 0,
+    produtos,
+  }
 }
 
 // --- Exportações ---
@@ -380,10 +648,18 @@ module.exports = {
   listarVendasDoDia,
   listarVendasPorData,
   listarVendasPorPeriodo,
+  excluirVenda,
   criarMovimentacaoCaixa,
   adicionarEstoque,
   listarMovimentacoesRecentes,
   listarProdutosMaisVendidos,
   listarMovimentacoesPorPeriodo,
   listarProdutosMaisVendidosPorPeriodo,
+  obterResumoVendasPeriodo,
+  obterVendasPorDia,
+  obterTotalVendasHoje,
+  obterLucroPeriodo,
+  listarProdutosMaisVendidosPorPeriodoEArtesao,
+  contarProdutosPorArtesao,
+  obterRelatorioCustoVendasPeriodo,
 }

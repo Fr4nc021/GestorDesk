@@ -64,6 +64,18 @@ export default function Caixa() {
     timeZone: TZ_BRASILIA,
   })
 
+  async function handleExcluirVenda(venda) {
+    const msg = `Tem certeza que deseja excluir a venda #${String(venda.id).padStart(4, '0')} de ${formatBRL(venda.valor_total)}? O estoque dos produtos será devolvido.`
+    if (!confirm(msg)) return
+    try {
+      await window.electronAPI.excluirVenda(venda.id)
+      setTransacoes(prev => prev.filter(t => t.id !== venda.id))
+    } catch (err) {
+      console.error(err)
+      alert('Erro ao excluir venda.')
+    }
+  }
+
   function abrirModalExportar() {
     setExportarDataDe(dataSelecionada)
     setExportarDataAte(dataSelecionada)
@@ -236,12 +248,13 @@ export default function Caixa() {
                 <th>Itens</th>
                 <th>Pagamento</th>
                 <th>Total</th>
+                <th>Ações</th>
               </tr>
             </thead>
             <tbody>
               {transacoesFiltradas.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="caixa-empty">Nenhuma transação encontrada</td>
+                  <td colSpan={6} className="caixa-empty">Nenhuma transação encontrada</td>
                 </tr>
               ) : (
                 transacoesFiltradas.map((t) => (
@@ -279,6 +292,21 @@ export default function Caixa() {
                       </span>
                     </td>
                     <td>{formatBRL(t.valor_total)}</td>
+                    <td>
+                      <button
+                        type="button"
+                        className="caixa-btn-excluir"
+                        onClick={() => handleExcluirVenda(t)}
+                        title="Excluir venda"
+                        aria-label="Excluir venda"
+                      >
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <polyline points="3 6 5 6 21 6" />
+                          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                        </svg>
+                        Excluir
+                      </button>
+                    </td>
                   </tr>
                 ))
               )}

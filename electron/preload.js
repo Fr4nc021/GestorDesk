@@ -23,6 +23,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   criarMovimentacaoCaixa: (data) => ipcRenderer.invoke('criar-movimentacao-caixa', data),
   listarVendasPorData: (data) => ipcRenderer.invoke('listar-vendas-por-data', data),
   listarVendasPorPeriodo: (dataInicio, dataFim) => ipcRenderer.invoke('listar-vendas-por-periodo', dataInicio, dataFim),
+  excluirVenda: (id) => ipcRenderer.invoke('excluir-venda', id),
   salvarRelatorioPDF: (pdfBase64, filename) => ipcRenderer.invoke('salvar-relatorio-pdf', pdfBase64, filename),
 
   // Impressão
@@ -39,4 +40,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('listar-movimentacoes-por-periodo', dataInicio, dataFim),
   listarProdutosMaisVendidosPorPeriodo: (dataInicio, dataFim) => 
     ipcRenderer.invoke('listar-produtos-mais-vendidos-por-periodo', dataInicio, dataFim),
+
+  // Relatórios
+  obterResumoVendasPeriodo: (dataInicio, dataFim, artesaoId) => 
+    ipcRenderer.invoke('obter-resumo-vendas-periodo', dataInicio, dataFim, artesaoId),
+  obterVendasPorDia: (dataInicio, dataFim, artesaoId) => 
+    ipcRenderer.invoke('obter-vendas-por-dia', dataInicio, dataFim, artesaoId),
+  obterTotalVendasHoje: () => ipcRenderer.invoke('obter-total-vendas-hoje'),
+  obterLucroPeriodo: (dataInicio, dataFim) => 
+    ipcRenderer.invoke('obter-lucro-periodo', dataInicio, dataFim),
+  listarProdutosMaisVendidosPorPeriodoEArtesao: (dataInicio, dataFim, artesaoId) => 
+    ipcRenderer.invoke('listar-produtos-mais-vendidos-por-periodo-e-artesao', dataInicio, dataFim, artesaoId),
+  contarProdutosPorArtesao: (artesaoId) => 
+    ipcRenderer.invoke('contar-produtos-por-artesao', artesaoId),
+  obterRelatorioCustoVendasPeriodo: (dataInicio, dataFim, artesaoId) => 
+    ipcRenderer.invoke('obter-relatorio-custo-vendas-periodo', dataInicio, dataFim, artesaoId),
 })
