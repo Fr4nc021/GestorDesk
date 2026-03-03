@@ -1464,6 +1464,32 @@
   color: #888;
 }
 
+.caixa-btn-excluir {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: transparent;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #6b7280;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.caixa-btn-excluir:hover {
+  background: #fee2e2;
+  color: #dc2626;
+  border-color: #fecaca;
+}
+
+.caixa-btn-excluir svg {
+  width: 16px;
+  height: 16px;
+}
+
 /* Modal - Cadastro Artesão */
 .modal-overlay {
   position: fixed;
@@ -2100,4 +2126,294 @@
 @keyframes fadeInUp {
   from { opacity: 0; transform: translateY(20px); }
   to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Relatórios */
+.relatorios {
+  width: 100%;
+}
+
+.relatorios-header {
+  margin-bottom: 24px;
+}
+
+.relatorios-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 24px;
+  border-bottom: 1px solid #e0e0e0;
+  padding-bottom: 0;
+}
+
+.relatorios-tab {
+  padding: 12px 20px;
+  border: none;
+  background: transparent;
+  color: #555;
+  font-size: 15px;
+  font-weight: 500;
+  cursor: pointer;
+  border-radius: 8px 8px 0 0;
+  transition: background 0.2s, color 0.2s;
+}
+
+.relatorios-tab:hover {
+  background: #f5f5f5;
+  color: #212121;
+}
+
+.relatorios-tab.active {
+  background: #212121;
+  color: white;
+}
+
+.relatorios-filtros {
+  margin-bottom: 24px;
+}
+
+.relatorios-filtros-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: flex-end;
+}
+
+.relatorios-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.relatorios-field label {
+  font-size: 13px;
+  font-weight: 500;
+  color: #333;
+}
+
+.relatorios-field input[type="date"],
+.relatorios-field select {
+  padding: 10px 12px;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  font-size: 14px;
+  min-width: 160px;
+}
+
+.relatorios-field input:focus,
+.relatorios-field select:focus {
+  outline: none;
+  border-color: #212121;
+}
+
+.relatorios-field-wide {
+  min-width: 220px;
+}
+
+.relatorios-field-wide select {
+  min-width: 220px;
+}
+
+.relatorios-field-export {
+  align-items: flex-end;
+}
+
+.relatorios-btn-exportar {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 18px;
+  background: #212121;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.relatorios-btn-exportar:hover:not(:disabled) {
+  background: #424242;
+}
+
+.relatorios-btn-exportar:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.relatorios-btn-exportar svg {
+  width: 18px;
+  height: 18px;
+}
+
+.relatorios-loading {
+  padding: 40px;
+  text-align: center;
+  color: #888;
+}
+
+.relatorios-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 20px;
+  margin-bottom: 32px;
+}
+
+.relatorios-cards-lucro {
+  margin-bottom: 20px;
+}
+
+.rel-card {
+  position: relative;
+  padding: 20px;
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
+.rel-card-icon {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  width: 24px;
+  height: 24px;
+  color: #999;
+}
+
+.rel-card-icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+.rel-card-content {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.rel-card-value {
+  font-size: 22px;
+  font-weight: 700;
+  color: #212121;
+}
+
+.rel-card-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: #555;
+}
+
+.rel-card-sub {
+  font-size: 13px;
+  color: #888;
+}
+
+.relatorios-grafico {
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
+.relatorios-grafico h3,
+.relatorios-mais-vendidos h3 {
+  font-size: 18px;
+  font-weight: 700;
+  color: #212121;
+  margin-bottom: 20px;
+}
+
+.relatorios-chart {
+  width: 100%;
+  height: 280px;
+}
+
+.relatorios-grafico-empty,
+.relatorios-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 20px;
+  color: #888;
+}
+
+.relatorios-grafico-empty p,
+.relatorios-empty p {
+  font-size: 16px;
+  font-weight: 600;
+  color: #666;
+  margin: 12px 0 4px;
+}
+
+.relatorios-grafico-empty span,
+.relatorios-empty span {
+  font-size: 14px;
+  color: #999;
+}
+
+.relatorios-empty-icon {
+  width: 64px;
+  height: 64px;
+  color: #ddd;
+}
+
+.relatorios-empty-icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+.relatorios-empty-icon-box {
+  width: 80px;
+  height: 80px;
+  color: #ddd;
+}
+
+.relatorios-lucro {
+  padding-bottom: 24px;
+}
+
+.relatorios-lucro-formula {
+  font-size: 14px;
+  color: #666;
+  margin: 0;
+}
+
+.relatorios-mais-vendidos {
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
+.relatorios-table-wrapper {
+  overflow-x: auto;
+  border-radius: 8px;
+  border: 1px solid #eee;
+}
+
+.relatorios-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.relatorios-table th,
+.relatorios-table td {
+  padding: 12px 16px;
+  text-align: left;
+  border-bottom: 1px solid #eee;
+}
+
+.relatorios-table th {
+  background: #f8f8f8;
+  font-weight: 600;
+  color: #555;
+}
+
+.relatorios-table tbody tr:hover {
+  background: #fafafa;
 }

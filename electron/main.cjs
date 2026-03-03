@@ -14,12 +14,20 @@ const {
   listarVendasDoDia,
   listarVendasPorData,
   listarVendasPorPeriodo,
+  excluirVenda,
   criarMovimentacaoCaixa,
   adicionarEstoque,
   listarMovimentacoesRecentes,
   listarProdutosMaisVendidos,
   listarMovimentacoesPorPeriodo,
   listarProdutosMaisVendidosPorPeriodo,
+  obterResumoVendasPeriodo,
+  obterVendasPorDia,
+  obterTotalVendasHoje,
+  obterLucroPeriodo,
+  listarProdutosMaisVendidosPorPeriodoEArtesao,
+  contarProdutosPorArtesao,
+  obterRelatorioCustoVendasPeriodo,
 } = require('./database')
 
 function createWindow() {
@@ -54,6 +62,7 @@ ipcMain.handle('criar-movimentacao-caixa', (_, data) => criarMovimentacaoCaixa(d
 //caixa filtro por data
 ipcMain.handle('listar-vendas-por-data', (_, data) => listarVendasPorData(data))
 ipcMain.handle('listar-vendas-por-periodo', (_, dataInicio, dataFim) => listarVendasPorPeriodo(dataInicio, dataFim))
+ipcMain.handle('excluir-venda', (_, id) => excluirVenda(id))
 
 ipcMain.handle('imprimir-etiquetas', async (event) => {
   const win = BrowserWindow.fromWebContents(event.sender)
@@ -88,5 +97,19 @@ ipcMain.handle('listar-movimentacoes-por-periodo', (_, dataInicio, dataFim) =>
 ipcMain.handle('listar-produtos-mais-vendidos-por-periodo', (_, dataInicio, dataFim) => 
   listarProdutosMaisVendidosPorPeriodo(dataInicio, dataFim))
 
+// Relatórios
+ipcMain.handle('obter-resumo-vendas-periodo', (_, dataInicio, dataFim, artesaoId) => 
+  obterResumoVendasPeriodo(dataInicio, dataFim, artesaoId ?? null))
+ipcMain.handle('obter-vendas-por-dia', (_, dataInicio, dataFim, artesaoId) => 
+  obterVendasPorDia(dataInicio, dataFim, artesaoId ?? null))
+ipcMain.handle('obter-total-vendas-hoje', () => obterTotalVendasHoje())
+ipcMain.handle('obter-lucro-periodo', (_, dataInicio, dataFim) => 
+  obterLucroPeriodo(dataInicio, dataFim))
+ipcMain.handle('listar-produtos-mais-vendidos-por-periodo-e-artesao', (_, dataInicio, dataFim, artesaoId) => 
+  listarProdutosMaisVendidosPorPeriodoEArtesao(dataInicio, dataFim, artesaoId ?? null))
+ipcMain.handle('contar-produtos-por-artesao', (_, artesaoId) => 
+  contarProdutosPorArtesao(artesaoId))
+ipcMain.handle('obter-relatorio-custo-vendas-periodo', (_, dataInicio, dataFim, artesaoId) => 
+  obterRelatorioCustoVendasPeriodo(dataInicio, dataFim, artesaoId ?? null))
 
 app.whenReady().then(createWindow)
