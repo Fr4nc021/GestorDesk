@@ -2,6 +2,7 @@
   "name": "gestordesk",
   "private": true,
   "version": "0.0.0",
+  "main": "electron/main.cjs",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -9,15 +10,21 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "electron": "electron .",
-    "start": "concurrently \"npm run dev\" \"npm run electron\""
+    "start": "concurrently \"npm run dev\" \"npm run electron\"",
+    "postinstall": "electron-rebuild"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.97.0",
+    "better-sqlite3": "^12.6.2",
+    "jspdf": "^4.2.0",
     "react": "^19.2.0",
+    "react-barcode": "^1.6.1",
     "react-dom": "^19.2.0",
-    "react-router-dom": "^7.13.1"
+    "react-router-dom": "^7.13.1",
+    "recharts": "^3.7.0"
   },
   "devDependencies": {
+    "@electron/rebuild": "^3.6.0",
     "@eslint/js": "^9.39.1",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",

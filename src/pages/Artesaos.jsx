@@ -1,6 +1,117 @@
 import loupeIcon from '../assets/complements/loupe.png'
+import { useState, useEffect } from 'react'
+
+
 
 export default function Artesaos() {
+  const [artesoes, setArtesoes] = useState([])
+  const [loading, setLoading] = useState(true)
+
+  const [modalAberto, setModalAberto] = useState(false)
+  const [modalExcluirAberto, setModalExcluirAberto] = useState(false)
+  const [artesaoEmEdicao, setArtesaoEmEdicao] = useState(null)
+  const [artesaoParaExcluir, setArtesaoParaExcluir] = useState(null)
+  const [nome, setNome] = useState('')
+  const [telefoneWhatsapp, setTelefoneWhatsapp] = useState('')
+
+  async function carregarArtesoes() {
+    try {
+      const lista = await window.electronAPI.listarArtesoes()
+      setArtesoes(lista)
+    } catch (err) {
+      console.error(err)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    carregarArtesoes()
+  }, [])
+
+  function abrirModal() {
+    setArtesaoEmEdicao(null)
+    setNome('')
+    setTelefoneWhatsapp('+55 ')
+    setModalAberto(true)
+  }
+
+  function abrirModalEdicao(artesao) {
+    setArtesaoEmEdicao(artesao)
+    setNome(artesao.nome)
+    setTelefoneWhatsapp(artesao.telefone_whats ? formatarTelefone(artesao.telefone_whats) : '+55 ')
+    setModalAberto(true)
+  }
+
+  function abrirModalExcluir(artesao) {
+    setArtesaoParaExcluir(artesao)
+    setModalExcluirAberto(true)
+  }
+
+  function formatarTelefone(valor) {
+    const digitos = valor.replace(/\D/g, '').replace(/^55/, '')
+    if (digitos.length === 0) return '+55 '
+    if (digitos.length <= 2) return `+55 (${digitos}`
+    if (digitos.length <= 7) return `+55 (${digitos.slice(0, 2)}) ${digitos.slice(2)}`
+    return `+55 (${digitos.slice(0, 2)}) ${digitos.slice(2, 7)}-${digitos.slice(7, 11)}`
+  }
+
+  function handleTelefoneChange(e) {
+    const valor = e.target.value
+    const digitos = valor.replace(/\D/g, '').replace(/^55/, '').slice(0, 11)
+    setTelefoneWhatsapp(formatarTelefone(digitos))
+  }
+
+  async function handleSalvarArtesao(e) {
+    e.preventDefault()
+    if (!nome.trim()) return
+
+    if (!window.electronAPI) {
+      alert('Execute o app pelo Electron (npm start). O banco de dados não está disponível no navegador.')
+      return
+    }
+
+    try {
+      if (artesaoEmEdicao) {
+        await window.electronAPI.atualizarArtesao(artesaoEmEdicao.id, {
+          nome: nome.trim(),
+          telefone_whats: telefoneWhatsapp.replace(/\D/g, '').length > 2 ? telefoneWhatsapp.trim() : null,
+        })
+      } else {
+        await window.electronAPI.criarArtesao({
+          nome: nome.trim(),
+          telefone_whats: telefoneWhatsapp.replace(/\D/g, '').length > 2 ? telefoneWhatsapp.trim() : null,
+        })
+      }
+      setModalAberto(false)
+      carregarArtesoes()
+    } catch (err) {
+      console.error(err)
+      const msg = err?.message || String(err)
+      alert(`Erro ao salvar artesão: ${msg}`)
+    }
+  }
+
+  async function handleExcluirArtesao() {
+    if (!artesaoParaExcluir) return
+
+    if (!window.electronAPI) {
+      alert('Execute o app pelo Electron (npm start). O banco de dados não está disponível no navegador.')
+      return
+    }
+
+    try {
+      await window.electronAPI.excluirArtesao(artesaoParaExcluir.id)
+      setModalExcluirAberto(false)
+      setArtesaoParaExcluir(null)
+      carregarArtesoes()
+    } catch (err) {
+      console.error(err)
+      const msg = err?.message || String(err)
+      alert(`Erro ao excluir artesão: ${msg}`)
+    }
+  }
+
   return (
     <div className="artesaos">
       <div className="artesaos-header">
@@ -15,9 +126,9 @@ export default function Artesaos() {
           </div>
         </div>
         <div className="artesaos-actions">
-          <button type="button" className="artesaos-btn-primary">
-            <span>+</span> Novo Artesão
-          </button>
+        <button type="button" className="artesaos-btn-primary" onClick={abrirModal}>
+              <span>+</span> Novo Artesão
+        </button>
         </div>
       </div>
 
@@ -33,10 +144,134 @@ export default function Artesaos() {
             </tr>
           </thead>
           <tbody>
-            {/* linhas de artesãos */}
+            {loading ? (
+              <tr>
+                <td colSpan={5}>Carregando...</td>
+              </tr>
+            ) : artesoes.length === 0 ? (
+              <tr>
+                <td colSpan={5}>Nenhum artesão cadastrado.</td>
+              </tr>
+            ) : (
+              artesoes.map((a) => (
+                <tr key={a.id}>
+                  <td>{a.nome}</td>
+                  <td>
+                    <span className="artesaos-contato">
+                      {a.telefone_whats ? (
+                        <>
+                          <svg className="artesaos-contato-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
+                          </svg>
+                          {a.telefone_whats}
+                        </>
+                      ) : (
+                        '-'
+                      )}
+                    </span>
+                  </td>
+                  <td>
+                    <span className="artesaos-status-badge">Ativo</span>
+                  </td>
+                  <td>{a.quantidade_produtos ?? 0}</td>
+                  <td>
+                    <div className="artesaos-acoes">
+                      <button
+                        type="button"
+                        className="artesaos-btn-edit"
+                        title="Editar"
+                        onClick={() => abrirModalEdicao(a)}
+                      >
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                        </svg>
+                      </button>
+                      <button
+                        type="button"
+                        className="artesaos-btn-excluir"
+                        title="Excluir"
+                        onClick={() => abrirModalExcluir(a)}
+                      >
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <polyline points="3 6 5 6 21 6" />
+                          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                          <line x1="10" y1="11" x2="10" y2="17" />
+                          <line x1="14" y1="11" x2="14" y2="17" />
+                        </svg>
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))
+            )}
           </tbody>
         </table>
       </div>
+
+      {modalAberto && (
+        <div className="modal-overlay" onClick={() => setModalAberto(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>{artesaoEmEdicao ? 'Editar Artesão' : 'Cadastrar Novo Artesão'}</h3>
+              <button type="button" className="modal-close" onClick={() => setModalAberto(false)} aria-label="Fechar">
+                ×
+              </button>
+            </div>
+            <form onSubmit={handleSalvarArtesao}>
+              <div className="modal-field">
+                <label htmlFor="nome">Nome Completo</label>
+                <input
+                  id="nome"
+                  type="text"
+                  value={nome}
+                  onChange={(e) => setNome(e.target.value)}
+                  placeholder="Ex: Maria Silva"
+                  required
+                />
+              </div>
+              <div className="modal-field">
+                <label htmlFor="telefone">Telefone / WhatsApp</label>
+                <input
+                  id="telefone"
+                  type="tel"
+                  value={telefoneWhatsapp}
+                  onChange={handleTelefoneChange}
+                  placeholder="+55 (11) 99999-9999"
+                />
+              </div>
+              <button type="submit" className="modal-submit">
+                {artesaoEmEdicao ? 'Salvar Alterações' : 'Salvar Artesão'}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {modalExcluirAberto && artesaoParaExcluir && (
+        <div className="modal-overlay" onClick={() => setModalExcluirAberto(false)}>
+          <div className="modal-content modal-confirm" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Excluir artesão</h3>
+              <button type="button" className="modal-close" onClick={() => setModalExcluirAberto(false)} aria-label="Fechar">
+                ×
+              </button>
+            </div>
+            <p className="modal-confirm-message">
+              Tem certeza que deseja excluir esse artesão? Essa ação é permanente e todos os produtos relacionados a ele ficarão sem relação com fornecedor.
+            </p>
+            <p className="modal-confirm-nome"><strong>{artesaoParaExcluir.nome}</strong></p>
+            <div className="modal-confirm-acoes">
+              <button type="button" className="modal-btn-cancelar" onClick={() => setModalExcluirAberto(false)}>
+                Cancelar
+              </button>
+              <button type="button" className="modal-btn-excluir" onClick={handleExcluirArtesao}>
+                Excluir
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
