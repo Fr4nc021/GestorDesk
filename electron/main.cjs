@@ -30,7 +30,23 @@ const {
   contarProdutosPorArtesao,
   obterRelatorioCustoVendasPeriodo,
   obterTotaisPagamentosPorPeriodo,
+  validarLogin,
+  criarUsuario,
 } = require('./database')
+
+// CLI: criar usuário e sair — node electron/main.cjs não funciona; use: npx electron . criar-usuario LOGIN SENHA
+if (process.argv[2] === 'criar-usuario' && process.argv[3] && process.argv[4]) {
+  const login = process.argv[3]
+  const senha = process.argv[4]
+  try {
+    criarUsuario(login, senha)
+    console.log('Usuário "%s" criado com sucesso.', login)
+  } catch (err) {
+    console.error(err.message)
+    process.exit(1)
+  }
+  process.exit(0)
+}
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -45,6 +61,11 @@ function createWindow() {
 
   win.loadURL('http://localhost:5173')
 }
+
+// Usuarios
+ipcMain.handle('validar-login', (_, login, senha) => validarLogin(login, senha))
+ipcMain.handle('criar-usuario', (_, login, senha) => criarUsuario(login, senha))
+
 
 // IPC Handlers
 ipcMain.handle('criar-artesao', (_, data) => criarArtesao(data))

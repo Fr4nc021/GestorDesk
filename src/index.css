@@ -2648,3 +2648,133 @@
 .relatorios-table tbody tr:hover {
   background: #fafafa;
 }
+
+/* ========== Login ========== */
+.login-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: #fff;
+  padding: 20px;
+}
+
+.login-card {
+  position: relative;
+  width: 100%;
+  max-width: 400px;
+  padding: 0 24px 32px;
+  background: #f0f0f0;
+  border: 1px solid #e0e0e0;
+  border-radius: 16px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+  overflow: hidden;
+}
+
+.login-card-stripe {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: linear-gradient(90deg, #e57373 0%, #ef9a9a 100%);
+}
+
+.login-title {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #212121;
+  text-align: center;
+  margin-top: 28px;
+  margin-bottom: 4px;
+}
+
+.login-subtitle {
+  font-size: 0.95rem;
+  color: #555;
+  text-align: center;
+  margin-bottom: 24px;
+}
+
+.login-card form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.login-label {
+  display: block;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: #212121;
+  margin-bottom: 4px;
+}
+
+.login-input-wrap {
+  display: flex;
+  align-items: center;
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 12px;
+  overflow: hidden;
+  transition: border-color 0.2s;
+}
+
+.login-input-wrap:focus-within {
+  border-color: #212121;
+  outline: none;
+}
+
+.login-input-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  flex-shrink: 0;
+  color: #666;
+}
+
+.login-input {
+  flex: 1;
+  padding: 14px 16px 14px 0;
+  font-size: 1rem;
+  font-family: inherit;
+  color: #212121;
+  background: transparent;
+  border: none;
+  outline: none;
+}
+
+.login-input::placeholder {
+  color: #888;
+}
+
+.login-btn {
+  margin-top: 8px;
+  padding: 14px 24px;
+  font-size: 1rem;
+  font-weight: 600;
+  font-family: inherit;
+  color: white;
+  background: #212121;
+  border: none;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  width: 100%;
+}
+
+.login-btn:hover {
+  background: #333;
+}
+
+.login-erro {
+  font-size: 0.9rem;
+  color: #c62828;
+  margin: 0;
+  padding: 10px 12px;
+  background: #ffebee;
+  border: 1px solid #ffcdd2;
+  border-radius: 8px;
+}

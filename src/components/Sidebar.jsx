@@ -1,4 +1,4 @@
-import { NavLink } from 'react-router-dom'
+import { NavLink, Link } from 'react-router-dom'
 import pdvIcon from '../assets/icons/pdv.png'
 import artesaosIcon from '../assets/icons/artesaos.png'
 import estoqueIcon from '../assets/icons/estoque.png'
@@ -6,13 +6,13 @@ import relatoriosIcon from '../assets/icons/relatorios.png'
 import sairIcon from '../assets/icons/sair.png'
 
 const menuItems = [
-  { to: '/', label: 'Dashboard', icon: relatoriosIcon },
-  { to: '/pdv', label: 'PDV (Venda)', icon: pdvIcon },
-  { to: '/produtos', label: 'Produtos', icon: estoqueIcon },
-  { to: '/artesaos', label: 'Artesãos', icon: artesaosIcon },
-  { to: '/estoque', label: 'Estoque', icon: estoqueIcon },
-  { to: '/caixa', label: 'Caixa', icon: pdvIcon },
-  { to: '/relatorios', label: 'Relatórios', icon: relatoriosIcon },
+  { to: '/app', label: 'Dashboard', icon: relatoriosIcon },
+  { to: '/app/pdv', label: 'PDV (Venda)', icon: pdvIcon },
+  { to: '/app/produtos', label: 'Produtos', icon: estoqueIcon },
+  { to: '/app/artesaos', label: 'Artesãos', icon: artesaosIcon },
+  { to: '/app/estoque', label: 'Estoque', icon: estoqueIcon },
+  { to: '/app/caixa', label: 'Caixa', icon: pdvIcon },
+  { to: '/app/relatorios', label: 'Relatórios', icon: relatoriosIcon },
 ]
 
 export default function Sidebar() {
@@ -25,7 +25,7 @@ export default function Sidebar() {
           <li key={to}>
             <NavLink
               to={to}
-              end={to === '/'}
+              end={to === '/app'}
               className={({ isActive }) => `sidebar-item ${isActive ? 'active' : ''}`}
             >
               <img src={icon} alt="" />
@@ -36,10 +36,10 @@ export default function Sidebar() {
       </ul>
 
       <div className="sidebar-footer">
-        <a href="/login" className="sidebar-item sair">
+        <Link to="/" className="sidebar-item sair">
           <img src={sairIcon} alt="" />
           <span>Sair</span>
-        </a>
+        </Link>
       </div>
     </div>
   )

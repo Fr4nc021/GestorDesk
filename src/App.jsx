@@ -1,4 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import Produtos from './pages/Produtos'
 import PDV from './pages/PDV'
@@ -12,14 +13,16 @@ export default function App() {
   return (
         <BrowserRouter>
         <Routes>
-            <Route path="/" element={<Layout />}>
-            <Route index element={<Dashboard />} />
-            <Route path="produtos" element={<Produtos />} />
-            <Route path="pdv" element={<PDV />} />
-            <Route path="artesaos" element={<Artesaos />} />
-            <Route path="estoque" element={<Estoque />} />
-            <Route path="caixa" element={<Caixa />} />
-            <Route path="relatorios" element={<Relatorios />} />
+            <Route path="/" element={<Login />} />
+            <Route path="/login" element={<Login />} />
+            <Route path="/app" element={<Layout />}>
+              <Route index element={<Dashboard />} />
+              <Route path="produtos" element={<Produtos />} />
+              <Route path="pdv" element={<PDV />} />
+              <Route path="artesaos" element={<Artesaos />} />
+              <Route path="estoque" element={<Estoque />} />
+              <Route path="caixa" element={<Caixa />} />
+              <Route path="relatorios" element={<Relatorios />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

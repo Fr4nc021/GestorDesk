@@ -30,6 +30,14 @@ function gerarCodigoBarras() {
 
 function initDatabase() {
   db.exec(`
+
+    CREATE TABLE IF NOT EXISTS usuarios (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      login TEXT NOT NULL UNIQUE,
+      senha TEXT NOT NULL,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
     CREATE TABLE IF NOT EXISTS artesoes (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       nome TEXT NOT NULL,
@@ -104,6 +112,11 @@ function initDatabase() {
 }
 
 initDatabase()
+
+const rowCount = db.prepare('SELECT COUNT(*) as n FROM usuarios').get()
+if (rowCount.n === 0) {
+  db.prepare('INSERT INTO usuarios (login, senha) VALUES (?, ?)').run('admin', 'admin')
+}
 
 try {
   db.exec(`ALTER TABLE movimentacoes_estoque ADD COLUMN origem TEXT DEFAULT 'admin'`)
@@ -729,6 +742,20 @@ function obterTotaisPagamentosPorPeriodo(dataInicio, dataFim) {
     GROUP BY vp.forma_pagamento
   `).all(dataInicio, dataFim)
 }
+  function validarLogin(login, senha) {
+    const row = db.prepare('SELECT id, login FROM usuarios WHERE login = ? AND senha = ?')
+      .get(String(login).trim(), senha)
+    return row || null
+  }
+
+  function criarUsuario(login, senha) {
+    const loginTrim = String(login).trim()
+    if (!loginTrim || !senha) throw new Error('Login e senha são obrigatórios.')
+    const existente = db.prepare('SELECT id FROM usuarios WHERE login = ?').get(loginTrim)
+    if (existente) throw new Error('Usuário já cadastrado.')
+    const result = db.prepare('INSERT INTO usuarios (login, senha) VALUES (?, ?)').run(loginTrim, senha)
+    return { id: result.lastInsertRowid, login: loginTrim }
+  }
 
 // --- Exportações ---
 
@@ -762,4 +789,6 @@ module.exports = {
   contarProdutosPorArtesao,
   obterRelatorioCustoVendasPeriodo,
   obterTotaisPagamentosPorPeriodo,
+  validarLogin,
+  criarUsuario,
 }
