@@ -5,9 +5,9 @@ import estoqueIcon from '../assets/icons/estoque.png'
 import relatoriosIcon from '../assets/icons/relatorios.png'
 
 const quickActions = [
-  { to: '/pdv', label: 'Vendas', icon: pdvIcon },
-  { to: '/produtos', label: 'Produtos', icon: estoqueIcon },
-  { to: '/caixa', label: 'Caixa', icon: relatoriosIcon },
+  { to: '/app/pdv', label: 'Vendas', icon: pdvIcon },
+  { to: '/app/produtos', label: 'Produtos', icon: estoqueIcon },
+  { to: '/app/caixa', label: 'Caixa', icon: relatoriosIcon },
 ]
 
 const TZ_BRASILIA = 'America/Sao_Paulo'

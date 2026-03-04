@@ -30,6 +30,14 @@ function gerarCodigoBarras() {
 
 function initDatabase() {
   db.exec(`
+
+    CREATE TABLE IF NOT EXISTS usuarios (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      login TEXT NOT NULL UNIQUE,
+      senha TEXT NOT NULL,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
     CREATE TABLE IF NOT EXISTS artesoes (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       nome TEXT NOT NULL,
@@ -72,6 +80,15 @@ function initDatabase() {
       FOREIGN KEY (produto_id) REFERENCES produtos(id)
     );
 
+    -- Pagamentos por venda (para suportar múltiplas formas)
+    CREATE TABLE IF NOT EXISTS vendas_pagamentos (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      venda_id INTEGER NOT NULL,
+      forma_pagamento TEXT NOT NULL CHECK(forma_pagamento IN ('dinheiro','credito','debito','pix')),
+      valor REAL NOT NULL,
+      FOREIGN KEY (venda_id) REFERENCES vendas(id)
+    );
+
      CREATE TABLE IF NOT EXISTS movimentacoes_estoque (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       produto_id INTEGER NOT NULL,
@@ -96,10 +113,27 @@ function initDatabase() {
 
 initDatabase()
 
+const rowCount = db.prepare('SELECT COUNT(*) as n FROM usuarios').get()
+if (rowCount.n === 0) {
+  db.prepare('INSERT INTO usuarios (login, senha) VALUES (?, ?)').run('admin', 'admin')
+}
+
 try {
   db.exec(`ALTER TABLE movimentacoes_estoque ADD COLUMN origem TEXT DEFAULT 'admin'`)
 } catch (_) {
   // coluna origem já existe
+}
+
+// Migrar vendas antigas para vendas_pagamentos (uma linha por venda)
+try {
+  db.exec(`
+    INSERT INTO vendas_pagamentos (venda_id, forma_pagamento, valor)
+    SELECT v.id, v.forma_pagamento, v.valor_total
+    FROM vendas v
+    WHERE NOT EXISTS (SELECT 1 FROM vendas_pagamentos vp WHERE vp.venda_id = v.id)
+  `)
+} catch (_) {
+  // migração já executada ou erro
 }
 
 // --- Artesãos ---
@@ -200,7 +234,7 @@ function buscarProdutoPorCodigo(codigo_barras) {
 
 // --- Vendas ---
 
-function criarVenda({ itens, forma_pagamento, valor_total: valorTotalInformado }) {
+function criarVenda({ itens, forma_pagamento, valor_total: valorTotalInformado, pagamentos }) {
   const subtotalItens = itens.reduce((acc, item) => acc + item.quantidade * item.preco_unitario, 0)
   const valor_total = valorTotalInformado != null ? valorTotalInformado : subtotalItens
 
@@ -218,6 +252,10 @@ function criarVenda({ itens, forma_pagamento, valor_total: valorTotalInformado }
     INSERT INTO movimentacoes_estoque (produto_id, tipo, quantidade, origem)
     VALUES (?, 'saida', ?, 'pdv')
   `)
+  const insertPagamento = db.prepare(`
+    INSERT INTO vendas_pagamentos (venda_id, forma_pagamento, valor)
+    VALUES (?, ?, ?)
+  `)
 
   const criarVendaComItens = db.transaction(() => {
     const result = insertVenda.run(valor_total, forma_pagamento)
@@ -227,6 +265,21 @@ function criarVenda({ itens, forma_pagamento, valor_total: valorTotalInformado }
       insertItem.run(vendaId, item.produto_id, item.quantidade, item.preco_unitario)
       updateEstoque.run(item.quantidade, item.produto_id)
       insertMovEstoque.run(item.produto_id, item.quantidade)
+    }
+
+    const pagamentosEfetivos = Array.isArray(pagamentos) && pagamentos.length > 0
+      ? pagamentos
+      : [
+          {
+            forma: forma_pagamento,
+            valor: valor_total,
+          },
+        ]
+
+    for (const pg of pagamentosEfetivos) {
+      const formaPg = pg.forma
+      const valorPg = pg.valor != null ? pg.valor : 0
+      insertPagamento.run(vendaId, formaPg, valorPg)
     }
 
     return vendaId
@@ -277,6 +330,43 @@ function listarVendasPorData(dataISO) {
   return vendas
 }
 
+/**
+ * Lista pagamentos por data para o Caixa (uma linha por forma de pagamento).
+ * Formato: #0018/1 — PIX R$ 50,00 | #0018/2 — Crédito R$ 30,00
+ * @param {string} dataISO - YYYY-MM-DD
+ * @returns {Array<{ venda_id, sequencia, forma_pagamento, valor, data, valor_total, itens_resumo, qtd_itens }>}
+ */
+function listarPagamentosCaixaPorData(dataISO) {
+  const rows = db.prepare(`
+    SELECT
+      v.id as venda_id,
+      v.data,
+      v.valor_total,
+      vp.forma_pagamento,
+      vp.valor,
+      (SELECT GROUP_CONCAT(p.nome || ' x' || vi.quantidade) FROM vendas_itens vi JOIN produtos p ON p.id = vi.produto_id WHERE vi.venda_id = v.id) as itens_resumo,
+      (SELECT COALESCE(SUM(vi.quantidade), 0) FROM vendas_itens vi WHERE vi.venda_id = v.id) as qtd_itens
+    FROM vendas_pagamentos vp
+    JOIN vendas v ON v.id = vp.venda_id
+    WHERE date(v.data) = date(?)
+    ORDER BY v.data DESC, v.id DESC, vp.id ASC
+  `).all(dataISO)
+
+  // Atribuir sequência (1, 2, 3...) por venda
+  const result = []
+  let lastVendaId = null
+  let sequencia = 0
+  for (const row of rows) {
+    if (row.venda_id !== lastVendaId) {
+      lastVendaId = row.venda_id
+      sequencia = 0
+    }
+    sequencia += 1
+    result.push({ ...row, sequencia })
+  }
+  return result
+}
+
 function listarVendasPorPeriodo(dataInicio, dataFim) {
   const vendas = db.prepare(`
     SELECT v.*, GROUP_CONCAT(p.nome || ' x' || vi.quantidade) as itens_resumo,
@@ -299,6 +389,7 @@ function excluirVenda(id) {
     INSERT INTO movimentacoes_estoque (produto_id, tipo, quantidade, origem)
     VALUES (?, 'entrada', ?, 'estorno')
   `)
+  const deletePagamentos = db.prepare('DELETE FROM vendas_pagamentos WHERE venda_id = ?')
   const deleteItens = db.prepare('DELETE FROM vendas_itens WHERE venda_id = ?')
   const deleteVenda = db.prepare('DELETE FROM vendas WHERE id = ?')
   const getItens = db.prepare('SELECT produto_id, quantidade FROM vendas_itens WHERE venda_id = ?')
@@ -309,6 +400,7 @@ function excluirVenda(id) {
       updateEstoque.run(item.quantidade, item.produto_id)
       insertMovEstoque.run(item.produto_id, item.quantidade)
     }
+    deletePagamentos.run(id)
     deleteItens.run(id)
     deleteVenda.run(id)
   })()
@@ -632,6 +724,39 @@ function obterRelatorioCustoVendasPeriodo(dataInicio, dataFim, artesaoId = null)
   }
 }
 
+/**
+ * Totais por forma de pagamento no período, considerando vendas_pagamentos.
+ * @param {string} dataInicio - YYYY-MM-DD
+ * @param {string} dataFim - YYYY-MM-DD
+ * @returns {Array<{ forma_pagamento: string, total: number, qtd_transacoes: number }>}
+ */
+function obterTotaisPagamentosPorPeriodo(dataInicio, dataFim) {
+  return db.prepare(`
+    SELECT
+      vp.forma_pagamento as forma_pagamento,
+      COALESCE(SUM(vp.valor), 0) as total,
+      COUNT(DISTINCT vp.venda_id) as qtd_transacoes
+    FROM vendas_pagamentos vp
+    JOIN vendas v ON v.id = vp.venda_id
+    WHERE date(v.data) >= date(?) AND date(v.data) <= date(?)
+    GROUP BY vp.forma_pagamento
+  `).all(dataInicio, dataFim)
+}
+  function validarLogin(login, senha) {
+    const row = db.prepare('SELECT id, login FROM usuarios WHERE login = ? AND senha = ?')
+      .get(String(login).trim(), senha)
+    return row || null
+  }
+
+  function criarUsuario(login, senha) {
+    const loginTrim = String(login).trim()
+    if (!loginTrim || !senha) throw new Error('Login e senha são obrigatórios.')
+    const existente = db.prepare('SELECT id FROM usuarios WHERE login = ?').get(loginTrim)
+    if (existente) throw new Error('Usuário já cadastrado.')
+    const result = db.prepare('INSERT INTO usuarios (login, senha) VALUES (?, ?)').run(loginTrim, senha)
+    return { id: result.lastInsertRowid, login: loginTrim }
+  }
+
 // --- Exportações ---
 
 module.exports = {
@@ -647,6 +772,7 @@ module.exports = {
   listarVendas,
   listarVendasDoDia,
   listarVendasPorData,
+  listarPagamentosCaixaPorData,
   listarVendasPorPeriodo,
   excluirVenda,
   criarMovimentacaoCaixa,
@@ -662,4 +788,7 @@ module.exports = {
   listarProdutosMaisVendidosPorPeriodoEArtesao,
   contarProdutosPorArtesao,
   obterRelatorioCustoVendasPeriodo,
+  obterTotaisPagamentosPorPeriodo,
+  validarLogin,
+  criarUsuario,
 }

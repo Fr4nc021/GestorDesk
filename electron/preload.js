@@ -1,6 +1,14 @@
 const { contextBridge, ipcRenderer } = require('electron')
 
 contextBridge.exposeInMainWorld('electronAPI', {
+
+  // Usuarios
+  validarLogin: (login, senha) => ipcRenderer.invoke('validar-login', login, senha),
+  criarUsuario: (login, senha) => ipcRenderer.invoke('criar-usuario', login, senha),
+  loginSuccessResize: () => ipcRenderer.invoke('login-success-resize'),
+  loginShowResize: () => ipcRenderer.invoke('login-show-resize'),
+
+
   // Artesãos
   criarArtesao: (data) => ipcRenderer.invoke('criar-artesao', data),
   listarArtesoes: () => ipcRenderer.invoke('listar-artesoes'),
@@ -22,6 +30,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Caixa
   criarMovimentacaoCaixa: (data) => ipcRenderer.invoke('criar-movimentacao-caixa', data),
   listarVendasPorData: (data) => ipcRenderer.invoke('listar-vendas-por-data', data),
+  listarPagamentosCaixaPorData: (data) => ipcRenderer.invoke('listar-pagamentos-caixa-por-data', data),
   listarVendasPorPeriodo: (dataInicio, dataFim) => ipcRenderer.invoke('listar-vendas-por-periodo', dataInicio, dataFim),
   excluirVenda: (id) => ipcRenderer.invoke('excluir-venda', id),
   salvarRelatorioPDF: (pdfBase64, filename) => ipcRenderer.invoke('salvar-relatorio-pdf', pdfBase64, filename),
@@ -55,4 +64,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('contar-produtos-por-artesao', artesaoId),
   obterRelatorioCustoVendasPeriodo: (dataInicio, dataFim, artesaoId) => 
     ipcRenderer.invoke('obter-relatorio-custo-vendas-periodo', dataInicio, dataFim, artesaoId),
+  obterTotaisPagamentosPorPeriodo: (dataInicio, dataFim) =>
+    ipcRenderer.invoke('obter-totais-pagamentos-por-periodo', dataInicio, dataFim),
 })

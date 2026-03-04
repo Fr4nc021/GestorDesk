@@ -13,6 +13,7 @@ const {
   listarVendas,
   listarVendasDoDia,
   listarVendasPorData,
+  listarPagamentosCaixaPorData,
   listarVendasPorPeriodo,
   excluirVenda,
   criarMovimentacaoCaixa,
@@ -28,12 +29,31 @@ const {
   listarProdutosMaisVendidosPorPeriodoEArtesao,
   contarProdutosPorArtesao,
   obterRelatorioCustoVendasPeriodo,
+  obterTotaisPagamentosPorPeriodo,
+  validarLogin,
+  criarUsuario,
 } = require('./database')
+
+// CLI: criar usuário e sair — node electron/main.cjs não funciona; use: npx electron . criar-usuario LOGIN SENHA
+if (process.argv[2] === 'criar-usuario' && process.argv[3] && process.argv[4]) {
+  const login = process.argv[3]
+  const senha = process.argv[4]
+  try {
+    criarUsuario(login, senha)
+    console.log('Usuário "%s" criado com sucesso.', login)
+  } catch (err) {
+    console.error(err.message)
+    process.exit(1)
+  }
+  process.exit(0)
+}
 
 function createWindow() {
   const win = new BrowserWindow({
-    width: 1200,
-    height: 800,
+    width: 420,
+    height: 550,
+    show: false,
+    backgroundColor: '#f0f0f0',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -42,7 +62,30 @@ function createWindow() {
   })
 
   win.loadURL('http://localhost:5173')
+
+  win.once('ready-to-show', () => {
+    win.show()
+  })
 }
+
+// Usuarios
+ipcMain.handle('validar-login', (_, login, senha) => validarLogin(login, senha))
+ipcMain.handle('criar-usuario', (_, login, senha) => criarUsuario(login, senha))
+ipcMain.handle('login-success-resize', (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender)
+  if (win) {
+    win.setSize(1200, 800)
+    win.center()
+  }
+})
+ipcMain.handle('login-show-resize', (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender)
+  if (win) {
+    win.setSize(420, 550)
+    win.center()
+  }
+})
+
 
 // IPC Handlers
 ipcMain.handle('criar-artesao', (_, data) => criarArtesao(data))
@@ -61,6 +104,7 @@ ipcMain.handle('criar-movimentacao-caixa', (_, data) => criarMovimentacaoCaixa(d
 
 //caixa filtro por data
 ipcMain.handle('listar-vendas-por-data', (_, data) => listarVendasPorData(data))
+ipcMain.handle('listar-pagamentos-caixa-por-data', (_, data) => listarPagamentosCaixaPorData(data))
 ipcMain.handle('listar-vendas-por-periodo', (_, dataInicio, dataFim) => listarVendasPorPeriodo(dataInicio, dataFim))
 ipcMain.handle('excluir-venda', (_, id) => excluirVenda(id))
 
@@ -111,5 +155,7 @@ ipcMain.handle('contar-produtos-por-artesao', (_, artesaoId) =>
   contarProdutosPorArtesao(artesaoId))
 ipcMain.handle('obter-relatorio-custo-vendas-periodo', (_, dataInicio, dataFim, artesaoId) => 
   obterRelatorioCustoVendasPeriodo(dataInicio, dataFim, artesaoId ?? null))
+ipcMain.handle('obter-totais-pagamentos-por-periodo', (_, dataInicio, dataFim) =>
+  obterTotaisPagamentosPorPeriodo(dataInicio, dataFim))
 
 app.whenReady().then(createWindow)
