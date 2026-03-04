@@ -1811,6 +1811,48 @@
   background: #333;
 }
 
+/* PDV - Modal de pesquisa de produto */
+.pdv-modal-pesquisa {
+  max-width: 720px;
+}
+
+.pdv-modal-pesquisa-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.pdv-modal-pesquisa-search input {
+  width: 100%;
+  padding: 10px 14px;
+  border: 1px solid #e0e0e0;
+  border-radius: 10px;
+  font-size: 14px;
+}
+
+.pdv-modal-pesquisa-table-wrapper {
+  max-height: 380px;
+  overflow: auto;
+  border: 1px solid #e0e0e0;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.pdv-modal-pesquisa-select {
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid #e0e0e0;
+  background: #212121;
+  color: #000000;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.pdv-modal-pesquisa-select:hover {
+  background: #404040;
+}
+
 .modal-field {
   margin-bottom: 20px;
 }

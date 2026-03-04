@@ -42,8 +42,8 @@ export default function Caixa() {
   useEffect(() => {
     async function carregar() {
       try {
-        const vendas = await window.electronAPI.listarVendasPorData(dataSelecionada)
-        setTransacoes(vendas)
+        const pagamentos = await window.electronAPI.listarPagamentosCaixaPorData(dataSelecionada)
+        setTransacoes(pagamentos)
       } catch (err) {
         console.error(err)
       }
@@ -55,7 +55,7 @@ export default function Caixa() {
     ? transacoes
     : transacoes.filter(t => t.forma_pagamento === filtroPagamento)
 
-  const totalFiltrado = transacoesFiltradas.reduce((acc, t) => acc + (t.valor_total || 0), 0)
+  const totalFiltrado = transacoesFiltradas.reduce((acc, t) => acc + (t.valor || 0), 0)
 
   const dataFormatada = new Date(dataSelecionada + 'T12:00:00').toLocaleDateString('pt-BR', {
     day: '2-digit',
@@ -64,12 +64,12 @@ export default function Caixa() {
     timeZone: TZ_BRASILIA,
   })
 
-  async function handleExcluirVenda(venda) {
-    const msg = `Tem certeza que deseja excluir a venda #${String(venda.id).padStart(4, '0')} de ${formatBRL(venda.valor_total)}? O estoque dos produtos será devolvido.`
+  async function handleExcluirVenda(pagamento) {
+    const msg = `Tem certeza que deseja excluir a venda #${String(pagamento.venda_id).padStart(4, '0')} de ${formatBRL(pagamento.valor_total)}? O estoque dos produtos será devolvido.`
     if (!confirm(msg)) return
     try {
-      await window.electronAPI.excluirVenda(venda.id)
-      setTransacoes(prev => prev.filter(t => t.id !== venda.id))
+      await window.electronAPI.excluirVenda(pagamento.venda_id)
+      setTransacoes(prev => prev.filter(t => t.venda_id !== pagamento.venda_id))
     } catch (err) {
       console.error(err)
       alert('Erro ao excluir venda.')
@@ -97,8 +97,10 @@ export default function Caixa() {
     }
 
     let vendas = []
+    let totaisDb = []
     try {
       vendas = await window.electronAPI.listarVendasPorPeriodo(dataDe, dataAte)
+      totaisDb = await window.electronAPI.obterTotaisPagamentosPorPeriodo(dataDe, dataAte)
     } catch (err) {
       console.error(err)
       alert('Erro ao carregar vendas.')
@@ -108,10 +110,12 @@ export default function Caixa() {
     const formas = ['dinheiro', 'pix', 'credito', 'debito']
     const totaisPorForma = {}
     let totalGeral = 0
+
     for (const fp of formas) {
-      const porForma = vendas.filter(t => t.forma_pagamento === fp)
-      const total = porForma.reduce((acc, t) => acc + (t.valor_total || 0), 0)
-      totaisPorForma[fp] = { total, qtd: porForma.length }
+      const row = totaisDb.find(r => r.forma_pagamento === fp) || { total: 0, qtd_transacoes: 0 }
+      const total = row.total || 0
+      const qtd = row.qtd_transacoes || 0
+      totaisPorForma[fp] = { total, qtd }
       totalGeral += total
     }
 
@@ -258,9 +262,9 @@ export default function Caixa() {
                 </tr>
               ) : (
                 transacoesFiltradas.map((t) => (
-                  <tr key={t.id}>
+                  <tr key={`${t.venda_id}-${t.sequencia}`}>
                     <td>{formatHora(t.data)}</td>
-                    <td>#{String(t.id).padStart(4, '0')}</td>
+                    <td>#{String(t.venda_id).padStart(4, '0')}/{t.sequencia}</td>
                     <td>{t.qtd_itens ?? 0} itens</td>
                     <td>
                       <span className="caixa-pagamento-badge">
@@ -291,7 +295,7 @@ export default function Caixa() {
                         {LABEL_PAGAMENTO[t.forma_pagamento] ?? t.forma_pagamento}
                       </span>
                     </td>
-                    <td>{formatBRL(t.valor_total)}</td>
+                    <td>{formatBRL(t.valor)}</td>
                     <td>
                       <button
                         type="button"

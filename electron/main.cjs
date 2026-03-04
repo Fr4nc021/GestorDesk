@@ -13,6 +13,7 @@ const {
   listarVendas,
   listarVendasDoDia,
   listarVendasPorData,
+  listarPagamentosCaixaPorData,
   listarVendasPorPeriodo,
   excluirVenda,
   criarMovimentacaoCaixa,
@@ -28,6 +29,7 @@ const {
   listarProdutosMaisVendidosPorPeriodoEArtesao,
   contarProdutosPorArtesao,
   obterRelatorioCustoVendasPeriodo,
+  obterTotaisPagamentosPorPeriodo,
 } = require('./database')
 
 function createWindow() {
@@ -61,6 +63,7 @@ ipcMain.handle('criar-movimentacao-caixa', (_, data) => criarMovimentacaoCaixa(d
 
 //caixa filtro por data
 ipcMain.handle('listar-vendas-por-data', (_, data) => listarVendasPorData(data))
+ipcMain.handle('listar-pagamentos-caixa-por-data', (_, data) => listarPagamentosCaixaPorData(data))
 ipcMain.handle('listar-vendas-por-periodo', (_, dataInicio, dataFim) => listarVendasPorPeriodo(dataInicio, dataFim))
 ipcMain.handle('excluir-venda', (_, id) => excluirVenda(id))
 
@@ -111,5 +114,7 @@ ipcMain.handle('contar-produtos-por-artesao', (_, artesaoId) =>
   contarProdutosPorArtesao(artesaoId))
 ipcMain.handle('obter-relatorio-custo-vendas-periodo', (_, dataInicio, dataFim, artesaoId) => 
   obterRelatorioCustoVendasPeriodo(dataInicio, dataFim, artesaoId ?? null))
+ipcMain.handle('obter-totais-pagamentos-por-periodo', (_, dataInicio, dataFim) =>
+  obterTotaisPagamentosPorPeriodo(dataInicio, dataFim))
 
 app.whenReady().then(createWindow)

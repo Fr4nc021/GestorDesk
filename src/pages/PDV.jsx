@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import codeIcon from '../assets/complements/code.png'
+import ProdutoSearchModal from '../components/ProdutoSearchModal'
 
 
 function formatBRL(val) {
@@ -14,6 +15,7 @@ export default function PDV() {
   const [formasSelecionadas, setFormasSelecionadas] = useState([]) // ['credito','pix',...]
   const [valoresPorForma, setValoresPorForma] = useState({}) // { credito: '50', pix: '20' }
   const [showModalPagamento, setShowModalPagamento] = useState(false)
+  const [showModalPesquisa, setShowModalPesquisa] = useState(false)
   const [valorRecebido, setValorRecebido] = useState('')
   const inputRef = useRef(null)
   const finalizarRef = useRef(null)
@@ -26,31 +28,65 @@ export default function PDV() {
     { id: 'dinheiro', label: 'Dinheiro', icon: 'money' },
   ]
 
-  async function handleBuscarProduto() {
-    const codigo = codigoInput.trim()
-    if (!codigo) return
+  function adicionarItemNaVenda(produto) {
+    if (!produto) return
+    setItens((prev) => {
+      const existe = prev.find((i) => i.id === produto.id)
+      if (existe) {
+        return prev.map((i) =>
+          i.id === produto.id ? { ...i, quantidade: i.quantidade + 1 } : i
+        )
+      }
+      return [...prev, { ...produto, quantidade: 1 }]
+    })
+  }
 
+  async function buscarProdutoPorCodigo(codigo) {
+    const codigoTrim = String(codigo || '').trim()
+    if (!codigoTrim) return
     try {
-      const produto = await window.electronAPI.buscarProdutoPorCodigo(codigo)
+      const produto = await window.electronAPI.buscarProdutoPorCodigo(codigoTrim)
       if (!produto) {
         alert('Produto não encontrado')
         return
       }
-      setItens((prev) => {
-        const existe = prev.find((i) => i.id === produto.id)
-        if (existe) {
-          return prev.map((i) =>
-            i.id === produto.id ? { ...i, quantidade: i.quantidade + 1 } : i
-          )
-        }
-        return [...prev, { ...produto, quantidade: 1 }]
-      })
+      adicionarItemNaVenda(produto)
       setCodigoInput('')
       inputRef.current?.focus()
     } catch (err) {
       console.error(err)
       alert('Erro ao buscar produto')
     }
+  }
+
+  function abrirModalPesquisa() {
+    setShowModalPesquisa(true)
+  }
+
+  function selecionarProduto(produto) {
+    if (!produto) return
+    if ((produto.estoque ?? 0) <= 0) {
+      alert('Produto sem estoque disponível.')
+      return
+    }
+    adicionarItemNaVenda(produto)
+    setShowModalPesquisa(false)
+    inputRef.current?.focus()
+  }
+
+  async function handleBuscarProduto() {
+    const codigo = codigoInput.trim()
+    if (codigo) {
+      await buscarProdutoPorCodigo(codigo)
+    } else {
+      abrirModalPesquisa()
+    }
+  }
+
+  function handleBuscarProdutoPorEnter() {
+    const codigo = codigoInput.trim()
+    if (!codigo) return
+    buscarProdutoPorCodigo(codigo)
   }
 
   function handleRemoverItem(id) {
@@ -199,7 +235,7 @@ export default function PDV() {
             onKeyDown={(e) => {
               if (e.key === 'Enter') {
                 e.preventDefault()
-                handleBuscarProduto()
+                handleBuscarProdutoPorEnter()
               }
             }}
             autoFocus
@@ -474,6 +510,11 @@ export default function PDV() {
 
         </div>
       )}
+      <ProdutoSearchModal
+        open={showModalPesquisa}
+        onClose={() => setShowModalPesquisa(false)}
+        onSelect={selecionarProduto}
+      />
     </div>
   )
 }
