@@ -5,6 +5,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Usuarios
   validarLogin: (login, senha) => ipcRenderer.invoke('validar-login', login, senha),
   criarUsuario: (login, senha) => ipcRenderer.invoke('criar-usuario', login, senha),
+  loginSuccessResize: () => ipcRenderer.invoke('login-success-resize'),
+  loginShowResize: () => ipcRenderer.invoke('login-show-resize'),
 
 
   // Artesãos

@@ -50,8 +50,10 @@ if (process.argv[2] === 'criar-usuario' && process.argv[3] && process.argv[4]) {
 
 function createWindow() {
   const win = new BrowserWindow({
-    width: 1200,
-    height: 800,
+    width: 420,
+    height: 550,
+    show: false,
+    backgroundColor: '#f0f0f0',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -60,11 +62,29 @@ function createWindow() {
   })
 
   win.loadURL('http://localhost:5173')
+
+  win.once('ready-to-show', () => {
+    win.show()
+  })
 }
 
 // Usuarios
 ipcMain.handle('validar-login', (_, login, senha) => validarLogin(login, senha))
 ipcMain.handle('criar-usuario', (_, login, senha) => criarUsuario(login, senha))
+ipcMain.handle('login-success-resize', (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender)
+  if (win) {
+    win.setSize(1200, 800)
+    win.center()
+  }
+})
+ipcMain.handle('login-show-resize', (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender)
+  if (win) {
+    win.setSize(420, 550)
+    win.center()
+  }
+})
 
 
 // IPC Handlers

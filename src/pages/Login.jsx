@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 
 const IconUser = () => (
@@ -21,6 +21,10 @@ export default function Login() {
   const [erro, setErro] = useState('')
   const navigate = useNavigate()
 
+  useEffect(() => {
+    window.electronAPI?.loginShowResize?.()
+  }, [])
+
   async function handleSubmit(e) {
     e.preventDefault()
     setErro('')
@@ -36,6 +40,7 @@ export default function Login() {
       const resultado = await window.electronAPI.validarLogin(usuario.trim(), senha)
       if (resultado) {
         localStorage.setItem('usuarioLogado', JSON.stringify({ id: resultado.id, login: resultado.login }))
+        window.electronAPI?.loginSuccessResize?.()
         navigate('/app', { replace: true })
       } else {
         setErro('Usuário ou senha incorretos.')
