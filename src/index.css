@@ -10,9 +10,25 @@
     -webkit-font-smoothing: antialiased;
   }
 
-  /* Sidebar */
+  /* Layout raiz: sidebar fixa à esquerda, conteúdo rola */
+  .layout-root {
+    display: flex;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  .layout-main {
+    flex: 1;
+    padding: 20px;
+    overflow: auto;
+    min-width: 0;
+  }
+
+  /* Sidebar - acompanha até em baixo */
   .sidebar {
     width: 250px;
+    flex-shrink: 0;
+    min-height: 100%;
     height: 100vh;
     background-color: #f5f5f5;
     padding: 20px;
@@ -147,6 +163,107 @@
 
   .quick-action-label {
     font-size: 18px;
+  }
+
+  /* Dashboard cards (métricas) */
+  .dashboard-cards {
+    display: flex;
+    gap: 24px;
+    flex-wrap: wrap;
+    margin-top: 20px;
+  }
+
+  .dashboard-card {
+    flex: 1;
+    min-width: 180px;
+    position: relative;
+    padding: 20px 24px;
+    background: #fff;
+    border: 1px solid #e0e0e0;
+    border-radius: 12px;
+  }
+
+  .dashboard-card-label {
+    font-size: 0.9rem;
+    color: #666;
+    display: block;
+  }
+
+  .dashboard-card-icon {
+    position: absolute;
+    top: 20px;
+    right: 20px;
+    color: #999;
+  }
+
+  .dashboard-card-icon svg {
+    display: block;
+  }
+
+  .dashboard-card-value {
+    display: block;
+    font-size: 1.75rem;
+    font-weight: 700;
+    color: #212121;
+    margin-top: 8px;
+  }
+
+  .dashboard-card-sub {
+    display: block;
+    font-size: 0.8rem;
+    color: #888;
+    margin-top: 6px;
+  }
+
+  /* Vendas recentes */
+  .vendas-recentes-card {
+    margin-top: 32px;
+    padding: 24px;
+    background: #fff;
+    border: 1px solid #e0e0e0;
+    border-radius: 12px;
+  }
+
+  .vendas-recentes-titulo {
+    font-size: 1rem;
+    font-weight: 600;
+    color: #212121;
+    margin-bottom: 16px;
+  }
+
+  .venda-recente-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 0;
+    border-bottom: 1px solid #f0f0f0;
+  }
+
+  .venda-recente-item:last-child {
+    border-bottom: none;
+  }
+
+  .venda-recente-id {
+    font-weight: 600;
+    color: #212121;
+  }
+
+  .venda-recente-detalhes {
+    display: block;
+    font-size: 0.875rem;
+    color: #888;
+    margin-top: 2px;
+  }
+
+  .venda-recente-valor {
+    font-weight: 600;
+    color: #212121;
+  }
+
+  .vendas-recentes-vazio {
+    color: #888;
+    padding: 24px 0;
+    text-align: center;
   }
 
   /* PDV - Barra de produtos */
@@ -421,6 +538,29 @@
   border-color: #212121;
 }
 
+.pdv-pagamento-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.pdv-pagamento-multiplas {
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid #e0e0e0;
+  background: #fff;
+  color: #555;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.pdv-pagamento-multiplas:hover {
+  background: #f5f5f5;
+  border-color: #ccc;
+}
+
 .pdv-pagamento-icon {
   display: flex;
   width: 18px;
@@ -430,6 +570,55 @@
 .pdv-pagamento-icon svg {
   width: 100%;
   height: 100%;
+}
+
+/* PDV - Troco */
+.pdv-troco {
+  border: 1px solid #e0e0e0;
+  border-radius: 12px;
+  padding: 20px;
+  background: #fff;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+.pdv-troco h3 {
+  font-size: 16px;
+  font-weight: 700;
+  color: #212121;
+  margin-bottom: 14px;
+}
+
+.pdv-troco-field label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #555;
+}
+
+.pdv-troco-input {
+  width: 100%;
+  padding: 10px 14px;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  font-size: 15px;
+  outline: none;
+}
+
+.pdv-troco-input:focus {
+  border-color: #212121;
+}
+
+.pdv-troco-resultado {
+  margin-top: 10px;
+  font-size: 14px;
+  color: #555;
+}
+
+.pdv-troco-resultado span {
+  font-weight: 700;
+  color: #212121;
 }
 
 /* Botões de ação */
@@ -1622,6 +1811,48 @@
   background: #333;
 }
 
+/* PDV - Modal de pesquisa de produto */
+.pdv-modal-pesquisa {
+  max-width: 720px;
+}
+
+.pdv-modal-pesquisa-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.pdv-modal-pesquisa-search input {
+  width: 100%;
+  padding: 10px 14px;
+  border: 1px solid #e0e0e0;
+  border-radius: 10px;
+  font-size: 14px;
+}
+
+.pdv-modal-pesquisa-table-wrapper {
+  max-height: 380px;
+  overflow: auto;
+  border: 1px solid #e0e0e0;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.pdv-modal-pesquisa-select {
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid #e0e0e0;
+  background: #212121;
+  color: #000000;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.pdv-modal-pesquisa-select:hover {
+  background: #404040;
+}
+
 .modal-field {
   margin-bottom: 20px;
 }
@@ -2416,4 +2647,134 @@
 
 .relatorios-table tbody tr:hover {
   background: #fafafa;
+}
+
+/* ========== Login ========== */
+.login-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: #fff;
+  padding: 20px;
+}
+
+.login-card {
+  position: relative;
+  width: 100%;
+  max-width: 400px;
+  padding: 0 24px 32px;
+  background: #f0f0f0;
+  border: 1px solid #e0e0e0;
+  border-radius: 16px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+  overflow: hidden;
+}
+
+.login-card-stripe {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: linear-gradient(90deg, #e57373 0%, #ef9a9a 100%);
+}
+
+.login-title {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #212121;
+  text-align: center;
+  margin-top: 28px;
+  margin-bottom: 4px;
+}
+
+.login-subtitle {
+  font-size: 0.95rem;
+  color: #555;
+  text-align: center;
+  margin-bottom: 24px;
+}
+
+.login-card form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.login-label {
+  display: block;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: #212121;
+  margin-bottom: 4px;
+}
+
+.login-input-wrap {
+  display: flex;
+  align-items: center;
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 12px;
+  overflow: hidden;
+  transition: border-color 0.2s;
+}
+
+.login-input-wrap:focus-within {
+  border-color: #212121;
+  outline: none;
+}
+
+.login-input-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  flex-shrink: 0;
+  color: #666;
+}
+
+.login-input {
+  flex: 1;
+  padding: 14px 16px 14px 0;
+  font-size: 1rem;
+  font-family: inherit;
+  color: #212121;
+  background: transparent;
+  border: none;
+  outline: none;
+}
+
+.login-input::placeholder {
+  color: #888;
+}
+
+.login-btn {
+  margin-top: 8px;
+  padding: 14px 24px;
+  font-size: 1rem;
+  font-weight: 600;
+  font-family: inherit;
+  color: white;
+  background: #212121;
+  border: none;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  width: 100%;
+}
+
+.login-btn:hover {
+  background: #333;
+}
+
+.login-erro {
+  font-size: 0.9rem;
+  color: #c62828;
+  margin: 0;
+  padding: 10px 12px;
+  background: #ffebee;
+  border: 1px solid #ffcdd2;
+  border-radius: 8px;
 }
