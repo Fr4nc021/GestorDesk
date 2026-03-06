@@ -108,10 +108,70 @@ function initDatabase() {
       data TEXT NOT NULL DEFAULT (datetime('now')),
       synced INTEGER DEFAULT 0
     );
+
+    CREATE TABLE IF NOT EXISTS tipos_variacao (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      nome TEXT NOT NULL UNIQUE,
+      ordem INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS variacao_valores (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      tipo_variacao_id INTEGER NOT NULL,
+      valor TEXT NOT NULL,
+      ordem INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (tipo_variacao_id) REFERENCES tipos_variacao(id) ON DELETE CASCADE,
+      UNIQUE(tipo_variacao_id, valor)
+    );
   `)
 }
 
 initDatabase()
+
+// Migração: remover CHECK de variacao em produtos para aceitar valores dinâmicos
+try {
+  const tableInfo = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='produtos'").get()
+  if (tableInfo && tableInfo.sql && tableInfo.sql.includes("CHECK(variacao IN")) {
+    db.pragma('foreign_keys = OFF')
+    db.exec(`
+      CREATE TABLE produtos_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        nome TEXT NOT NULL,
+        variacao TEXT,
+        preco_custo REAL NOT NULL DEFAULT 0,
+        preco_venda REAL NOT NULL DEFAULT 0,
+        estoque INTEGER NOT NULL DEFAULT 0,
+        codigo_barras TEXT UNIQUE NOT NULL,
+        artesao_id INTEGER NOT NULL,
+        synced INTEGER DEFAULT 0,
+        created_at TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (artesao_id) REFERENCES artesoes(id)
+      );
+      INSERT INTO produtos_new SELECT id, nome, variacao, preco_custo, preco_venda, estoque, codigo_barras, artesao_id, synced, created_at FROM produtos;
+      DROP TABLE produtos;
+      ALTER TABLE produtos_new RENAME TO produtos;
+    `)
+    db.pragma('foreign_keys = ON')
+  }
+} catch (_) {
+  // migração já executada ou não necessária
+}
+
+// Seed: tipos de variação padrão (Tamanho com P, M, G, GG)
+try {
+  const countTipos = db.prepare('SELECT COUNT(*) as n FROM tipos_variacao').get()
+  if (countTipos.n === 0) {
+    db.prepare('INSERT INTO tipos_variacao (nome, ordem) VALUES (?, ?)').run('Tamanho', 0)
+    const tipoId = db.prepare('SELECT id FROM tipos_variacao WHERE nome = ?').get('Tamanho').id
+    for (const v of ['P', 'M', 'G', 'GG']) {
+      db.prepare('INSERT INTO variacao_valores (tipo_variacao_id, valor, ordem) VALUES (?, ?, ?)').run(tipoId, v, 0)
+    }
+  }
+} catch (_) {
+  // seed já executado
+}
 
 const rowCount = db.prepare('SELECT COUNT(*) as n FROM usuarios').get()
 if (rowCount.n === 0) {
@@ -209,16 +269,88 @@ function excluirProduto(id) {
   return { id }
 }
 function buscarProdutoPorCodigo(codigo_barras) {
-    const stmt = db.prepare(`
-      SELECT p.*, a.nome as artesao_nome
-      FROM produtos p
-      LEFT JOIN artesoes a ON a.id = p.artesao_id
-      WHERE p.codigo_barras = ?
-    `)
-    return stmt.get(codigo_barras.trim()) || null
-  }
+  const stmt = db.prepare(`
+    SELECT p.*, a.nome as artesao_nome
+    FROM produtos p
+    LEFT JOIN artesoes a ON a.id = p.artesao_id
+    WHERE p.codigo_barras = ?
+  `)
+  return stmt.get(codigo_barras.trim()) || null
+}
 
-  function listarVendasPorData(dataISO) {
+// --- Tipos de Variação e Valores ---
+
+function listarTiposVariacao() {
+  const tipos = db.prepare(`
+    SELECT * FROM tipos_variacao ORDER BY ordem, nome
+  `).all()
+  const valoresStmt = db.prepare(`
+    SELECT id, tipo_variacao_id, valor, ordem FROM variacao_valores
+    WHERE tipo_variacao_id = ? ORDER BY ordem, valor
+  `)
+  return tipos.map((t) => {
+    const valores = valoresStmt.all(t.id)
+    return { ...t, valores }
+  })
+}
+
+function criarTipoVariacao({ nome, ordem = 0 }) {
+  const stmt = db.prepare('INSERT INTO tipos_variacao (nome, ordem) VALUES (?, ?)')
+  const result = stmt.run(nome.trim(), ordem)
+  return { id: result.lastInsertRowid, nome: nome.trim(), ordem }
+}
+
+function atualizarTipoVariacao(id, { nome, ordem }) {
+  const stmt = db.prepare('UPDATE tipos_variacao SET nome = ?, ordem = ? WHERE id = ?')
+  stmt.run(nome.trim(), ordem ?? 0, id)
+  return { id }
+}
+
+function excluirTipoVariacao(id) {
+  const stmt = db.prepare('DELETE FROM tipos_variacao WHERE id = ?')
+  stmt.run(id)
+  return { id }
+}
+
+function listarValoresVariacao(tipoVariacaoId) {
+  const stmt = db.prepare(`
+    SELECT * FROM variacao_valores
+    WHERE tipo_variacao_id = ?
+    ORDER BY ordem, valor
+  `)
+  return stmt.all(tipoVariacaoId)
+}
+
+function criarValorVariacao({ tipo_variacao_id, valor, ordem = 0 }) {
+  const stmt = db.prepare('INSERT INTO variacao_valores (tipo_variacao_id, valor, ordem) VALUES (?, ?, ?)')
+  const result = stmt.run(tipo_variacao_id, valor.trim(), ordem)
+  return { id: result.lastInsertRowid, tipo_variacao_id, valor: valor.trim(), ordem }
+}
+
+function atualizarValorVariacao(id, { valor, ordem }) {
+  const stmt = db.prepare('UPDATE variacao_valores SET valor = ?, ordem = ? WHERE id = ?')
+  stmt.run(valor.trim(), ordem ?? 0, id)
+  return { id }
+}
+
+function excluirValorVariacao(id) {
+  const stmt = db.prepare('DELETE FROM variacao_valores WHERE id = ?')
+  stmt.run(id)
+  return { id }
+}
+
+/** Retorna lista de valores de variação para uso em produtos (ex: ['P','M','G','GG','Vermelho','Azul']) */
+function listarTodosValoresVariacao() {
+  const stmt = db.prepare(`
+    SELECT t.nome as tipo_nome, v.valor, v.id
+    FROM variacao_valores v
+    JOIN tipos_variacao t ON t.id = v.tipo_variacao_id
+    ORDER BY t.ordem, t.nome, v.ordem, v.valor
+  `)
+  return stmt.all().map((r) => r.valor)
+}
+
+function listarVendasPorData(dataISO) {
     const vendas = db.prepare(`
       SELECT v.*, GROUP_CONCAT(p.nome || ' x' || vi.quantidade) as itens_resumo,
              (SELECT SUM(quantidade) FROM vendas_itens WHERE venda_id = v.id) as qtd_itens
@@ -791,4 +923,13 @@ module.exports = {
   obterTotaisPagamentosPorPeriodo,
   validarLogin,
   criarUsuario,
+  listarTiposVariacao,
+  criarTipoVariacao,
+  atualizarTipoVariacao,
+  excluirTipoVariacao,
+  listarValoresVariacao,
+  criarValorVariacao,
+  atualizarValorVariacao,
+  excluirValorVariacao,
+  listarTodosValoresVariacao,
 }

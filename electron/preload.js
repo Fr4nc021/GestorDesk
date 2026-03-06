@@ -22,6 +22,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
   excluirProduto: (id) => ipcRenderer.invoke('excluir-produto', id),
   buscarProdutoPorCodigo: (codigo) => ipcRenderer.invoke('buscar-produto-por-codigo', codigo),
 
+  // Variações (tipos e valores)
+  listarTiposVariacao: () => ipcRenderer.invoke('listar-tipos-variacao'),
+  criarTipoVariacao: (data) => ipcRenderer.invoke('criar-tipo-variacao', data),
+  atualizarTipoVariacao: (id, data) => ipcRenderer.invoke('atualizar-tipo-variacao', id, data),
+  excluirTipoVariacao: (id) => ipcRenderer.invoke('excluir-tipo-variacao', id),
+  listarValoresVariacao: (tipoVariacaoId) => ipcRenderer.invoke('listar-valores-variacao', tipoVariacaoId),
+  criarValorVariacao: (data) => ipcRenderer.invoke('criar-valor-variacao', data),
+  atualizarValorVariacao: (id, data) => ipcRenderer.invoke('atualizar-valor-variacao', id, data),
+  excluirValorVariacao: (id) => ipcRenderer.invoke('excluir-valor-variacao', id),
+  listarTodosValoresVariacao: () => ipcRenderer.invoke('listar-todos-valores-variacao'),
+
   // Vendas
   criarVenda: (data) => ipcRenderer.invoke('criar-venda', data),
   listarVendas: () => ipcRenderer.invoke('listar-vendas'),

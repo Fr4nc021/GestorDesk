@@ -718,6 +718,7 @@
 .produtos-actions {
   display: flex;
   align-items: flex-start;
+  gap: 12px;
   margin-left: 32px;
 }
 
@@ -1695,7 +1696,7 @@
   border-radius: 16px;
   padding: 24px;
   width: 100%;
-  max-width: 420px;
+  max-width: 800px;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
 }
 
@@ -2103,6 +2104,171 @@
 }
 
 /* Modal Imprimir Etiquetas */
+/* Modal Gerenciar Variações */
+.modal-variacoes .modal-content {
+  width: 560px;
+  max-width: 95vw;
+}
+
+.modal-variacoes-desc {
+  font-size: 14px;
+  color: #666;
+  margin-bottom: 20px;
+}
+
+.modal-variacoes-section {
+  margin-bottom: 24px;
+}
+
+.modal-variacoes-section h4,
+.modal-variacoes-lista h4 {
+  font-size: 14px;
+  font-weight: 600;
+  color: #212121;
+  margin-bottom: 10px;
+}
+
+.modal-variacoes-form {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.modal-variacoes-form input[type="text"],
+.modal-variacoes-form select {
+  flex: 1;
+  min-width: 120px;
+  padding: 10px 14px;
+  border: 1px solid #e0e0e0;
+  border-radius: 10px;
+  font-size: 14px;
+}
+
+.modal-variacoes-form input:focus,
+.modal-variacoes-form select:focus {
+  outline: none;
+  border-color: #212121;
+}
+
+.modal-variacoes-btn-add {
+  padding: 10px 18px;
+  background: #212121;
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.modal-variacoes-btn-add:hover {
+  background: #333;
+}
+
+.modal-variacoes-lista {
+  margin-bottom: 24px;
+}
+
+.modal-variacoes-empty {
+  font-size: 14px;
+  color: #999;
+  padding: 16px 0;
+}
+
+.modal-variacoes-tipos {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.modal-variacoes-tipo-item {
+  border: 1px solid #e8e8e8;
+  border-radius: 12px;
+  padding: 14px 16px;
+  margin-bottom: 10px;
+}
+
+.modal-variacoes-tipo-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.modal-variacoes-tipo-header strong {
+  font-size: 15px;
+  color: #212121;
+}
+
+.modal-variacoes-tipo-acoes,
+.modal-variacoes-valor-acoes {
+  display: flex;
+  gap: 4px;
+}
+
+.modal-variacoes-valores {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 0 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.modal-variacoes-valor-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: #f5f5f5;
+  border-radius: 8px;
+  font-size: 13px;
+}
+
+.modal-variacoes-valor-empty {
+  color: #999;
+  font-size: 13px;
+  font-style: italic;
+}
+
+.modal-variacoes-edit-inline {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.modal-variacoes-edit-inline input {
+  flex: 1;
+  min-width: 100px;
+  padding: 6px 10px;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  font-size: 13px;
+}
+
+.modal-variacoes-edit-inline button[type="submit"] {
+  padding: 6px 12px;
+  background: #212121;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.modal-variacoes-edit-inline button[type="button"] {
+  padding: 6px 12px;
+  background: #fff;
+  color: #666;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+/* Modal Imprimir Etiquetas */
 .modal-etiquetas .modal-content {
   width: 700px;
   max-width: 95vw;
@@ -2144,6 +2310,46 @@
 }
 
 .modal-etiquetas-pesquisar:hover {
+  background: #333;
+}
+
+.modal-etiquetas-sugestoes {
+  margin-top: 12px;
+  border: 1px solid #e0e0e0;
+  border-radius: 12px;
+  overflow: hidden;
+  max-height: 220px;
+  overflow-y: auto;
+  background: #fafafa;
+}
+
+.modal-etiquetas-sugestoes-table-wrapper {
+  overflow: auto;
+}
+
+.modal-etiquetas-sugestoes-tabela th {
+  padding: 10px 14px;
+  font-size: 13px;
+}
+
+.modal-etiquetas-sugestoes-tabela td {
+  padding: 10px 14px;
+  font-size: 13px;
+}
+
+.modal-etiquetas-adicionar-sugestao {
+  padding: 6px 14px;
+  background: #212121;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.modal-etiquetas-adicionar-sugestao:hover {
   background: #333;
 }
 
@@ -2206,6 +2412,40 @@
   font-weight: 600;
 }
 
+.modal-etiquetas-qtd-input,
+.modal-etiquetas-sugestao-qtd {
+  -moz-appearance: textfield;
+}
+
+.modal-etiquetas-qtd-input::-webkit-outer-spin-button,
+.modal-etiquetas-qtd-input::-webkit-inner-spin-button,
+.modal-etiquetas-sugestao-qtd::-webkit-outer-spin-button,
+.modal-etiquetas-sugestao-qtd::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.modal-etiquetas-qtd-input {
+  width: 56px;
+  padding: 6px 8px;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  text-align: center;
+}
+
+.modal-etiquetas-qtd-input:focus {
+  outline: none;
+  border-color: #212121;
+}
+
+.modal-etiquetas-sugestao-qtd {
+  width: 52px;
+  padding: 6px 6px;
+  font-size: 13px;
+}
+
 .modal-etiquetas-imprimir {
   width: 100%;
   padding: 14px;
@@ -2243,7 +2483,7 @@
 
 .etiquetas-container {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(2, 1fr);
   gap: 16px;
   padding: 24px 0;
   margin-bottom: 20px;
@@ -2315,16 +2555,16 @@
     width: 100% !important;
     padding: 0 !important;
     display: grid !important;
-    grid-template-columns: repeat(3, 1fr) !important;
+    grid-template-columns: repeat(2, 1fr) !important;
     gap: 12px !important;
   }
 
   .etiqueta-item {
     break-inside: avoid;
     page-break-inside: avoid;
-    width: 50mm !important;
-    height: 30mm !important;
-    padding: 4px !important;
+    width: 40mm !important;
+    height: 20mm !important;
+    padding: 2px !important;
     box-sizing: border-box !important;
   }
 }

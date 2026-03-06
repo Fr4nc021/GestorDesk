@@ -32,6 +32,15 @@ const {
   obterTotaisPagamentosPorPeriodo,
   validarLogin,
   criarUsuario,
+  listarTiposVariacao,
+  criarTipoVariacao,
+  atualizarTipoVariacao,
+  excluirTipoVariacao,
+  listarValoresVariacao,
+  criarValorVariacao,
+  atualizarValorVariacao,
+  excluirValorVariacao,
+  listarTodosValoresVariacao,
 } = require('./database')
 
 // CLI: criar usuário e sair — node electron/main.cjs não funciona; use: npx electron . criar-usuario LOGIN SENHA
@@ -96,6 +105,16 @@ ipcMain.handle('listar-produtos', () => listarProdutos())
 ipcMain.handle('atualizar-produto', (_, id, data) => atualizarProduto(id, data))
 ipcMain.handle('excluir-produto', (_, id) => excluirProduto(id))
 ipcMain.handle('buscar-produto-por-codigo', (_, codigo) => buscarProdutoPorCodigo(codigo))
+
+ipcMain.handle('listar-tipos-variacao', () => listarTiposVariacao())
+ipcMain.handle('criar-tipo-variacao', (_, data) => criarTipoVariacao(data))
+ipcMain.handle('atualizar-tipo-variacao', (_, id, data) => atualizarTipoVariacao(id, data))
+ipcMain.handle('excluir-tipo-variacao', (_, id) => excluirTipoVariacao(id))
+ipcMain.handle('listar-valores-variacao', (_, tipoVariacaoId) => listarValoresVariacao(tipoVariacaoId))
+ipcMain.handle('criar-valor-variacao', (_, data) => criarValorVariacao(data))
+ipcMain.handle('atualizar-valor-variacao', (_, id, data) => atualizarValorVariacao(id, data))
+ipcMain.handle('excluir-valor-variacao', (_, id) => excluirValorVariacao(id))
+ipcMain.handle('listar-todos-valores-variacao', () => listarTodosValoresVariacao())
 
 ipcMain.handle('criar-venda', (_, data) => criarVenda(data))
 ipcMain.handle('listar-vendas', () => listarVendas())
