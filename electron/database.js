@@ -217,6 +217,20 @@ function listarArtesoes() {
   return stmt.all()
 }
 
+function atualizarArtesao(id, { nome, telefone_whats = null }) {
+  const stmt = db.prepare(`
+    UPDATE artesoes SET nome = ?, telefone_whats = ? WHERE id = ?
+  `)
+  stmt.run(nome, telefone_whats, id)
+  return { id }
+}
+
+function excluirArtesao(id) {
+  const stmt = db.prepare('DELETE FROM artesoes WHERE id = ?')
+  stmt.run(id)
+  return { id }
+}
+
 // --- Produtos ---
 
 function criarProduto({ nome, variacao = null, preco_custo = 0, preco_venda = 0, estoque = 0, artesao_id }) {
@@ -895,6 +909,8 @@ module.exports = {
   db,
   criarArtesao,
   listarArtesoes,
+  atualizarArtesao,
+  excluirArtesao,
   criarProduto,
   listarProdutos,
   atualizarProduto,

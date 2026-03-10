@@ -4,6 +4,8 @@ const path = require('path')
 const {
   criarArtesao,
   listarArtesoes,
+  atualizarArtesao,
+  excluirArtesao,
   criarProduto,
   listarProdutos,
   atualizarProduto,
@@ -99,6 +101,8 @@ ipcMain.handle('login-show-resize', (event) => {
 // IPC Handlers
 ipcMain.handle('criar-artesao', (_, data) => criarArtesao(data))
 ipcMain.handle('listar-artesoes', () => listarArtesoes())
+ipcMain.handle('atualizar-artesao', (_, id, data) => atualizarArtesao(id, data))
+ipcMain.handle('excluir-artesao', (_, id) => excluirArtesao(id))
 
 ipcMain.handle('criar-produto', (_, data) => criarProduto(data))
 ipcMain.handle('listar-produtos', () => listarProdutos())
