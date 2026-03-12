@@ -444,19 +444,60 @@ export default function Produtos() {
     setModalVisualizarEtiquetasAberto(true)
   }
 
-  async function handleConfirmarImpressao() {
-    if (window.electronAPI?.imprimirEtiquetas) {
-      try {
-        await window.electronAPI.imprimirEtiquetas()
-        setModalVisualizarEtiquetasAberto(false)
-        mostrarToast('Impressão enviada com sucesso!', 'success')
-      } catch (err) {
-        console.error(err)
-        mostrarToast('Erro ao imprimir: ' + (err?.message || err), 'error')
-      }
+  /** Abre uma janela com apenas o HTML das etiquetas e imprime essa janela (evita página em branco). */
+  function imprimirEtiquetasEmJanelaDedicada(containerEl) {
+    const conteudo = containerEl?.innerHTML ?? ''
+    if (!conteudo.trim()) return false
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Etiquetas</title><style>
+      *{margin:0;padding:0;box-sizing:border-box}
+      body{padding:8px;background:#fff}
+      .etiquetas-container{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}
+      .etiqueta-item{border:1px solid #000;padding:8px;text-align:center;background:#fff;break-inside:avoid;page-break-inside:avoid;width:40mm;min-height:20mm}
+      .etiqueta-nome{font-size:12px;font-weight:600;margin-bottom:4px;word-break:break-word}
+      .etiqueta-barcode{display:flex;justify-content:center;margin:4px 0}
+      .etiqueta-barcode svg{max-width:100%;height:auto}
+      .etiqueta-codigo-numero{font-size:11px;font-family:monospace}
+      .etiqueta-preco{font-size:12px;font-weight:700;margin-top:4px}
+      @media print{body{padding:0}.etiqueta-item{width:40mm;min-height:20mm}}
+    </style></head><body><div class="etiquetas-container">${conteudo}</div></body></html>`
+    const printWin = window.open('', '_blank')
+    if (!printWin) {
+      mostrarToast('Permita pop-ups para imprimir etiquetas.', 'error')
+      return false
+    }
+    printWin.document.write(html)
+    printWin.document.close()
+    printWin.focus()
+    // Aguardar layout/SVG antes de imprimir
+    const imprimirDepois = () => {
+      printWin.print()
+      printWin.onafterprint = () => printWin.close()
+      // Fallback: fechar após um tempo se onafterprint não disparar
+      setTimeout(() => { try { printWin.close() } catch (_) {} }, 3000)
+    }
+    if (printWin.document.readyState === 'complete') {
+      setTimeout(imprimirDepois, 400)
     } else {
-      window.print()
+      printWin.addEventListener('load', () => setTimeout(imprimirDepois, 400))
+    }
+    return true
+  }
+
+  async function handleConfirmarImpressao() {
+    await new Promise((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+    })
+    await new Promise((r) => setTimeout(r, 150))
+    const container = etiquetasContainerRef.current
+    const temEtiquetas = container?.querySelectorAll('.etiqueta-item').length > 0
+    if (!temEtiquetas) {
+      mostrarToast('Nenhuma etiqueta no DOM. Tente novamente.', 'error')
+      return
+    }
+    const ok = imprimirEtiquetasEmJanelaDedicada(container)
+    if (ok) {
       setModalVisualizarEtiquetasAberto(false)
+      mostrarToast('Diálogo de impressão aberto. Selecione a impressora.', 'success')
     }
   }
 
