@@ -122,8 +122,7 @@ export default function Estoque() {
       setModalEntradaAberto(false)
       setProdutoParaEntrada(null)
       carregarProdutos()
-      carregarHistorico()
-      if (consultaAtiva === 'movimentacoes') buscarMovimentacoes()
+      buscarMovimentacoes()
     } catch (err) {
       console.error(err)
       alert(`Erro ao adicionar estoque: ${err?.message || err}`)

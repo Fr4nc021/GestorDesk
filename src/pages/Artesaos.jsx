@@ -6,6 +6,7 @@ import { useState, useEffect } from 'react'
 export default function Artesaos() {
   const [artesoes, setArtesoes] = useState([])
   const [loading, setLoading] = useState(true)
+  const [termoBusca, setTermoBusca] = useState('')
 
   const [modalAberto, setModalAberto] = useState(false)
   const [modalExcluirAberto, setModalExcluirAberto] = useState(false)
@@ -92,6 +93,12 @@ export default function Artesaos() {
     }
   }
 
+  const artesoesFiltrados = termoBusca.trim()
+    ? artesoes.filter((a) =>
+        a.nome?.toLowerCase().includes(termoBusca.trim().toLowerCase())
+      )
+    : artesoes
+
   async function handleExcluirArtesao() {
     if (!artesaoParaExcluir) return
 
@@ -121,7 +128,12 @@ export default function Artesaos() {
           <div className="artesaos-search-row">
             <div className="artesaos-search-wrapper">
               <img src={loupeIcon} alt="" className="pdv-input-icon" />
-              <input type="text" placeholder="Buscar por nome..." />
+              <input
+                type="text"
+                placeholder="Buscar por nome..."
+                value={termoBusca}
+                onChange={(e) => setTermoBusca(e.target.value)}
+              />
             </div>
           </div>
         </div>
@@ -148,12 +160,16 @@ export default function Artesaos() {
               <tr>
                 <td colSpan={5}>Carregando...</td>
               </tr>
-            ) : artesoes.length === 0 ? (
+            ) : artesoesFiltrados.length === 0 ? (
               <tr>
-                <td colSpan={5}>Nenhum artesão cadastrado.</td>
+                <td colSpan={5}>
+                  {termoBusca.trim()
+                    ? 'Nenhum artesão encontrado com esse nome.'
+                    : 'Nenhum artesão cadastrado.'}
+                </td>
               </tr>
             ) : (
-              artesoes.map((a) => (
+              artesoesFiltrados.map((a) => (
                 <tr key={a.id}>
                   <td>{a.nome}</td>
                   <td>

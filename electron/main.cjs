@@ -1,6 +1,6 @@
 const { app, BrowserWindow, ipcMain, dialog } = require('electron')
-const fs = require('fs')
 const path = require('path')
+const fs = require('fs')
 const {
   criarArtesao,
   listarArtesoes,
@@ -181,4 +181,7 @@ ipcMain.handle('obter-relatorio-custo-vendas-periodo', (_, dataInicio, dataFim, 
 ipcMain.handle('obter-totais-pagamentos-por-periodo', (_, dataInicio, dataFim) =>
   obterTotaisPagamentosPorPeriodo(dataInicio, dataFim))
 
-app.whenReady().then(createWindow)
+app.whenReady().then(() => {
+  createWindow()
+  iniciarSyncTimer()
+})

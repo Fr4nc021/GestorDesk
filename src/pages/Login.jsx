@@ -25,6 +25,19 @@ export default function Login() {
     window.electronAPI?.loginShowResize?.()
   }, [])
 
+  // Se já estiver logado, redireciona para o app
+  useEffect(() => {
+    try {
+      const s = localStorage.getItem('usuarioLogado')
+      if (s) {
+        const data = JSON.parse(s)
+        if (data && data.id) navigate('/app', { replace: true })
+      }
+    } catch {
+      // ignora
+    }
+  }, [navigate])
+
   async function handleSubmit(e) {
     e.preventDefault()
     setErro('')
