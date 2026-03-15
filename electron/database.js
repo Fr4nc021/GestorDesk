@@ -1,7 +1,7 @@
 const Database = require('better-sqlite3')
 const path = require('path')
 
-const dbPath = path.join(__dirname, '..', 'database.db')
+const dbPath = process.env.GESTORDESK_DB_PATH || path.join(__dirname, '..', 'database.db')
 const db = new Database(dbPath)
 
 db.pragma('foreign_keys = ON')
@@ -196,6 +196,53 @@ try {
   // migração já executada ou erro
 }
 
+// --- Migração: coluna sync_status (pending | synced) para controle de sincronização ---
+const TABELAS_SYNC = [
+  'usuarios', 'artesoes', 'tipos_variacao', 'variacao_valores', 'produtos',
+  'vendas', 'vendas_itens', 'vendas_pagamentos', 'movimentacoes_estoque', 'movimentacoes_caixa',
+]
+const TABELAS_COM_SYNCED_INT = ['artesoes', 'produtos', 'vendas', 'vendas_itens', 'movimentacoes_caixa']
+
+function tabelaTemColuna(dbConn, nomeTabela, coluna) {
+  const cols = dbConn.prepare(`PRAGMA table_info(${nomeTabela})`).all()
+  return cols.some((c) => c.name === coluna)
+}
+
+for (const tabela of TABELAS_SYNC) {
+  try {
+    if (!tabelaTemColuna(db, tabela, 'sync_status')) {
+      db.exec(`ALTER TABLE ${tabela} ADD COLUMN sync_status TEXT DEFAULT 'pending'`)
+    }
+    if (TABELAS_COM_SYNCED_INT.includes(tabela) && tabelaTemColuna(db, tabela, 'synced')) {
+      db.prepare(`UPDATE ${tabela} SET sync_status = 'synced' WHERE synced = 1`).run()
+    }
+  } catch (_) {
+    // coluna já existe ou migração já aplicada
+  }
+}
+
+// --- Funções para o serviço de sincronização ---
+/** Retorna todos os registros da tabela com sync_status = 'pending'. */
+function getPendingRecordsForSync(tabela) {
+  if (!tabelaTemColuna(db, tabela, 'sync_status')) {
+    return db.prepare(`SELECT * FROM ${tabela}`).all()
+  }
+  return db.prepare(`SELECT * FROM ${tabela} WHERE sync_status = 'pending'`).all()
+}
+
+/** Marca os registros pelos ids como sincronizados (sync_status = 'synced'). */
+function markAsSynced(tabela, ids) {
+  if (ids.length === 0 || !tabelaTemColuna(db, tabela, 'sync_status')) return
+  const placeholders = ids.map(() => '?').join(',')
+  db.prepare(`UPDATE ${tabela} SET sync_status = 'synced' WHERE id IN (${placeholders})`).run(...ids)
+}
+
+/** Ordem das tabelas para envio ao Supabase (respeitando FKs). */
+const ORDEM_SYNC = [
+  'usuarios', 'artesoes', 'tipos_variacao', 'variacao_valores', 'produtos',
+  'vendas', 'vendas_itens', 'vendas_pagamentos', 'movimentacoes_estoque', 'movimentacoes_caixa',
+]
+
 // --- Artesãos ---
 
 function criarArtesao({ nome, telefone_whats = null }) {
@@ -219,7 +266,7 @@ function listarArtesoes() {
 
 function atualizarArtesao(id, { nome, telefone_whats = null }) {
   const stmt = db.prepare(`
-    UPDATE artesoes SET nome = ?, telefone_whats = ? WHERE id = ?
+    UPDATE artesoes SET nome = ?, telefone_whats = ?, sync_status = 'pending' WHERE id = ?
   `)
   stmt.run(nome, telefone_whats, id)
   return { id }
@@ -270,7 +317,7 @@ function listarProdutos() {
 
 function atualizarProduto(id, { nome, variacao = null, preco_custo = 0, preco_venda = 0, estoque = 0, artesao_id }) {
   const stmt = db.prepare(`
-    UPDATE produtos SET nome = ?, variacao = ?, preco_custo = ?, preco_venda = ?, estoque = ?, artesao_id = ?
+    UPDATE produtos SET nome = ?, variacao = ?, preco_custo = ?, preco_venda = ?, estoque = ?, artesao_id = ?, sync_status = 'pending'
     WHERE id = ?
   `)
   stmt.run(nome, variacao, preco_custo, preco_venda, estoque, artesao_id, id)
@@ -315,7 +362,7 @@ function criarTipoVariacao({ nome, ordem = 0 }) {
 }
 
 function atualizarTipoVariacao(id, { nome, ordem }) {
-  const stmt = db.prepare('UPDATE tipos_variacao SET nome = ?, ordem = ? WHERE id = ?')
+  const stmt = db.prepare("UPDATE tipos_variacao SET nome = ?, ordem = ?, sync_status = 'pending' WHERE id = ?")
   stmt.run(nome.trim(), ordem ?? 0, id)
   return { id }
 }
@@ -342,7 +389,7 @@ function criarValorVariacao({ tipo_variacao_id, valor, ordem = 0 }) {
 }
 
 function atualizarValorVariacao(id, { valor, ordem }) {
-  const stmt = db.prepare('UPDATE variacao_valores SET valor = ?, ordem = ? WHERE id = ?')
+  const stmt = db.prepare("UPDATE variacao_valores SET valor = ?, ordem = ?, sync_status = 'pending' WHERE id = ?")
   stmt.run(valor.trim(), ordem ?? 0, id)
   return { id }
 }
@@ -907,6 +954,9 @@ function obterTotaisPagamentosPorPeriodo(dataInicio, dataFim) {
 
 module.exports = {
   db,
+  getPendingRecordsForSync,
+  markAsSynced,
+  ORDEM_SYNC,
   criarArtesao,
   listarArtesoes,
   atualizarArtesao,

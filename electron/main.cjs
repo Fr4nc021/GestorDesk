@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain, dialog } = require('electron')
 const path = require('path')
 const fs = require('fs')
+const { syncWithSupabase, iniciarSyncTimer } = require('./services/syncService')
 const {
   criarArtesao,
   listarArtesoes,
@@ -180,6 +181,15 @@ ipcMain.handle('obter-relatorio-custo-vendas-periodo', (_, dataInicio, dataFim, 
   obterRelatorioCustoVendasPeriodo(dataInicio, dataFim, artesaoId ?? null))
 ipcMain.handle('obter-totais-pagamentos-por-periodo', (_, dataInicio, dataFim) =>
   obterTotaisPagamentosPorPeriodo(dataInicio, dataFim))
+
+// Sincronização ao fechar: tenta enviar pendentes antes de encerrar
+let syncOnQuitDone = false
+app.on('before-quit', (event) => {
+  if (syncOnQuitDone) return
+  event.preventDefault()
+  syncOnQuitDone = true
+  syncWithSupabase().finally(() => app.quit())
+})
 
 app.whenReady().then(() => {
   createWindow()
