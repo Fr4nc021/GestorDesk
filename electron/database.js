@@ -1,7 +1,23 @@
 const Database = require('better-sqlite3')
 const path = require('path')
+const fs = require('fs')
 
-const dbPath = process.env.GESTORDESK_DB_PATH || path.join(__dirname, '..', 'database.db')
+const defaultDbPath = path.join(__dirname, '..', 'database.db')
+const dbPath = process.env.GESTORDESK_DB_PATH || defaultDbPath
+
+// Garante que a pasta existe e, se não houver banco no destino, copia o modelo padrão (se existir)
+const dbDir = path.dirname(dbPath)
+if (!fs.existsSync(dbDir)) {
+  fs.mkdirSync(dbDir, { recursive: true })
+}
+if (!fs.existsSync(dbPath) && fs.existsSync(defaultDbPath)) {
+  try {
+    fs.copyFileSync(defaultDbPath, dbPath)
+  } catch (_) {
+    // se a cópia falhar, better-sqlite3 vai criar um novo banco vazio
+  }
+}
+
 const db = new Database(dbPath)
 
 db.pragma('foreign_keys = ON')
@@ -43,7 +59,8 @@ function initDatabase() {
       nome TEXT NOT NULL,
       telefone_whats TEXT,
       synced INTEGER DEFAULT 0,
-      created_at TEXT DEFAULT (datetime('now'))
+      created_at TEXT DEFAULT (datetime('now')),
+      deleted_at TEXT
     );
 
     CREATE TABLE IF NOT EXISTS produtos (
@@ -57,6 +74,7 @@ function initDatabase() {
       artesao_id INTEGER NOT NULL,
       synced INTEGER DEFAULT 0,
       created_at TEXT DEFAULT (datetime('now')),
+      deleted_at TEXT,
       FOREIGN KEY (artesao_id) REFERENCES artesoes(id)
     );
 
@@ -66,7 +84,8 @@ function initDatabase() {
       valor_total REAL NOT NULL DEFAULT 0,
       forma_pagamento TEXT NOT NULL CHECK(forma_pagamento IN ('dinheiro','credito','debito','pix')),
       synced INTEGER DEFAULT 0,
-      created_at TEXT DEFAULT (datetime('now'))
+      created_at TEXT DEFAULT (datetime('now')),
+      deleted_at TEXT
     );
 
     CREATE TABLE IF NOT EXISTS vendas_itens (
@@ -76,6 +95,7 @@ function initDatabase() {
       quantidade INTEGER NOT NULL,
       preco_unitario REAL NOT NULL,
       synced INTEGER DEFAULT 0,
+      deleted_at TEXT,
       FOREIGN KEY (venda_id) REFERENCES vendas(id),
       FOREIGN KEY (produto_id) REFERENCES produtos(id)
     );
@@ -86,16 +106,18 @@ function initDatabase() {
       venda_id INTEGER NOT NULL,
       forma_pagamento TEXT NOT NULL CHECK(forma_pagamento IN ('dinheiro','credito','debito','pix')),
       valor REAL NOT NULL,
+      deleted_at TEXT,
       FOREIGN KEY (venda_id) REFERENCES vendas(id)
     );
 
-     CREATE TABLE IF NOT EXISTS movimentacoes_estoque (
+    CREATE TABLE IF NOT EXISTS movimentacoes_estoque (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       produto_id INTEGER NOT NULL,
       tipo TEXT NOT NULL CHECK(tipo IN ('entrada','saida')),
       quantidade INTEGER NOT NULL,
       origem TEXT DEFAULT 'admin',
       data TEXT NOT NULL DEFAULT (datetime('now')),
+      deleted_at TEXT,
       FOREIGN KEY (produto_id) REFERENCES produtos(id)
     );
 
@@ -106,14 +128,16 @@ function initDatabase() {
       forma_pagamento TEXT NOT NULL CHECK(forma_pagamento IN ('dinheiro','credito','debito','pix')),
       descricao TEXT,
       data TEXT NOT NULL DEFAULT (datetime('now')),
-      synced INTEGER DEFAULT 0
+      synced INTEGER DEFAULT 0,
+      deleted_at TEXT
     );
 
     CREATE TABLE IF NOT EXISTS tipos_variacao (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       nome TEXT NOT NULL UNIQUE,
       ordem INTEGER NOT NULL DEFAULT 0,
-      created_at TEXT DEFAULT (datetime('now'))
+      created_at TEXT DEFAULT (datetime('now')),
+      deleted_at TEXT
     );
 
     CREATE TABLE IF NOT EXISTS variacao_valores (
@@ -122,6 +146,7 @@ function initDatabase() {
       valor TEXT NOT NULL,
       ordem INTEGER NOT NULL DEFAULT 0,
       created_at TEXT DEFAULT (datetime('now')),
+      deleted_at TEXT,
       FOREIGN KEY (tipo_variacao_id) REFERENCES tipos_variacao(id) ON DELETE CASCADE,
       UNIQUE(tipo_variacao_id, valor)
     );
@@ -198,8 +223,16 @@ try {
 
 // --- Migração: coluna sync_status (pending | synced) para controle de sincronização ---
 const TABELAS_SYNC = [
-  'usuarios', 'artesoes', 'tipos_variacao', 'variacao_valores', 'produtos',
-  'vendas', 'vendas_itens', 'vendas_pagamentos', 'movimentacoes_estoque', 'movimentacoes_caixa',
+  'usuarios',
+  'artesoes',
+  'tipos_variacao',
+  'variacao_valores',
+  'produtos',
+  'vendas',
+  'vendas_itens',
+  'vendas_pagamentos',
+  'movimentacoes_estoque',
+  'movimentacoes_caixa',
 ]
 const TABELAS_COM_SYNCED_INT = ['artesoes', 'produtos', 'vendas', 'vendas_itens', 'movimentacoes_caixa']
 
@@ -215,6 +248,9 @@ for (const tabela of TABELAS_SYNC) {
     }
     if (TABELAS_COM_SYNCED_INT.includes(tabela) && tabelaTemColuna(db, tabela, 'synced')) {
       db.prepare(`UPDATE ${tabela} SET sync_status = 'synced' WHERE synced = 1`).run()
+    }
+    if (!tabelaTemColuna(db, tabela, 'deleted_at')) {
+      db.exec(`ALTER TABLE ${tabela} ADD COLUMN deleted_at TEXT`)
     }
   } catch (_) {
     // coluna já existe ou migração já aplicada
@@ -257,7 +293,8 @@ function listarArtesoes() {
   const stmt = db.prepare(`
     SELECT a.*, COUNT(p.id) as quantidade_produtos
     FROM artesoes a
-    LEFT JOIN produtos p ON p.artesao_id = a.id
+    LEFT JOIN produtos p ON p.artesao_id = a.id AND p.deleted_at IS NULL
+    WHERE a.deleted_at IS NULL
     GROUP BY a.id
     ORDER BY a.nome
   `)
@@ -273,7 +310,9 @@ function atualizarArtesao(id, { nome, telefone_whats = null }) {
 }
 
 function excluirArtesao(id) {
-  const stmt = db.prepare('DELETE FROM artesoes WHERE id = ?')
+  const stmt = db.prepare(
+    "UPDATE artesoes SET deleted_at = datetime('now', 'localtime'), sync_status = 'pending' WHERE id = ?",
+  )
   stmt.run(id)
   return { id }
 }
@@ -310,6 +349,8 @@ function listarProdutos() {
     SELECT p.*, a.nome as artesao_nome
     FROM produtos p
     LEFT JOIN artesoes a ON a.id = p.artesao_id
+    WHERE p.deleted_at IS NULL
+      AND (a.deleted_at IS NULL OR a.id IS NULL)
     ORDER BY p.nome
   `)
   return stmt.all()
@@ -325,7 +366,9 @@ function atualizarProduto(id, { nome, variacao = null, preco_custo = 0, preco_ve
 }
 
 function excluirProduto(id) {
-  const stmt = db.prepare('DELETE FROM produtos WHERE id = ?')
+  const stmt = db.prepare(
+    "UPDATE produtos SET deleted_at = datetime('now', 'localtime'), sync_status = 'pending' WHERE id = ?",
+  )
   stmt.run(id)
   return { id }
 }
@@ -368,7 +411,9 @@ function atualizarTipoVariacao(id, { nome, ordem }) {
 }
 
 function excluirTipoVariacao(id) {
-  const stmt = db.prepare('DELETE FROM tipos_variacao WHERE id = ?')
+  const stmt = db.prepare(
+    "UPDATE tipos_variacao SET deleted_at = datetime('now', 'localtime'), sync_status = 'pending' WHERE id = ?",
+  )
   stmt.run(id)
   return { id }
 }
@@ -377,6 +422,7 @@ function listarValoresVariacao(tipoVariacaoId) {
   const stmt = db.prepare(`
     SELECT * FROM variacao_valores
     WHERE tipo_variacao_id = ?
+      AND deleted_at IS NULL
     ORDER BY ordem, valor
   `)
   return stmt.all(tipoVariacaoId)
@@ -395,7 +441,9 @@ function atualizarValorVariacao(id, { valor, ordem }) {
 }
 
 function excluirValorVariacao(id) {
-  const stmt = db.prepare('DELETE FROM variacao_valores WHERE id = ?')
+  const stmt = db.prepare(
+    "UPDATE variacao_valores SET deleted_at = datetime('now', 'localtime'), sync_status = 'pending' WHERE id = ?",
+  )
   stmt.run(id)
   return { id }
 }
@@ -442,8 +490,8 @@ function criarVenda({ itens, forma_pagamento, valor_total: valorTotalInformado, 
     UPDATE produtos SET estoque = estoque - ? WHERE id = ?
   `)
   const insertMovEstoque = db.prepare(`
-    INSERT INTO movimentacoes_estoque (produto_id, tipo, quantidade, origem)
-    VALUES (?, 'saida', ?, 'pdv')
+    INSERT INTO movimentacoes_estoque (produto_id, tipo, quantidade, origem, data)
+    VALUES (?, 'saida', ?, 'pdv', datetime('now', 'localtime'))
   `)
   const insertPagamento = db.prepare(`
     INSERT INTO vendas_pagamentos (venda_id, forma_pagamento, valor)
@@ -487,8 +535,9 @@ function listarVendas() {
     SELECT v.*, GROUP_CONCAT(p.nome || ' x' || vi.quantidade) as itens_resumo,
            (SELECT SUM(quantidade) FROM vendas_itens WHERE venda_id = v.id) as qtd_itens
     FROM vendas v
-    LEFT JOIN vendas_itens vi ON vi.venda_id = v.id
-    LEFT JOIN produtos p ON p.id = vi.produto_id
+    LEFT JOIN vendas_itens vi ON vi.venda_id = v.id AND vi.deleted_at IS NULL
+    LEFT JOIN produtos p ON p.id = vi.produto_id AND p.deleted_at IS NULL
+    WHERE v.deleted_at IS NULL
     GROUP BY v.id
     ORDER BY v.data DESC
   `).all()
@@ -500,9 +549,10 @@ function listarVendasDoDia() {
     SELECT v.*, GROUP_CONCAT(p.nome || ' x' || vi.quantidade) as itens_resumo,
            (SELECT SUM(quantidade) FROM vendas_itens WHERE venda_id = v.id) as qtd_itens
     FROM vendas v
-    LEFT JOIN vendas_itens vi ON vi.venda_id = v.id
-    LEFT JOIN produtos p ON p.id = vi.produto_id
-    WHERE date(v.data) = date('now', 'localtime')
+    LEFT JOIN vendas_itens vi ON vi.venda_id = v.id AND vi.deleted_at IS NULL
+    LEFT JOIN produtos p ON p.id = vi.produto_id AND p.deleted_at IS NULL
+    WHERE v.deleted_at IS NULL
+      AND date(v.data) = date('now', 'localtime')
     GROUP BY v.id
     ORDER BY v.data ASC
   `).all()
@@ -514,9 +564,10 @@ function listarVendasPorData(dataISO) {
     SELECT v.*, GROUP_CONCAT(p.nome || ' x' || vi.quantidade) as itens_resumo,
            (SELECT SUM(quantidade) FROM vendas_itens WHERE venda_id = v.id) as qtd_itens
     FROM vendas v
-    LEFT JOIN vendas_itens vi ON vi.venda_id = v.id
-    LEFT JOIN produtos p ON p.id = vi.produto_id
-    WHERE date(v.data) = date(?)
+    LEFT JOIN vendas_itens vi ON vi.venda_id = v.id AND vi.deleted_at IS NULL
+    LEFT JOIN produtos p ON p.id = vi.produto_id AND p.deleted_at IS NULL
+    WHERE v.deleted_at IS NULL
+      AND date(v.data) = date(?)
     GROUP BY v.id
     ORDER BY v.data DESC
   `).all(dataISO)
@@ -541,7 +592,9 @@ function listarPagamentosCaixaPorData(dataISO) {
       (SELECT COALESCE(SUM(vi.quantidade), 0) FROM vendas_itens vi WHERE vi.venda_id = v.id) as qtd_itens
     FROM vendas_pagamentos vp
     JOIN vendas v ON v.id = vp.venda_id
-    WHERE date(v.data) = date(?)
+    WHERE v.deleted_at IS NULL
+      AND vp.deleted_at IS NULL
+      AND date(v.data) = date(?)
     ORDER BY v.data DESC, v.id DESC, vp.id ASC
   `).all(dataISO)
 
@@ -579,12 +632,18 @@ function excluirVenda(id) {
     UPDATE produtos SET estoque = estoque + ? WHERE id = ?
   `)
   const insertMovEstoque = db.prepare(`
-    INSERT INTO movimentacoes_estoque (produto_id, tipo, quantidade, origem)
-    VALUES (?, 'entrada', ?, 'estorno')
+    INSERT INTO movimentacoes_estoque (produto_id, tipo, quantidade, origem, data)
+    VALUES (?, 'entrada', ?, 'estorno', datetime('now', 'localtime'))
   `)
-  const deletePagamentos = db.prepare('DELETE FROM vendas_pagamentos WHERE venda_id = ?')
-  const deleteItens = db.prepare('DELETE FROM vendas_itens WHERE venda_id = ?')
-  const deleteVenda = db.prepare('DELETE FROM vendas WHERE id = ?')
+  const softDeletePagamentos = db.prepare(
+    "UPDATE vendas_pagamentos SET deleted_at = datetime('now', 'localtime'), sync_status = 'pending' WHERE venda_id = ?",
+  )
+  const softDeleteItens = db.prepare(
+    "UPDATE vendas_itens SET deleted_at = datetime('now', 'localtime'), sync_status = 'pending' WHERE venda_id = ?",
+  )
+  const softDeleteVenda = db.prepare(
+    "UPDATE vendas SET deleted_at = datetime('now', 'localtime'), sync_status = 'pending' WHERE id = ?",
+  )
   const getItens = db.prepare('SELECT produto_id, quantidade FROM vendas_itens WHERE venda_id = ?')
 
   db.transaction(() => {
@@ -593,9 +652,9 @@ function excluirVenda(id) {
       updateEstoque.run(item.quantidade, item.produto_id)
       insertMovEstoque.run(item.produto_id, item.quantidade)
     }
-    deletePagamentos.run(id)
-    deleteItens.run(id)
-    deleteVenda.run(id)
+    softDeletePagamentos.run(id)
+    softDeleteItens.run(id)
+    softDeleteVenda.run(id)
   })()
   return { id }
 }
@@ -604,7 +663,8 @@ function excluirVenda(id) {
 
 function criarMovimentacaoCaixa({ tipo, valor, forma_pagamento, descricao = null }) {
   const stmt = db.prepare(`
-    INSERT INTO movimentacoes_caixa (tipo, valor, forma_pagamento, descricao) VALUES (?, ?, ?, ?)
+    INSERT INTO movimentacoes_caixa (tipo, valor, forma_pagamento, descricao, data)
+    VALUES (?, ?, ?, ?, datetime('now', 'localtime'))
   `)
   const result = stmt.run(tipo, valor, forma_pagamento, descricao)
   return { id: result.lastInsertRowid, tipo, valor, forma_pagamento, descricao }
@@ -614,8 +674,8 @@ function criarMovimentacaoCaixa({ tipo, valor, forma_pagamento, descricao = null
 // Adicionar estoque e registrar movimentação
 function adicionarEstoque(produto_id, quantidade, origem = 'admin') {
   const insertMov = db.prepare(`
-    INSERT INTO movimentacoes_estoque (produto_id, tipo, quantidade, origem)
-    VALUES (?, 'entrada', ?, ?)
+    INSERT INTO movimentacoes_estoque (produto_id, tipo, quantidade, origem, data)
+    VALUES (?, 'entrada', ?, ?, datetime('now', 'localtime'))
   `)
   const updateProd = db.prepare(`
     UPDATE produtos SET estoque = estoque + ? WHERE id = ?
@@ -785,8 +845,8 @@ function obterTotalVendasHoje() {
 function obterLucroPeriodo(dataInicio, dataFim) {
   const row = db.prepare(`
     SELECT
-      COALESCE(SUM((vi.preco_unitario - p.preco_custo) * vi.quantidade), 0) as lucro,
-      COALESCE(SUM(vi.preco_unitario * vi.quantidade), 0) as total_vendas,
+      COALESCE(SUM((COALESCE(vi.preco_unitario, p.preco_venda) - p.preco_custo) * vi.quantidade), 0) as lucro,
+      COALESCE(SUM(COALESCE(vi.preco_unitario, p.preco_venda) * vi.quantidade), 0) as total_vendas,
       COALESCE(SUM(p.preco_custo * vi.quantidade), 0) as total_custo,
       COALESCE(SUM(vi.quantidade), 0) as qtd_itens
     FROM vendas_itens vi
@@ -859,7 +919,7 @@ function obterRelatorioCustoVendasPeriodo(dataInicio, dataFim, artesaoId = null)
   if (artesaoId == null) {
     const row = db.prepare(`
       SELECT
-        COALESCE(SUM(vi.preco_unitario * vi.quantidade), 0) as total_vendas,
+        COALESCE(SUM(COALESCE(vi.preco_unitario, p.preco_venda) * vi.quantidade), 0) as total_vendas,
         COALESCE(SUM(p.preco_custo * vi.quantidade), 0) as total_custo
       FROM vendas_itens vi
       JOIN vendas v ON v.id = vi.venda_id
@@ -868,9 +928,14 @@ function obterRelatorioCustoVendasPeriodo(dataInicio, dataFim, artesaoId = null)
     `).get(dataInicio, dataFim)
     const produtos = db.prepare(`
       SELECT
-        p.id, p.nome, p.variacao, a.nome as artesao_nome, p.preco_custo,
+        p.id,
+        p.nome,
+        p.variacao,
+        a.nome as artesao_nome,
+        p.preco_custo,
         SUM(vi.quantidade) as total_vendido,
-        SUM(p.preco_custo * vi.quantidade) as total_custo_produto
+        SUM(p.preco_custo * vi.quantidade) as total_custo_produto,
+        SUM(COALESCE(vi.preco_unitario, p.preco_venda) * vi.quantidade) as total_venda_produto
       FROM vendas_itens vi
       JOIN vendas v ON v.id = vi.venda_id
       JOIN produtos p ON p.id = vi.produto_id
@@ -888,7 +953,7 @@ function obterRelatorioCustoVendasPeriodo(dataInicio, dataFim, artesaoId = null)
 
   const row = db.prepare(`
     SELECT
-      COALESCE(SUM(vi.preco_unitario * vi.quantidade), 0) as total_vendas,
+      COALESCE(SUM(COALESCE(vi.preco_unitario, p.preco_venda) * vi.quantidade), 0) as total_vendas,
       COALESCE(SUM(p.preco_custo * vi.quantidade), 0) as total_custo
     FROM vendas_itens vi
     JOIN vendas v ON v.id = vi.venda_id
@@ -898,9 +963,14 @@ function obterRelatorioCustoVendasPeriodo(dataInicio, dataFim, artesaoId = null)
   `).get(dataInicio, dataFim, artesaoId)
   const produtos = db.prepare(`
     SELECT
-      p.id, p.nome, p.variacao, a.nome as artesao_nome, p.preco_custo,
+      p.id,
+      p.nome,
+      p.variacao,
+      a.nome as artesao_nome,
+      p.preco_custo,
       SUM(vi.quantidade) as total_vendido,
-      SUM(p.preco_custo * vi.quantidade) as total_custo_produto
+      SUM(p.preco_custo * vi.quantidade) as total_custo_produto,
+      SUM(COALESCE(vi.preco_unitario, p.preco_venda) * vi.quantidade) as total_venda_produto
     FROM vendas_itens vi
     JOIN vendas v ON v.id = vi.venda_id
     JOIN produtos p ON p.id = vi.produto_id

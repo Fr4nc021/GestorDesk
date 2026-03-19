@@ -2,6 +2,7 @@ import loupeIcon from '../assets/complements/loupe.png'
 import filterIcon from '../assets/complements/filter.png'
 import { useState, useEffect, useRef, useMemo } from 'react'
 import Barcode from 'react-barcode'
+import JsBarcode from 'jsbarcode'
 
 export default function Produtos() {
   const [produtos, setProdutos] = useState([])
@@ -42,6 +43,16 @@ export default function Produtos() {
   const [buscaEtiqueta, setBuscaEtiqueta] = useState('')
   const [sugestaoQtdPorChave, setSugestaoQtdPorChave] = useState({})
   const etiquetasContainerRef = useRef(null)
+
+  // Configuração de tamanho das etiquetas (em mm) – ajustável pelo usuário
+  const [configEtiquetas, setConfigEtiquetas] = useState({
+    larguraEtiqueta: 28, // mm
+    alturaEtiqueta: 18,  // mm
+    larguraPapel: 60,    // mm
+    alturaPapel: 40,     // mm
+    colunas: 2,
+    linhas: 2,
+  })
 
   function mostrarToast(message, type = 'success') {
     setToast({ visible: true, message, type })
@@ -97,6 +108,34 @@ export default function Produtos() {
     } catch (_) {
       setTiposVariacao([])
     }
+  }
+
+  // Carregar configuração de etiquetas do localStorage (se existir)
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('gestordesk_config_etiquetas')
+      if (raw) {
+        const parsed = JSON.parse(raw)
+        setConfigEtiquetas((prev) => ({
+          ...prev,
+          ...parsed,
+        }))
+      }
+    } catch (_) {
+      // se der erro, mantemos os valores padrão
+    }
+  }, [])
+
+  function atualizarConfigEtiquetas(parcial) {
+    setConfigEtiquetas((prev) => {
+      const next = { ...prev, ...parcial }
+      try {
+        localStorage.setItem('gestordesk_config_etiquetas', JSON.stringify(next))
+      } catch (_) {
+        // ignore falha em salvar
+      }
+      return next
+    })
   }
 
   async function abrirModalVariacoes() {
@@ -428,11 +467,58 @@ export default function Produtos() {
   function gerarListaEtiquetasParaImpressao() {
     const lista = []
     produtosParaEtiquetas.forEach(({ produto, quantidade }) => {
-      for (let i = 0; i < quantidade; i++) {
+      const q = Math.max(0, Math.floor(Number(quantidade)) || 0)
+      for (let i = 0; i < q; i++) {
         lista.push(produto)
       }
     })
     return lista
+  }
+
+  function escapeHtmlEtiqueta(str) {
+    if (str == null) return ''
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+  }
+
+  /** HTML de uma etiqueta para impressão (não depende do DOM do preview). */
+  function htmlEtiquetaProdutoParaImpressao(produto, idx) {
+    const nome =
+      escapeHtmlEtiqueta(produto.nome) +
+      (produto.variacao ? ` (${escapeHtmlEtiqueta(produto.variacao)})` : '')
+    const code = String(produto.codigo_barras || '').trim()
+    let barcodeInner = ''
+    if (code) {
+      try {
+        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+        const digits = code.replace(/\D/g, '')
+        const formato =
+          digits.length === 12 || digits.length === 13 ? 'EAN13' : 'CODE128'
+        JsBarcode(svg, code, {
+          format: formato,
+          width: 1.2,
+          height: 30,
+          margin: 0,
+          displayValue: false,
+        })
+        barcodeInner = svg.outerHTML
+      } catch (_) {
+        barcodeInner = `<span class="etiqueta-codigo-fallback">${escapeHtmlEtiqueta(code)}</span>`
+      }
+    }
+    const preco =
+      produto.preco_venda != null
+        ? `R$ ${Number(produto.preco_venda).toFixed(2).replace('.', ',')}`
+        : '-'
+    return `<div class="etiqueta-item" data-idx="${idx}">
+  <div class="etiqueta-nome">${nome}</div>
+  <div class="etiqueta-barcode">${barcodeInner}</div>
+  <div class="etiqueta-codigo-numero">${escapeHtmlEtiqueta(code)}</div>
+  <div class="etiqueta-preco">${preco}</div>
+</div>`
   }
 
   function handleImprimirEtiquetas() {
@@ -444,22 +530,102 @@ export default function Produtos() {
     setModalVisualizarEtiquetasAberto(true)
   }
 
-  /** Abre uma janela com apenas o HTML das etiquetas e imprime essa janela (evita página em branco). */
-  function imprimirEtiquetasEmJanelaDedicada(containerEl) {
-    const conteudo = containerEl?.innerHTML ?? ''
-    if (!conteudo.trim()) return false
-    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Etiquetas</title><style>
-      *{margin:0;padding:0;box-sizing:border-box}
-      body{padding:8px;background:#fff}
-      .etiquetas-container{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}
-      .etiqueta-item{border:1px solid #000;padding:8px;text-align:center;background:#fff;break-inside:avoid;page-break-inside:avoid;width:40mm;min-height:20mm}
-      .etiqueta-nome{font-size:12px;font-weight:600;margin-bottom:4px;word-break:break-word}
-      .etiqueta-barcode{display:flex;justify-content:center;margin:4px 0}
-      .etiqueta-barcode svg{max-width:100%;height:auto}
-      .etiqueta-codigo-numero{font-size:11px;font-family:monospace}
-      .etiqueta-preco{font-size:12px;font-weight:700;margin-top:4px}
-      @media print{body{padding:0}.etiqueta-item{width:40mm;min-height:20mm}}
-    </style></head><body><div class="etiquetas-container">${conteudo}</div></body></html>`
+  /** Imprime N etiquetas (1 item na lista = 1 etiqueta). Pagina em colunas×linhas por folha. */
+  function imprimirEtiquetasEmJanelaDedicada(listaProdutos) {
+    if (!listaProdutos || listaProdutos.length === 0) return false
+
+    const labelHtmls = listaProdutos.map((produto, i) =>
+      htmlEtiquetaProdutoParaImpressao(produto, i)
+    )
+
+    const {
+      larguraEtiqueta,
+      alturaEtiqueta,
+      larguraPapel,
+      alturaPapel,
+      colunas,
+      linhas,
+    } = configEtiquetas
+
+    const labelWidthMm = Number(larguraEtiqueta) || 28
+    const labelHeightMm = Number(alturaEtiqueta) || 18
+    const paperWidthMm = Number(larguraPapel) || 60
+    const paperHeightMm = Number(alturaPapel) || 40
+    const columns = Math.max(1, parseInt(colunas, 10) || 1)
+    const rows = Math.max(1, parseInt(linhas, 10) || 1)
+    const labelsPerPage = columns * rows
+
+    const pageChunks = []
+    for (let i = 0; i < labelHtmls.length; i += labelsPerPage) {
+      pageChunks.push(labelHtmls.slice(i, i + labelsPerPage))
+    }
+
+    const pageHtml = pageChunks
+      .map(
+        (chunk) =>
+          `<div class="print-page">
+  <div class="etiquetas-container">
+${chunk.join('\n')}
+  </div>
+</div>`
+      )
+      .join('\n')
+
+    const printCss = `
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      @page {
+        margin: 0;
+        size: ${paperWidthMm}mm ${paperHeightMm}mm;
+      }
+      body {
+        margin: 0;
+        background: #fff;
+        width: ${paperWidthMm}mm;
+        min-height: ${paperHeightMm}mm;
+      }
+      .print-page {
+        width: ${paperWidthMm}mm;
+        height: ${paperHeightMm}mm;
+        page-break-after: always;
+        overflow: hidden;
+      }
+      .print-page:last-child {
+        page-break-after: auto;
+      }
+      .etiquetas-container {
+        display: grid;
+        grid-template-columns: repeat(${columns}, ${labelWidthMm}mm);
+        grid-template-rows: repeat(${rows}, ${labelHeightMm}mm);
+        width: ${paperWidthMm}mm;
+        height: ${paperHeightMm}mm;
+        gap: 0;
+      }
+      .etiqueta-item {
+        border: 1px solid #000;
+        padding: 1mm;
+        text-align: center;
+        background: #fff;
+        break-inside: avoid;
+        page-break-inside: avoid;
+        width: ${labelWidthMm}mm;
+        height: ${labelHeightMm}mm;
+        overflow: hidden;
+        box-sizing: border-box;
+      }
+      .etiqueta-nome { font-size: 8px; font-weight: 600; margin-bottom: 1mm; word-break: break-word; }
+      .etiqueta-barcode { display: flex; justify-content: center; margin: 1mm 0; }
+      .etiqueta-barcode svg { max-width: 100%; height: auto; }
+      .etiqueta-codigo-numero { font-size: 7px; font-family: monospace; }
+      .etiqueta-preco { font-size: 8px; font-weight: 700; margin-top: 1mm; }
+      @media print {
+        body { margin: 0; }
+        .print-page { page-break-after: always; }
+        .print-page:last-child { page-break-after: auto; }
+      }
+    `
+
+    const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Etiquetas</title><style>${printCss}</style></head><body>${pageHtml}</body></html>`
+
     const printWin = window.open('', '_blank')
     if (!printWin) {
       mostrarToast('Permita pop-ups para imprimir etiquetas.', 'error')
@@ -468,11 +634,9 @@ export default function Produtos() {
     printWin.document.write(html)
     printWin.document.close()
     printWin.focus()
-    // Aguardar layout/SVG antes de imprimir
     const imprimirDepois = () => {
       printWin.print()
       printWin.onafterprint = () => printWin.close()
-      // Fallback: fechar após um tempo se onafterprint não disparar
       setTimeout(() => { try { printWin.close() } catch (_) {} }, 3000)
     }
     if (printWin.document.readyState === 'complete') {
@@ -484,20 +648,18 @@ export default function Produtos() {
   }
 
   async function handleConfirmarImpressao() {
-    await new Promise((resolve) => {
-      requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
-    })
-    await new Promise((r) => setTimeout(r, 150))
-    const container = etiquetasContainerRef.current
-    const temEtiquetas = container?.querySelectorAll('.etiqueta-item').length > 0
-    if (!temEtiquetas) {
-      mostrarToast('Nenhuma etiqueta no DOM. Tente novamente.', 'error')
+    const lista = gerarListaEtiquetasParaImpressao()
+    if (lista.length === 0) {
+      mostrarToast('Nenhuma etiqueta para imprimir. Verifique as quantidades.', 'error')
       return
     }
-    const ok = imprimirEtiquetasEmJanelaDedicada(container)
+    const ok = imprimirEtiquetasEmJanelaDedicada(lista)
     if (ok) {
       setModalVisualizarEtiquetasAberto(false)
-      mostrarToast('Diálogo de impressão aberto. Selecione a impressora.', 'success')
+      mostrarToast(
+        `Enviando ${lista.length} etiqueta(s) para impressão. Confira o total no diálogo da impressora.`,
+        'success'
+      )
     }
   }
 
@@ -761,6 +923,67 @@ export default function Produtos() {
               </button>
             </div>
             <div className="modal-etiquetas-busca">
+              <div className="modal-etiquetas-config">
+                <span className="modal-etiquetas-config-title">Configuração do tamanho (mm)</span>
+                <div className="modal-etiquetas-config-grid">
+                  <label>
+                    Largura etiqueta
+                    <input
+                      type="number"
+                      min={5}
+                      value={configEtiquetas.larguraEtiqueta}
+                      onChange={(e) => atualizarConfigEtiquetas({ larguraEtiqueta: Number(e.target.value) || 0 })}
+                    />
+                  </label>
+                  <label>
+                    Altura etiqueta
+                    <input
+                      type="number"
+                      min={5}
+                      value={configEtiquetas.alturaEtiqueta}
+                      onChange={(e) => atualizarConfigEtiquetas({ alturaEtiqueta: Number(e.target.value) || 0 })}
+                    />
+                  </label>
+                  <label>
+                    Largura papel
+                    <input
+                      type="number"
+                      min={10}
+                      value={configEtiquetas.larguraPapel}
+                      onChange={(e) => atualizarConfigEtiquetas({ larguraPapel: Number(e.target.value) || 0 })}
+                    />
+                  </label>
+                  <label>
+                    Altura papel
+                    <input
+                      type="number"
+                      min={10}
+                      value={configEtiquetas.alturaPapel}
+                      onChange={(e) => atualizarConfigEtiquetas({ alturaPapel: Number(e.target.value) || 0 })}
+                    />
+                  </label>
+                  <label>
+                    Colunas
+                    <input
+                      type="number"
+                      min={1}
+                      max={12}
+                      value={configEtiquetas.colunas}
+                      onChange={(e) => atualizarConfigEtiquetas({ colunas: Number(e.target.value) || 1 })}
+                    />
+                  </label>
+                  <label>
+                    Linhas (por folha)
+                    <input
+                      type="number"
+                      min={1}
+                      max={12}
+                      value={configEtiquetas.linhas}
+                      onChange={(e) => atualizarConfigEtiquetas({ linhas: Number(e.target.value) || 1 })}
+                    />
+                  </label>
+                </div>
+              </div>
               <div className="modal-etiquetas-input-wrapper">
                 <input
                   type="text"
@@ -917,7 +1140,13 @@ export default function Produtos() {
                 ×
               </button>
             </div>
-            <div ref={etiquetasContainerRef} className="etiquetas-container">
+            <div
+              ref={etiquetasContainerRef}
+              className="etiquetas-container"
+              style={{
+                gridTemplateColumns: `repeat(${configEtiquetas.colunas || 2}, minmax(0, 1fr))`,
+              }}
+            >
               {gerarListaEtiquetasParaImpressao().map((produto, i) => (
                 <div key={`${produto.id}-${produto.variacao || ''}-${i}`} className="etiqueta-item">
                   <div className="etiqueta-nome">{produto.nome}{produto.variacao ? ` (${produto.variacao})` : ''}</div>

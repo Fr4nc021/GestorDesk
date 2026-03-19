@@ -54,6 +54,8 @@ export default function Dashboard() {
   const [vendasRecentes, setVendasRecentes] = useState([])
   const [resumoMesAtual, setResumoMesAtual] = useState(null)
   const [resumoMesAnterior, setResumoMesAnterior] = useState(null)
+  const [syncStatus, setSyncStatus] = useState('idle') // idle | checking | syncing | ok | error | no-internet
+  const [syncMessage, setSyncMessage] = useState('')
 
   useEffect(() => {
     async function carregar() {
@@ -92,9 +94,33 @@ export default function Dashboard() {
     carregar()
   }, [])
 
+  async function handleSyncClick() {
+    if (!window.electronAPI?.sincronizarAgora) return
+    setSyncStatus('checking')
+    setSyncMessage('Verificando conexão com a internet...')
+    try {
+      const resultado = await window.electronAPI.sincronizarAgora()
+      if (!resultado?.success) {
+        if (resultado?.error === 'Sem conexão com a internet') {
+          setSyncStatus('no-internet')
+          setSyncMessage('Sem conexão com a internet.')
+        } else {
+          setSyncStatus('error')
+          setSyncMessage(resultado?.error || 'Erro ao sincronizar.')
+        }
+        return
+      }
+      setSyncStatus('ok')
+      setSyncMessage('Aplicativo sincronizado!')
+    } catch (err) {
+      setSyncStatus('error')
+      setSyncMessage(err?.message || 'Erro ao sincronizar.')
+    }
+  }
+
   const totalProdutosAtivos = produtos.filter(p => (p.estoque ?? 0) > 0).length
   const totalItensEstoque = produtos.reduce((acc, p) => acc + (p.estoque ?? 0), 0)
-  const vendasTotais = resumoMesAtual?.totalVendas ?? vendasHoje?.totalVendas ?? 0
+  const vendasTotais = vendasHoje?.totalVendas ?? 0
 
   let variacaoPercentual = null
   if (resumoMesAtual && resumoMesAnterior != null && resumoMesAnterior.totalVendas > 0) {
@@ -108,6 +134,21 @@ export default function Dashboard() {
       <section className="dashboard-section">
         <h2 className="dashboard-heading">Ações Rápidas</h2>
         <hr className="dashboard-divider" />
+        <div style={{ marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+          <button
+            type="button"
+            onClick={handleSyncClick}
+            className="btn-sync-manual"
+            disabled={syncStatus === 'checking' || syncStatus === 'syncing'}
+          >
+            {syncStatus === 'checking' || syncStatus === 'syncing' ? 'Sincronizando...' : 'Sincronizar agora'}
+          </button>
+          {syncMessage && (
+            <span className="sync-status-text">
+              {syncMessage}
+            </span>
+          )}
+        </div>
         <div className="quick-actions">
           {quickActions.map(({ to, label, icon }) => (
             <Link key={to} to={to} className="quick-action-card">
@@ -125,7 +166,7 @@ export default function Dashboard() {
 
         <div className="dashboard-cards">
           <div className="dashboard-card">
-            <span className="dashboard-card-label">Vendas Totais</span>
+            <span className="dashboard-card-label">Vendas Totais de Hoje</span>
             <span className="dashboard-card-icon"><IconDolar /></span>
             <span className="dashboard-card-value">{formatBRL(vendasTotais)}</span>
             {variacaoPercentual != null && (

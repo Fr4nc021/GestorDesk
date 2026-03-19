@@ -1,7 +1,75 @@
 const { app, BrowserWindow, ipcMain, dialog } = require('electron')
 const path = require('path')
 const fs = require('fs')
+
+const DEFAULT_ENV_CONTENT = [
+  'SUPABASE_URL=https://jevbemunxafaauyfdikj.supabase.co',
+  'SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpldmJlbXVueGFmYWF1eWZkaWtqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzMyNzY4ODEsImV4cCI6MjA4ODg1Mjg4MX0.Jnf3Dyod6aVHdeb8O48IHgtVeK4oW0f99eLF9nu7vmc',
+  'SUPABASE_AUTH_DOMAIN=gestordesk.local',
+  '',
+].join('\n')
+
+function resolveGestorDeskEnvPath() {
+  const appDataDir = process.env.APPDATA || app.getPath('appData')
+  const configDir = path.join(appDataDir, 'gestordesk')
+  const envPath = path.join(configDir, '.env')
+  return { configDir, envPath }
+}
+
+function ensureEnvInAppData() {
+  try {
+    const { configDir, envPath } = resolveGestorDeskEnvPath()
+    if (!fs.existsSync(configDir)) {
+      fs.mkdirSync(configDir, { recursive: true })
+      console.log(`[ENV] Pasta criada: ${configDir}`)
+    }
+
+    if (!fs.existsSync(envPath)) {
+      fs.writeFileSync(envPath, DEFAULT_ENV_CONTENT, { encoding: 'utf8', flag: 'wx' })
+      console.log(`[ENV] Arquivo .env criado em: ${envPath}`)
+    } else {
+      console.log(`[ENV] Arquivo .env já existe em: ${envPath}`)
+    }
+
+    return envPath
+  } catch (err) {
+    console.error('[ENV] Falha ao garantir .env no AppData:', err?.message || err)
+    return null
+  }
+}
+
+// Em produção, não confie em .env dentro da pasta de instalação.
+// Preferimos carregar do diretório de dados do usuário (Windows: AppData\Roaming\<productName>).
+function loadEnv() {
+  const fallbackPath = path.join(__dirname, '..', '.env')
+  const appDataEnvPath = ensureEnvInAppData()
+  try {
+    if (appDataEnvPath && fs.existsSync(appDataEnvPath)) {
+      require('dotenv').config({ path: appDataEnvPath })
+      return
+    }
+  } catch (_) {
+    // Se app.getPath falhar por qualquer motivo, usamos o fallback.
+  }
+  require('dotenv').config({ path: fallbackPath })
+}
+
+loadEnv()
+
+// Define caminho do banco em ambiente empacotado (instalado)
+if (app.isPackaged) {
+  const userDataDir = app.getPath('userData')
+  const dbPath = path.join(userDataDir, 'database.db')
+  if (!process.env.GESTORDESK_DB_PATH) {
+    process.env.GESTORDESK_DB_PATH = dbPath
+  }
+  if (!process.env.GESTORDESK_USER_DATA_DIR) {
+    process.env.GESTORDESK_USER_DATA_DIR = userDataDir
+  }
+}
+
 const { syncWithSupabase, iniciarSyncTimer } = require('./services/syncService')
+const { setSupabaseAuthFromAppLogin } = require('./services/supabaseClient')
 const {
   criarArtesao,
   listarArtesoes,
@@ -73,7 +141,14 @@ function createWindow() {
     },
   })
 
-  win.loadURL('http://localhost:5173')
+  if (app.isPackaged) {
+    // Em produção, carrega o index.html gerado pelo Vite
+    const indexPath = path.join(__dirname, '..', 'dist', 'index.html')
+    win.loadFile(indexPath)
+  } else {
+    // Em desenvolvimento, usa o servidor do Vite
+    win.loadURL('http://localhost:5173')
+  }
 
   win.once('ready-to-show', () => {
     win.show()
@@ -81,7 +156,16 @@ function createWindow() {
 }
 
 // Usuarios
-ipcMain.handle('validar-login', (_, login, senha) => validarLogin(login, senha))
+ipcMain.handle('validar-login', async (_, login, senha) => {
+  const user = validarLogin(login, senha)
+  if (user) {
+    // Usa o mesmo login/senha do GestorDesk para autenticar no Supabase (via "email virtual").
+    setSupabaseAuthFromAppLogin(login, senha)
+    // Tenta sincronizar imediatamente após login (não bloqueia o login se falhar).
+    syncWithSupabase().catch(() => {})
+  }
+  return user
+})
 ipcMain.handle('criar-usuario', (_, login, senha) => criarUsuario(login, senha))
 ipcMain.handle('login-success-resize', (event) => {
   const win = BrowserWindow.fromWebContents(event.sender)
@@ -181,6 +265,16 @@ ipcMain.handle('obter-relatorio-custo-vendas-periodo', (_, dataInicio, dataFim, 
   obterRelatorioCustoVendasPeriodo(dataInicio, dataFim, artesaoId ?? null))
 ipcMain.handle('obter-totais-pagamentos-por-periodo', (_, dataInicio, dataFim) =>
   obterTotaisPagamentosPorPeriodo(dataInicio, dataFim))
+
+// Sincronização manual disparada pela interface
+ipcMain.handle('sync-agora', async () => {
+  try {
+    const resultado = await syncWithSupabase()
+    return resultado
+  } catch (err) {
+    return { success: false, error: err?.message || String(err) }
+  }
+})
 
 // Sincronização ao fechar: tenta enviar pendentes antes de encerrar
 let syncOnQuitDone = false

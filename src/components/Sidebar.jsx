@@ -1,9 +1,10 @@
-import { NavLink, Link } from 'react-router-dom'
+import { NavLink, Link, useNavigate } from 'react-router-dom'
 import pdvIcon from '../assets/icons/pdv.png'
 import artesaosIcon from '../assets/icons/artesaos.png'
 import estoqueIcon from '../assets/icons/estoque.png'
 import relatoriosIcon from '../assets/icons/relatorios.png'
 import sairIcon from '../assets/icons/sair.png'
+import logo from '../assets/logo.png'
 
 const menuItems = [
   { to: '/app', label: 'Dashboard', icon: relatoriosIcon },
@@ -13,12 +14,26 @@ const menuItems = [
   { to: '/app/estoque', label: 'Estoque', icon: estoqueIcon },
   { to: '/app/caixa', label: 'Caixa', icon: pdvIcon },
   { to: '/app/relatorios', label: 'Relatórios', icon: relatoriosIcon },
+  { to: '/app/configuracoes', label: 'Configurações', icon: relatoriosIcon },
 ]
 
 export default function Sidebar() {
+  const navigate = useNavigate()
+
+  function handleLogout(e) {
+    e.preventDefault()
+    try {
+      sessionStorage.removeItem('usuarioLogado')
+    } catch {
+      // ignore
+    }
+    window.electronAPI?.loginShowResize?.()
+    navigate('/login', { replace: true })
+  }
+
   return (
     <div className="sidebar">
-      <h2>Espaço da Arte</h2>
+      <img src={logo} alt="Espaço da Arte" />
 
       <ul className="sidebar-nav">
         {menuItems.map(({ to, label, icon }) => (
@@ -36,7 +51,7 @@ export default function Sidebar() {
       </ul>
 
       <div className="sidebar-footer">
-        <Link to="/" className="sidebar-item sair">
+        <Link to="/login" className="sidebar-item sair" onClick={handleLogout}>
           <img src={sairIcon} alt="" />
           <span>Sair</span>
         </Link>

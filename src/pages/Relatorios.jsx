@@ -136,6 +136,299 @@ export default function Relatorios() {
     fullData: d.data,
   }))
 
+  async function handleExportarRelatorioGeral() {
+    if (dataInicio > dataFim) {
+      alert('A data início deve ser anterior ou igual à data fim.')
+      return
+    }
+
+    try {
+      const doc = new jsPDF()
+      const margin = 20
+      let y = 20
+
+      doc.setFontSize(18)
+      doc.text('Relatório de Vendas - Visão Geral', margin, y)
+      y += 10
+
+      doc.setFontSize(11)
+      doc.setTextColor(80, 80, 80)
+      const periodoTexto =
+        dataInicio === dataFim
+          ? `Data: ${formatarDataParaExibir(dataInicio)}`
+          : `Período: ${formatarDataParaExibir(dataInicio)} a ${formatarDataParaExibir(dataFim)}`
+      doc.text(periodoTexto, margin, y)
+      y += 15
+
+      doc.setTextColor(0, 0, 0)
+      doc.setFont('helvetica', 'bold')
+      doc.setFontSize(12)
+      doc.text('Resumo do Período', margin, y)
+      y += 10
+
+      doc.setFont('helvetica', 'normal')
+      doc.setFontSize(11)
+      doc.text(`Total em vendas: ${formatBRL(resumo?.totalVendas)}`, margin, y)
+      y += 6
+      doc.text(`Quantidade de vendas: ${resumo?.qtdVendas ?? 0}`, margin, y)
+      y += 6
+      doc.text(`Itens vendidos: ${resumo?.qtdItens ?? 0}`, margin, y)
+      y += 6
+      doc.text(`Ticket médio: ${formatBRL(resumo?.ticketMedio)}`, margin, y)
+      y += 10
+
+      doc.setFont('helvetica', 'bold')
+      doc.text('Vendas de Hoje', margin, y)
+      y += 8
+      doc.setFont('helvetica', 'normal')
+      doc.text(`Total em vendas hoje: ${formatBRL(totalHoje?.totalVendas)}`, margin, y)
+      y += 6
+      doc.text(`Quantidade de vendas hoje: ${totalHoje?.qtdVendas ?? 0}`, margin, y)
+      y += 12
+
+      doc.setFont('helvetica', 'bold')
+      doc.text('Vendas por Dia', margin, y)
+      y += 8
+
+      doc.setFont('helvetica', 'bold')
+      doc.setFontSize(10)
+      doc.text('Data', margin, y)
+      doc.text('Total vendido', 80, y)
+      y += 6
+
+      doc.setFont('helvetica', 'normal')
+      doc.setDrawColor(220, 220, 220)
+      doc.line(margin, y - 2, 190, y - 2)
+      y += 2
+
+      if (dadosGrafico.length === 0) {
+        doc.setFontSize(10)
+        doc.text('Nenhuma venda no período.', margin, y)
+      } else {
+        for (const d of dadosGrafico) {
+          if (y > 270) {
+            doc.addPage()
+            y = 20
+          }
+          doc.setFontSize(9)
+          doc.text(d.data, margin, y)
+          doc.text(formatBRL(d.valor), 80, y)
+          y += 6
+        }
+      }
+
+      const filename =
+        dataInicio === dataFim
+          ? `relatorio-vendas-geral-${dataInicio}.pdf`
+          : `relatorio-vendas-geral-${dataInicio}-a-${dataFim}.pdf`
+      const base64 = doc.output('datauristring').split(',')[1]
+      const result = await window.electronAPI.salvarRelatorioPDF(base64, filename)
+      if (result?.canceled) return
+      if (!result?.ok) alert('Erro ao salvar PDF.')
+    } catch (err) {
+      console.error(err)
+      alert('Erro ao gerar relatório.')
+    }
+  }
+
+  async function handleExportarRelatorioLucro() {
+    if (dataInicio > dataFim) {
+      alert('A data início deve ser anterior ou igual à data fim.')
+      return
+    }
+
+    try {
+      const rel = await window.electronAPI.obterRelatorioCustoVendasPeriodo(dataInicio, dataFim, null)
+      const produtos = rel?.produtos ?? []
+
+      const doc = new jsPDF()
+      const margin = 20
+      let y = 20
+
+      doc.setFontSize(18)
+      doc.text('Relatório de Lucro', margin, y)
+      y += 10
+
+      doc.setFontSize(11)
+      doc.setTextColor(80, 80, 80)
+      const periodoTexto =
+        dataInicio === dataFim
+          ? `Data: ${formatarDataParaExibir(dataInicio)}`
+          : `Período: ${formatarDataParaExibir(dataInicio)} a ${formatarDataParaExibir(dataFim)}`
+      doc.text(periodoTexto, margin, y)
+      y += 15
+
+      doc.setTextColor(0, 0, 0)
+      doc.setFont('helvetica', 'bold')
+      doc.setFontSize(12)
+      doc.text('Resumo do Lucro', margin, y)
+      y += 10
+
+      doc.setFont('helvetica', 'normal')
+      doc.setFontSize(11)
+      doc.text(`Lucro no período: ${formatBRL(lucro?.lucro)}`, margin, y)
+      y += 6
+      doc.text(`Total em vendas: ${formatBRL(lucro?.totalVendas)}`, margin, y)
+      y += 6
+      doc.text(`Total de custo: ${formatBRL(lucro?.totalCusto)}`, margin, y)
+      y += 6
+      doc.text(`Itens vendidos: ${lucro?.qtdItens ?? 0}`, margin, y)
+      y += 12
+
+      doc.setFont('helvetica', 'bold')
+      doc.text('Fórmula utilizada', margin, y)
+      y += 8
+      doc.setFont('helvetica', 'normal')
+      doc.setFontSize(10)
+      doc.text(
+        'Lucro = (Preço venda - Preço custo) × quantidade, somado para todos os itens vendidos no período.',
+        margin,
+        y,
+        { maxWidth: 170 }
+      )
+      y += 18
+
+      doc.setFont('helvetica', 'bold')
+      doc.setFontSize(12)
+      doc.text('Detalhamento por produto', margin, y)
+      y += 10
+
+      if (produtos.length === 0) {
+        doc.setFont('helvetica', 'normal')
+        doc.setFontSize(10)
+        doc.text('Nenhum item vendido no período para detalhar.', margin, y)
+      } else {
+        const col = { produto: 20, custo: 90, venda: 120, lucro: 155 }
+
+        doc.setFont('helvetica', 'bold')
+        doc.setFontSize(9)
+        doc.text('Produto', col.produto, y)
+        doc.text('Custo total', col.custo, y)
+        doc.text('Venda total', col.venda, y)
+        doc.text('Lucro', col.lucro, y)
+        y += 6
+
+        doc.setFont('helvetica', 'normal')
+        doc.setDrawColor(220, 220, 220)
+        doc.line(margin, y - 2, 190, y - 2)
+        y += 2
+
+        for (const p of produtos) {
+          if (y > 270) {
+            doc.addPage()
+            y = 20
+          }
+          const totalCustoProduto = p.total_custo_produto ?? 0
+          const totalVendaProduto = p.total_venda_produto ?? 0
+          const lucroProduto = totalVendaProduto - totalCustoProduto
+
+          doc.setFontSize(9)
+          const nomeProduto = (p.nome || '').substring(0, 40)
+          doc.text(nomeProduto, col.produto, y)
+          doc.text(formatBRL(totalCustoProduto), col.custo, y)
+          doc.text(formatBRL(totalVendaProduto), col.venda, y)
+          doc.text(formatBRL(lucroProduto), col.lucro, y)
+          y += 6
+        }
+      }
+
+      const filename =
+        dataInicio === dataFim
+          ? `relatorio-lucro-${dataInicio}.pdf`
+          : `relatorio-lucro-${dataInicio}-a-${dataFim}.pdf`
+      const base64 = doc.output('datauristring').split(',')[1]
+      const result = await window.electronAPI.salvarRelatorioPDF(base64, filename)
+      if (result?.canceled) return
+      if (!result?.ok) alert('Erro ao salvar PDF.')
+    } catch (err) {
+      console.error(err)
+      alert('Erro ao gerar relatório.')
+    }
+  }
+
+  async function handleExportarRelatorioMaisVendidos() {
+    if (dataInicio > dataFim) {
+      alert('A data início deve ser anterior ou igual à data fim.')
+      return
+    }
+
+    try {
+      const doc = new jsPDF()
+      const margin = 20
+      let y = 20
+
+      const artesaoNome = artesaoId ? artesoes.find(a => a.id === artesaoId)?.nome : 'Todos os artesãos'
+
+      doc.setFontSize(18)
+      doc.text('Relatório de Produtos Mais Vendidos', margin, y)
+      y += 10
+
+      doc.setFontSize(11)
+      doc.setTextColor(80, 80, 80)
+      const periodoTexto =
+        dataInicio === dataFim
+          ? `Data: ${formatarDataParaExibir(dataInicio)}`
+          : `Período: ${formatarDataParaExibir(dataInicio)} a ${formatarDataParaExibir(dataFim)}`
+      doc.text(periodoTexto, margin, y)
+      y += 6
+      doc.text(`Filtro de artesão: ${artesaoNome}`, margin, y)
+      y += 15
+
+      doc.setTextColor(0, 0, 0)
+      doc.setFont('helvetica', 'bold')
+      doc.setFontSize(12)
+      doc.text('Ranking de Produtos', margin, y)
+      y += 8
+
+      if (maisVendidos.length === 0) {
+        doc.setFont('helvetica', 'normal')
+        doc.setFontSize(10)
+        doc.text('Nenhuma venda no período para gerar o ranking.', margin, y)
+      } else {
+        doc.setFont('helvetica', 'bold')
+        doc.setFontSize(9)
+        const colStart = { pos: 20, produto: 30, variacao: 95, artesao: 120, qtd: 170 }
+        doc.text('#', colStart.pos, y)
+        doc.text('Produto', colStart.produto, y)
+        doc.text('Var.', colStart.variacao, y)
+        doc.text('Artesão', colStart.artesao, y)
+        doc.text('Qtd', colStart.qtd, y)
+        y += 6
+
+        doc.setFont('helvetica', 'normal')
+        doc.setDrawColor(220, 220, 220)
+        doc.line(margin, y - 2, 190, y - 2)
+        y += 2
+
+        for (const [idx, item] of maisVendidos.entries()) {
+          if (y > 270) {
+            doc.addPage()
+            y = 20
+          }
+          doc.setFontSize(9)
+          doc.text(String(idx + 1), colStart.pos, y)
+          doc.text((item.nome || '').substring(0, 35), colStart.produto, y)
+          doc.text(item.variacao || '—', colStart.variacao, y)
+          doc.text((item.artesao_nome || '—').substring(0, 12), colStart.artesao, y)
+          doc.text(String(item.total_vendido), colStart.qtd, y)
+          y += 6
+        }
+      }
+
+      const filename =
+        dataInicio === dataFim
+          ? `relatorio-mais-vendidos-${dataInicio}.pdf`
+          : `relatorio-mais-vendidos-${dataInicio}-a-${dataFim}.pdf`
+      const base64 = doc.output('datauristring').split(',')[1]
+      const result = await window.electronAPI.salvarRelatorioPDF(base64, filename)
+      if (result?.canceled) return
+      if (!result?.ok) alert('Erro ao salvar PDF.')
+    } catch (err) {
+      console.error(err)
+      alert('Erro ao gerar relatório.')
+    }
+  }
+
   async function handleExportarRelatorioArtesao() {
     if (dataInicio > dataFim) {
       alert('A data início deve ser anterior ou igual à data fim.')
@@ -311,6 +604,60 @@ export default function Relatorios() {
                   </option>
                 ))}
               </select>
+            </div>
+          )}
+          {aba === TAB_GERAL && (
+            <div className="relatorios-field relatorios-field-export">
+              <label>&nbsp;</label>
+              <button
+                type="button"
+                className="relatorios-btn-exportar"
+                onClick={handleExportarRelatorioGeral}
+                disabled={carregando}
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="7 10 12 15 17 10" />
+                  <line x1="12" y1="15" x2="12" y2="3" />
+                </svg>
+                Exportar PDF
+              </button>
+            </div>
+          )}
+          {aba === TAB_LUCRO && (
+            <div className="relatorios-field relatorios-field-export">
+              <label>&nbsp;</label>
+              <button
+                type="button"
+                className="relatorios-btn-exportar"
+                onClick={handleExportarRelatorioLucro}
+                disabled={carregando}
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="7 10 12 15 17 10" />
+                  <line x1="12" y1="15" x2="12" y2="3" />
+                </svg>
+                Exportar PDF
+              </button>
+            </div>
+          )}
+          {aba === TAB_MAIS_VENDIDOS && (
+            <div className="relatorios-field relatorios-field-export">
+              <label>&nbsp;</label>
+              <button
+                type="button"
+                className="relatorios-btn-exportar"
+                onClick={handleExportarRelatorioMaisVendidos}
+                disabled={carregando}
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="7 10 12 15 17 10" />
+                  <line x1="12" y1="15" x2="12" y2="3" />
+                </svg>
+                Exportar PDF
+              </button>
             </div>
           )}
           {aba === TAB_ARTESAO && (

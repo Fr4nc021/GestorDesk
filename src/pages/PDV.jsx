@@ -21,6 +21,12 @@ export default function PDV() {
   const finalizarRef = useRef(null)
   const [toast, setToast] = useState(null) // ex: { mensagem: '...', tipo: 'sucesso' }
 
+  useEffect(() => {
+    if (!toast) return
+    const timer = setTimeout(() => setToast(null), 3000)
+    return () => clearTimeout(timer)
+  }, [toast])
+
   const FORMAS_PAGAMENTO = [
     { id: 'credito', label: 'Cartão de Crédito', icon: 'credit' },
     { id: 'debito', label: 'Cartão de Débito', icon: 'credit' },
@@ -50,6 +56,14 @@ export default function PDV() {
         alert('Produto não encontrado')
         return
       }
+      const estoqueAtual = produto.estoque ?? 0
+      if (estoqueAtual <= 0) {
+        setToast({ tipo: 'erro', mensagem: 'Produto sem estoque disponível.' })
+        return
+      }
+      if (estoqueAtual === 1) {
+        setToast({ tipo: 'alerta', mensagem: 'Atenção: este é o último item em estoque.' })
+      }
       adicionarItemNaVenda(produto)
       setCodigoInput('')
       inputRef.current?.focus()
@@ -65,9 +79,13 @@ export default function PDV() {
 
   function selecionarProduto(produto) {
     if (!produto) return
-    if ((produto.estoque ?? 0) <= 0) {
-      alert('Produto sem estoque disponível.')
+    const estoqueAtual = produto.estoque ?? 0
+    if (estoqueAtual <= 0) {
+      setToast({ tipo: 'erro', mensagem: 'Produto sem estoque disponível.' })
       return
+    }
+    if (estoqueAtual === 1) {
+      setToast({ tipo: 'alerta', mensagem: 'Atenção: este é o último item em estoque.' })
     }
     adicionarItemNaVenda(produto)
     setShowModalPesquisa(false)
@@ -228,10 +246,14 @@ export default function PDV() {
           <input
             ref={inputRef}
             type="text"
+            inputMode="numeric"
             className="pdv-search-input"
             placeholder="Escaneie ou digite o código de barras"
             value={codigoInput}
-            onChange={(e) => setCodigoInput(e.target.value)}
+            onChange={(e) => {
+              const somenteNumeros = e.target.value.replace(/\D/g, '')
+              setCodigoInput(somenteNumeros)
+            }}
             onKeyDown={(e) => {
               if (e.key === 'Enter') {
                 e.preventDefault()
@@ -498,16 +520,22 @@ export default function PDV() {
               </button>
             </div>
           </div>
+        </div>
+      )}
 
-          {toast && (
-  <div className={`pdv-toast pdv-toast-${toast.tipo}`}>
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="20" height="20">
-      <path d="M20 6L9 17l-5-5" />
-    </svg>
-    {toast.mensagem}
-  </div>
-)}
-
+      {toast && (
+        <div className={`pdv-toast pdv-toast-${toast.tipo}`}>
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            width="20"
+            height="20"
+          >
+            <path d="M20 6L9 17l-5-5" />
+          </svg>
+          {toast.mensagem}
         </div>
       )}
       <ProdutoSearchModal

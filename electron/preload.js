@@ -77,4 +77,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('obter-relatorio-custo-vendas-periodo', dataInicio, dataFim, artesaoId),
   obterTotaisPagamentosPorPeriodo: (dataInicio, dataFim) =>
     ipcRenderer.invoke('obter-totais-pagamentos-por-periodo', dataInicio, dataFim),
+
+  // Sincronização manual
+  sincronizarAgora: () => ipcRenderer.invoke('sync-agora'),
 })

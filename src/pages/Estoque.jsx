@@ -122,6 +122,7 @@ export default function Estoque() {
       setModalEntradaAberto(false)
       setProdutoParaEntrada(null)
       carregarProdutos()
+      setConsultaAtiva('movimentacoes')
       buscarMovimentacoes()
     } catch (err) {
       console.error(err)

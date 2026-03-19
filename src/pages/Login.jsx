@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
+import logo from '../assets/logo.png'
 
 const IconUser = () => (
   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
@@ -28,7 +29,7 @@ export default function Login() {
   // Se já estiver logado, redireciona para o app
   useEffect(() => {
     try {
-      const s = localStorage.getItem('usuarioLogado')
+      const s = sessionStorage.getItem('usuarioLogado')
       if (s) {
         const data = JSON.parse(s)
         if (data && data.id) navigate('/app', { replace: true })
@@ -52,7 +53,7 @@ export default function Login() {
     try {
       const resultado = await window.electronAPI.validarLogin(usuario.trim(), senha)
       if (resultado) {
-        localStorage.setItem('usuarioLogado', JSON.stringify({ id: resultado.id, login: resultado.login }))
+        sessionStorage.setItem('usuarioLogado', JSON.stringify({ id: resultado.id, login: resultado.login }))
         window.electronAPI?.loginSuccessResize?.()
         navigate('/app', { replace: true })
       } else {
@@ -67,7 +68,7 @@ export default function Login() {
     <div className="login-page">
       <div className="login-card">
         <div className="login-card-stripe" />
-        <h1 className="login-title">Espaço da Arte</h1>
+        <img src={logo} alt="Espaço da Arte" className="login-logo" />
         <p className="login-subtitle">Sistema de Gestão</p>
         <form onSubmit={handleSubmit}>
           <label className="login-label">Usuário</label>

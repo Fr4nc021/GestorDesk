@@ -41,7 +41,7 @@
     font-weight: 700;
     color: #212121;
     margin-bottom: 24px;
-    padding: 0 4px;
+    padding:  4px;
   }
 
   .sidebar-nav {
@@ -66,6 +66,10 @@
     margin-bottom: 4px;
     transition: background-color 0.2s;
     cursor: pointer;
+  }
+
+  .sidebar-nav li:first-child .sidebar-item {
+    margin-top: 24px;
   }
 
   .sidebar-item:hover {
@@ -133,6 +137,219 @@
     margin-top: 20px;
     width: 100%;           /* usa toda a largura */
   }
+
+/* Botão de sincronização manual no Dashboard */
+.btn-sync-manual {
+  padding: 10px 18px;
+  background: #212121;
+  color: #fff;
+  border: none;
+  border-radius: 999px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+  transition: background-color 0.2s, box-shadow 0.2s, transform 0.1s, opacity 0.2s;
+}
+
+.btn-sync-manual:hover {
+  background: #333;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.16);
+  transform: translateY(-1px);
+}
+
+.btn-sync-manual:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+}
+
+.sync-status-text {
+  font-size: 0.85rem;
+  color: #555;
+}
+
+.sync-status-text.ok {
+  color: #16a34a;
+}
+
+.sync-status-text.error {
+  color: #dc2626;
+}
+
+.sync-status-text.no-internet {
+  color: #f97316;
+}
+
+/* Configurações */
+.configuracoes {
+  width: 100%;
+}
+
+.configuracoes-header {
+  margin-bottom: 24px;
+}
+
+.configuracoes-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  gap: 20px;
+}
+
+.config-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.config-tab {
+  padding: 9px 14px;
+  border: 1px solid #e0e0e0;
+  border-radius: 999px;
+  background: #fff;
+  color: #555;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.config-tab.active {
+  background: #212121;
+  color: #fff;
+  border-color: #212121;
+}
+
+.config-card {
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
+.config-card h3 {
+  font-size: 18px;
+  font-weight: 700;
+  color: #212121;
+  margin-bottom: 6px;
+}
+
+.config-card-sub {
+  font-size: 14px;
+  color: #666;
+  margin-bottom: 16px;
+}
+
+.sync-action-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.config-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.config-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #333;
+}
+
+.config-form input {
+  padding: 10px 12px;
+  border: 1px solid #e0e0e0;
+  border-radius: 10px;
+  font-size: 14px;
+  outline: none;
+}
+
+.config-form input:focus {
+  border-color: #212121;
+}
+
+.config-submit-btn {
+  margin-top: 4px;
+  padding: 11px 16px;
+  background: #212121;
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.config-submit-btn:hover:not(:disabled) {
+  background: #333;
+}
+
+.config-submit-btn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.config-feedback {
+  font-size: 14px;
+  margin-top: 4px;
+}
+
+.config-feedback.success {
+  color: #16a34a;
+}
+
+.config-feedback.error {
+  color: #dc2626;
+}
+
+.usuarios-local-lista {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.usuario-local-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 12px;
+  border: 1px solid #ededed;
+  border-radius: 10px;
+}
+
+.usuario-local-item p {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: #777;
+}
+
+.config-delete-btn {
+  padding: 8px 12px;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  background: #fee2e2;
+  color: #dc2626;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.config-delete-btn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
 
   .quick-action-card {
     flex: 1;
@@ -304,13 +521,17 @@
     border: none;
     background: transparent;
     padding: 28px 20px 28px 12px;
-    font-size: 16px;
+    font-size: 22px; /* tamanho do código digitado */
     outline: none;
     color: #212121;
+    font-weight: 700;
+    
   }
 
   .pdv-search-input::placeholder {
+    font-size: 16px; /* tamanho do texto "Escaneie ou digite..." */
     color: #888;
+    font-weight: 500;
   }
 
   .pdv-search-btn {
@@ -1777,6 +1998,60 @@
   margin: 0 0 32px 0;
 }
 
+/* Pagamento com múltiplas formas - campos de valor */
+.pdv-modal-multiplos {
+  margin-top: 8px;
+  padding: 16px 18px 14px;
+  border-radius: 12px;
+  border: 1px solid #e3e3e3;
+  background: #fafafa;
+  text-align: left;
+}
+
+.pdv-modal-multiplos > p:first-child {
+  font-size: 14px;
+  color: #555;
+  margin-bottom: 12px;
+}
+
+.pdv-modal-forma-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.pdv-modal-forma-row span {
+  flex: 1;
+  font-size: 14px;
+  color: #333;
+}
+
+.pdv-modal-forma-row input {
+  flex: 0 0 130px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid #d0d0d0;
+  font-size: 14px;
+  background: #fff;
+  text-align: right;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
+}
+
+.pdv-modal-forma-row input:focus {
+  outline: none;
+  border-color: #212121;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.06);
+  background-color: #ffffff;
+}
+
+.pdv-modal-multiplos > p:last-child {
+  margin-top: 4px;
+  font-size: 14px;
+  font-weight: 500;
+  color: #333;
+}
+
 .pdv-modal-actions {
   display: flex;
   gap: 12px;
@@ -2211,10 +2486,10 @@
 .modal-variacoes-valores {
   list-style: none;
   padding: 0;
-  margin: 0 0 0 8px;
+  margin: 0 0 0 6px;
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px;
 }
 
 .modal-variacoes-valor-item {
@@ -2276,6 +2551,43 @@
 
 .modal-etiquetas-busca {
   margin-bottom: 20px;
+}
+
+.modal-etiquetas-config {
+  margin-bottom: 16px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #fafafa;
+  border: 1px solid #e5e7eb;
+}
+
+.modal-etiquetas-config-title {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: #374151;
+  margin-bottom: 8px;
+}
+
+.modal-etiquetas-config-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px 12px;
+}
+
+.modal-etiquetas-config-grid label {
+  display: flex;
+  flex-direction: column;
+  font-size: 12px;
+  color: #4b5563;
+  gap: 3px;
+}
+
+.modal-etiquetas-config-grid input {
+  padding: 4px 8px;
+  border-radius: 8px;
+  border: 1px solid #d1d5db;
+  font-size: 13px;
 }
 
 .modal-etiquetas-input-wrapper {
@@ -2468,25 +2780,32 @@
 }
 
 /* Modal Visualizar Etiquetas */
-.modal-visualizar-etiquetas .modal-content {
+.modal-content.modal-visualizar-etiquetas {
   width: 800px;
   max-width: 95vw;
   max-height: 90vh;
-  overflow-y: auto; 
+  display: flex;
+  flex-direction: column;
 }
 
 .etiqueta-item .etiqueta-preco {
-  font-size: 1rem;
+  font-size: 1.2rem;
   font-weight: 700;
   margin-top: 4px;
 }
 
+/* Visualização em tela das etiquetas (no modal) */
 .etiquetas-container {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
   gap: 16px;
   padding: 24px 0;
   margin-bottom: 20px;
+}
+
+/* Dentro do modal de visualização, permitir rolagem quando tiver muitas etiquetas */
+.modal-content.modal-visualizar-etiquetas .etiquetas-container {
+  flex: 1;
+  overflow-y: auto;
 }
 
 .etiqueta-item {
@@ -2502,6 +2821,8 @@
   font-weight: 600;
   margin-bottom: 8px;
   word-break: break-word;
+  max-height: 2.6em; /* aproximadamente 2 linhas */
+  overflow: hidden;  /* corta o texto extra para não invadir o código de barras/valor */
 }
 
 .etiqueta-item .etiqueta-barcode {
@@ -2537,7 +2858,9 @@
   background: #333;
 }
 
-/* Impressão - mostrar apenas etiquetas (display evita problemas de visibility em impressoras) */
+/* Impressão - mostrar apenas etiquetas (display evita problemas de visibility em impressoras)
+   Aqui consideramos que cada "página" física da impressora é 60x40mm e vamos
+   desenhar 4 etiquetas de 30x20mm (2x2) dentro desse retângulo. */
 @media print {
   /* Esconder tudo por padrão */
   body * {
@@ -2557,7 +2880,7 @@
     display: block !important;
   }
 
-  /* Container de etiquetas visível e em grid; filhos precisam de display para não ficarem com none */
+  /* Container de etiquetas visível; filhos precisam de display para não ficarem com none */
   .etiquetas-container,
   .etiquetas-container * {
     visibility: visible !important;
@@ -2574,13 +2897,16 @@
 
   .etiquetas-container {
     display: grid !important;
-    position: absolute !important;
-    left: 0 !important;
-    top: 0 !important;
-    width: 100% !important;
+    grid-template-columns: repeat(2, 28mm) !important;
+    grid-auto-rows: 18mm !important;
+    position: static !important;
+    width: 60mm !important;
+    height: 40mm !important;
     padding: 0 !important;
-    grid-template-columns: repeat(2, 1fr) !important;
-    gap: 12px !important;
+    margin: 0 !important;
+    justify-content: center !important;
+    align-content: center !important;
+    gap: 0 !important;
     background: #fff !important;
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
@@ -2599,9 +2925,9 @@
     visibility: visible !important;
     break-inside: avoid;
     page-break-inside: avoid;
-    width: 40mm !important;
-    height: 20mm !important;
-    padding: 2px !important;
+    width: 28mm !important;
+    height: 18mm !important;
+    padding: 1mm !important;
     box-sizing: border-box !important;
     background: #fff !important;
     border: 1px solid #000 !important;
@@ -2979,6 +3305,14 @@
   right: 0;
   height: 4px;
   background: linear-gradient(90deg, #e57373 0%, #ef9a9a 100%);
+}
+
+.login-logo {
+  max-width: 260px;
+  width: 100%;
+  height: auto;
+  display: block;
+  margin: 24px auto 8px;
 }
 
 .login-title {
