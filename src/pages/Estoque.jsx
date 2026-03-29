@@ -21,6 +21,11 @@ function formatData(dataStr) {
   return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' })
 }
 
+function nomeProdutoComVariacao(produto) {
+  if (!produto) return ''
+  return `${produto.nome}${produto.variacao ? ` (${produto.variacao})` : ''}`
+}
+
 export default function Estoque() {
   const [produtos, setProdutos] = useState([])
   const [movimentacoes, setMovimentacoes] = useState([])
@@ -33,7 +38,6 @@ export default function Estoque() {
   const [quantidadeEntrada, setQuantidadeEntrada] = useState('')
   const [salvando, setSalvando] = useState(false)
 
-  // Consultas: movimentações ou produtos mais vendidos
   const [consultaAtiva, setConsultaAtiva] = useState('movimentacoes')
   const [dataInicio, setDataInicio] = useState(hojeISO())
   const [dataFim, setDataFim] = useState(hojeISO())
@@ -49,11 +53,11 @@ export default function Estoque() {
     }
   }
 
-  async function buscarMovimentacoes() {
+  async function executarConsultaPeriodo(buscarLista, setLista) {
     setLoadingConsulta(true)
     try {
-      const lista = await window.electronAPI.listarMovimentacoesPorPeriodo(dataInicio, dataFim)
-      setMovimentacoes(lista)
+      const lista = await buscarLista()
+      setLista(lista)
     } catch (err) {
       console.error(err)
     } finally {
@@ -61,16 +65,18 @@ export default function Estoque() {
     }
   }
 
-  async function buscarProdutosMaisVendidos() {
-    setLoadingConsulta(true)
-    try {
-      const lista = await window.electronAPI.listarProdutosMaisVendidosPorPeriodo(dataInicio, dataFim)
-      setProdutosMaisVendidos(lista)
-    } catch (err) {
-      console.error(err)
-    } finally {
-      setLoadingConsulta(false)
-    }
+  function buscarMovimentacoes() {
+    return executarConsultaPeriodo(
+      () => window.electronAPI.listarMovimentacoesPorPeriodo(dataInicio, dataFim),
+      setMovimentacoes
+    )
+  }
+
+  function buscarProdutosMaisVendidos() {
+    return executarConsultaPeriodo(
+      () => window.electronAPI.listarProdutosMaisVendidosPorPeriodo(dataInicio, dataFim),
+      setProdutosMaisVendidos
+    )
   }
 
   function handleBuscarMovimentacoes() {
@@ -85,19 +91,17 @@ export default function Estoque() {
 
   useEffect(() => {
     carregarProdutos()
-  }, [])
-
-  useEffect(() => {
     buscarMovimentacoes()
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const termoBusca = busca.trim().toLowerCase()
+  const buscaTrim = busca.trim()
+  const termoBusca = buscaTrim.toLowerCase()
   const produtosFiltrados = termoBusca
     ? produtos.filter(
-        (p) =>
-          (p.nome && p.nome.toLowerCase().includes(termoBusca)) ||
-          (p.codigo_barras && String(p.codigo_barras).includes(busca.trim()))
+        (produto) =>
+          (produto.nome && produto.nome.toLowerCase().includes(termoBusca)) ||
+          (produto.codigo_barras && String(produto.codigo_barras).includes(buscaTrim))
       )
     : produtos
 
@@ -175,24 +179,24 @@ export default function Estoque() {
                     </td>
                   </tr>
                 ) : (
-                  produtosFiltrados.map((p) => (
-                    <tr key={p.id}>
+                  produtosFiltrados.map((produto) => (
+                    <tr key={produto.id}>
                       <td>
                         <div className="estoque-produto-cell">
-                          <span className="estoque-produto-nome">{p.nome}{p.variacao ? ` (${p.variacao})` : ''}</span>
-                          <span className="estoque-produto-codigo">{p.codigo_barras}</span>
+                          <span className="estoque-produto-nome">{nomeProdutoComVariacao(produto)}</span>
+                          <span className="estoque-produto-codigo">{produto.codigo_barras}</span>
                         </div>
                       </td>
                       <td>
-                        <span className={`estoque-atual ${(p.estoque ?? 0) === 0 ? 'estoque-falta' : ''}`}>
-                          {p.estoque ?? 0}
+                        <span className={`estoque-atual ${(produto.estoque ?? 0) === 0 ? 'estoque-falta' : ''}`}>
+                          {produto.estoque ?? 0}
                         </span>
                       </td>
                       <td>
                         <button
                           type="button"
                           className="estoque-btn-entrada"
-                          onClick={() => abrirModalEntrada(p)}
+                          onClick={() => abrirModalEntrada(produto)}
                         >
                           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                             <path d="M12 19V5M5 12l7-7 7 7" />
@@ -262,29 +266,29 @@ export default function Estoque() {
                 {movimentacoes.length === 0 ? (
                   <p className="estoque-history-empty">Nenhuma movimentação no período</p>
                 ) : (
-                  movimentacoes.map((m) => (
-                    <div key={m.id} className="estoque-history-card">
+                  movimentacoes.map((mov) => (
+                    <div key={mov.id} className="estoque-history-card">
                       <div className="estoque-history-card-info">
-                        <span className="estoque-history-produto">{m.produto_nome}</span>
+                        <span className="estoque-history-produto">{mov.produto_nome}</span>
                         <span className="estoque-history-origem">
-                          {m.origem === 'pdv' ? 'PDV' : 'Admin'}
+                          {mov.origem === 'pdv' ? 'PDV' : 'Admin'}
                         </span>
-                        <span className="estoque-history-hora">{formatData(m.data)} {formatHora(m.data)}</span>
+                        <span className="estoque-history-hora">{formatData(mov.data)} {formatHora(mov.data)}</span>
                       </div>
-                      <span className={`estoque-history-qtd ${m.tipo}`}>
-                        {m.tipo === 'entrada' ? (
+                      <span className={`estoque-history-qtd ${mov.tipo}`}>
+                        {mov.tipo === 'entrada' ? (
                           <>
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                               <path d="M12 19V5M5 12l7-7 7 7" />
                             </svg>
-                            +{m.quantidade} un
+                            +{mov.quantidade} un
                           </>
                         ) : (
                           <>
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                               <path d="M12 5v14M5 12l7 7 7-7" />
                             </svg>
-                            -{m.quantidade} un
+                            -{mov.quantidade} un
                           </>
                         )}
                       </span>
@@ -297,17 +301,17 @@ export default function Estoque() {
                 {produtosMaisVendidos.length === 0 ? (
                   <p className="estoque-history-empty">Nenhuma venda no período</p>
                 ) : (
-                  produtosMaisVendidos.map((p, idx) => (
-                    <div key={p.id} className="estoque-mais-vendidos-card">
-                      <span className="estoque-mais-vendidos-pos">{idx + 1}º</span>
+                  produtosMaisVendidos.map((item, indice) => (
+                    <div key={item.id} className="estoque-mais-vendidos-card">
+                      <span className="estoque-mais-vendidos-pos">{indice + 1}º</span>
                       <div className="estoque-mais-vendidos-info">
-                        <span className="estoque-mais-vendidos-nome">{p.nome}{p.variacao ? ` (${p.variacao})` : ''}</span>
-                        <span className="estoque-mais-vendidos-codigo">{p.codigo_barras}</span>
-                        <span className={`estoque-mais-vendidos-estoque ${(p.estoque ?? 0) === 0 ? 'estoque-falta' : ''}`}>
-                          Estoque: {p.estoque ?? 0}
+                        <span className="estoque-mais-vendidos-nome">{nomeProdutoComVariacao(item)}</span>
+                        <span className="estoque-mais-vendidos-codigo">{item.codigo_barras}</span>
+                        <span className={`estoque-mais-vendidos-estoque ${(item.estoque ?? 0) === 0 ? 'estoque-falta' : ''}`}>
+                          Estoque: {item.estoque ?? 0}
                         </span>
                       </div>
-                      <span className="estoque-mais-vendidos-qtd">{p.total_vendido} vendidos</span>
+                      <span className="estoque-mais-vendidos-qtd">{item.total_vendido} vendidos</span>
                     </div>
                   ))
                 )}
@@ -327,7 +331,7 @@ export default function Estoque() {
               </button>
             </div>
             <form onSubmit={handleConfirmarEntrada}>
-              <p className="estoque-modal-produto">{produtoParaEntrada.nome}{produtoParaEntrada.variacao ? ` (${produtoParaEntrada.variacao})` : ''}</p>
+              <p className="estoque-modal-produto">{nomeProdutoComVariacao(produtoParaEntrada)}</p>
               <div className="modal-field">
                 <label htmlFor="quantidade">Quantidade</label>
                 <input

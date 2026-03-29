@@ -3,10 +3,10 @@ import Sidebar from './components/Sidebar'
 
 function getUsuarioLogado() {
   try {
-    const s = sessionStorage.getItem('usuarioLogado')
-    if (!s) return null
-    const data = JSON.parse(s)
-    return data && data.id ? data : null
+    const storedJson = sessionStorage.getItem('usuarioLogado')
+    if (!storedJson) return null
+    const parsed = JSON.parse(storedJson)
+    return parsed?.id ? parsed : null
   } catch {
     return null
   }

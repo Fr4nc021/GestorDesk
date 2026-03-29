@@ -1,6 +1,5 @@
-import loupeIcon from '../assets/complements/loupe.png'
 import { useState, useEffect } from 'react'
-
+import loupeIcon from '../assets/complements/loupe.png'
 
 const REGIOES_TELEFONE = [
   { id: 'BR', nome: 'Brasil', codigo: '+55' },
@@ -13,6 +12,9 @@ const REGIOES_TELEFONE = [
 
 const REGIAO_PADRAO = REGIOES_TELEFONE[0]
 
+const REGIOES_TELEFONE_POR_CODIGO_DECRESCENTE = [...REGIOES_TELEFONE].sort(
+  (a, b) => b.codigo.replace(/\D/g, '').length - a.codigo.replace(/\D/g, '').length
+)
 
 export default function Artesaos() {
   const [artesoes, setArtesoes] = useState([])
@@ -78,10 +80,7 @@ export default function Artesaos() {
     const digitos = String(telefoneCompleto || '').replace(/\D/g, '')
     if (!digitos) return { regiao: REGIAO_PADRAO, telefoneLocal: '' }
 
-    const regioesOrdenadas = [...REGIOES_TELEFONE]
-      .sort((a, b) => b.codigo.replace(/\D/g, '').length - a.codigo.replace(/\D/g, '').length)
-
-    for (const regiao of regioesOrdenadas) {
+    for (const regiao of REGIOES_TELEFONE_POR_CODIGO_DECRESCENTE) {
       const codigoDigitos = regiao.codigo.replace(/\D/g, '')
       if (digitos.length > 11 && digitos.startsWith(codigoDigitos)) {
         const telefoneLocal = formatarTelefoneLocal(digitos.slice(codigoDigitos.length))
@@ -132,10 +131,9 @@ export default function Artesaos() {
     }
   }
 
-  const artesoesFiltrados = termoBusca.trim()
-    ? artesoes.filter((a) =>
-        a.nome?.toLowerCase().includes(termoBusca.trim().toLowerCase())
-      )
+  const buscaNome = termoBusca.trim().toLowerCase()
+  const artesoesFiltrados = buscaNome
+    ? artesoes.filter((artesao) => artesao.nome?.toLowerCase().includes(buscaNome))
     : artesoes
 
   async function handleExcluirArtesao() {
@@ -177,9 +175,9 @@ export default function Artesaos() {
           </div>
         </div>
         <div className="artesaos-actions">
-        <button type="button" className="artesaos-btn-primary" onClick={abrirModal}>
-              <span>+</span> Novo Artesão
-        </button>
+          <button type="button" className="artesaos-btn-primary" onClick={abrirModal}>
+            <span>+</span> Novo Artesão
+          </button>
         </div>
       </div>
 
@@ -202,23 +200,23 @@ export default function Artesaos() {
             ) : artesoesFiltrados.length === 0 ? (
               <tr>
                 <td colSpan={5}>
-                  {termoBusca.trim()
+                  {buscaNome
                     ? 'Nenhum artesão encontrado com esse nome.'
                     : 'Nenhum artesão cadastrado.'}
                 </td>
               </tr>
             ) : (
-              artesoesFiltrados.map((a) => (
-                <tr key={a.id}>
-                  <td>{a.nome}</td>
+              artesoesFiltrados.map((artesao) => (
+                <tr key={artesao.id}>
+                  <td>{artesao.nome}</td>
                   <td>
                     <span className="artesaos-contato">
-                      {a.telefone_whats ? (
+                      {artesao.telefone_whats ? (
                         <>
                           <svg className="artesaos-contato-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                             <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
                           </svg>
-                          {a.telefone_whats}
+                          {artesao.telefone_whats}
                         </>
                       ) : (
                         '-'
@@ -228,14 +226,14 @@ export default function Artesaos() {
                   <td>
                     <span className="artesaos-status-badge">Ativo</span>
                   </td>
-                  <td>{a.quantidade_produtos ?? 0}</td>
+                  <td>{artesao.quantidade_produtos ?? 0}</td>
                   <td>
                     <div className="artesaos-acoes">
                       <button
                         type="button"
                         className="artesaos-btn-edit"
                         title="Editar"
-                        onClick={() => abrirModalEdicao(a)}
+                        onClick={() => abrirModalEdicao(artesao)}
                       >
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                           <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
@@ -246,7 +244,7 @@ export default function Artesaos() {
                         type="button"
                         className="artesaos-btn-excluir"
                         title="Excluir"
-                        onClick={() => abrirModalExcluir(a)}
+                        onClick={() => abrirModalExcluir(artesao)}
                       >
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                           <polyline points="3 6 5 6 21 6" />
@@ -293,7 +291,7 @@ export default function Artesaos() {
                   onClick={() => setModalRegiaoAberto(true)}
                   style={{ marginBottom: '8px', width: '100%' }}
                 >
-                  Regiao: {regiaoTelefone.nome} ({regiaoTelefone.codigo})
+                  Região: {regiaoTelefone.nome} ({regiaoTelefone.codigo})
                 </button>
                 <input
                   id="telefone"
@@ -315,23 +313,23 @@ export default function Artesaos() {
         <div className="modal-overlay" onClick={() => setModalRegiaoAberto(false)}>
           <div className="modal-content modal-confirm" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h3>Selecionar regiao</h3>
+              <h3>Selecionar região</h3>
               <button type="button" className="modal-close" onClick={() => setModalRegiaoAberto(false)} aria-label="Fechar">
                 ×
               </button>
             </div>
             <div className="modal-confirm-acoes" style={{ display: 'grid', gap: '8px' }}>
-              {REGIOES_TELEFONE.map((regiao) => (
+              {REGIOES_TELEFONE.map((opcao) => (
                 <button
-                  key={regiao.id}
+                  key={opcao.id}
                   type="button"
-                  className={regiao.id === regiaoTelefone.id ? 'modal-submit' : 'modal-btn-cancelar'}
+                  className={opcao.id === regiaoTelefone.id ? 'modal-submit' : 'modal-btn-cancelar'}
                   onClick={() => {
-                    setRegiaoTelefone(regiao)
+                    setRegiaoTelefone(opcao)
                     setModalRegiaoAberto(false)
                   }}
                 >
-                  {regiao.nome} ({regiao.codigo})
+                  {opcao.nome} ({opcao.codigo})
                 </button>
               ))}
             </div>

@@ -1,18 +1,20 @@
 import { useEffect, useState } from 'react'
 
+const SYNC_STATUS_CSS = {
+  ok: 'ok',
+  error: 'error',
+  'no-internet': 'no-internet',
+}
+
 export default function Configuracoes() {
-  const [abaAtiva, setAbaAtiva] = useState('usuarios') // usuarios | sync
+  const [abaAtiva, setAbaAtiva] = useState('usuarios')
   const [usuariosLocais, setUsuariosLocais] = useState([])
   const [carregandoUsuarios, setCarregandoUsuarios] = useState(true)
   const [erroUsuarios, setErroUsuarios] = useState('')
   const [excluindoUsuarioId, setExcluindoUsuarioId] = useState(null)
 
-  const [syncStatus, setSyncStatus] = useState('idle') // idle | checking | ok | error | no-internet
+  const [syncStatus, setSyncStatus] = useState('idle')
   const [syncMessage, setSyncMessage] = useState('')
-
-  const [limpandoDados, setLimpandoDados] = useState(false)
-  const [limpezaStatus, setLimpezaStatus] = useState('idle') // idle | ok | error
-  const [limpezaMensagem, setLimpezaMensagem] = useState('')
 
   useEffect(() => {
     carregarUsuarios()
@@ -77,49 +79,7 @@ export default function Configuracoes() {
     }
   }
 
-  async function handleLimparDadosSistema() {
-    if (!window.electronAPI?.limparDadosSistema) {
-      setLimpezaStatus('error')
-      setLimpezaMensagem('Função de limpeza indisponível nesta versão.')
-      return
-    }
-
-    const confirmou = window.confirm(
-      'ATENCAO: esta ação remove dados operacionais do sistema. Deseja continuar?',
-    )
-    if (!confirmou) return
-
-    const confirmouFinal = window.confirm('Confirmação final: limpar dados agora?')
-    if (!confirmouFinal) return
-
-    setLimpandoDados(true)
-    setLimpezaStatus('idle')
-    setLimpezaMensagem('')
-    try {
-      const resultado = await window.electronAPI.limparDadosSistema()
-      if (!resultado?.success) {
-        setLimpezaStatus('error')
-        setLimpezaMensagem(resultado?.error || 'Falha ao limpar dados.')
-        return
-      }
-      setLimpezaStatus('ok')
-      setLimpezaMensagem('Dados limpos com sucesso.')
-    } catch (err) {
-      setLimpezaStatus('error')
-      setLimpezaMensagem(err?.message || 'Erro ao limpar dados.')
-    } finally {
-      setLimpandoDados(false)
-    }
-  }
-
-  const syncStatusClass =
-    syncStatus === 'ok'
-      ? 'ok'
-      : syncStatus === 'error'
-      ? 'error'
-      : syncStatus === 'no-internet'
-      ? 'no-internet'
-      : ''
+  const syncStatusClass = SYNC_STATUS_CSS[syncStatus] ?? ''
 
   return (
     <div className="configuracoes">
@@ -148,19 +108,19 @@ export default function Configuracoes() {
               {usuariosLocais.length === 0 ? (
                 <p className="config-card-sub">Nenhum usuário encontrado.</p>
               ) : (
-                usuariosLocais.map((u) => (
-                  <div key={u.id} className="usuario-local-item">
+                usuariosLocais.map((usuario) => (
+                  <div key={usuario.id} className="usuario-local-item">
                     <div>
-                      <strong>{u.login}</strong>
-                      <p>ID: {u.id}</p>
+                      <strong>{usuario.login}</strong>
+                      <p>ID: {usuario.id}</p>
                     </div>
                     <button
                       type="button"
                       className="config-delete-btn"
-                      onClick={() => handleExcluirUsuario(u)}
-                      disabled={excluindoUsuarioId === u.id || u.login === 'admin'}
+                      onClick={() => handleExcluirUsuario(usuario)}
+                      disabled={excluindoUsuarioId === usuario.id || usuario.login === 'admin'}
                     >
-                      {excluindoUsuarioId === u.id ? 'Excluindo...' : u.login === 'admin' ? 'Protegido' : 'Excluir'}
+                      {excluindoUsuarioId === usuario.id ? 'Excluindo...' : usuario.login === 'admin' ? 'Protegido' : 'Excluir'}
                     </button>
                   </div>
                 ))

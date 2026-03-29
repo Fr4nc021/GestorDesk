@@ -26,17 +26,13 @@ export default function Login() {
     window.electronAPI?.loginShowResize?.()
   }, [])
 
-  // Se já estiver logado, redireciona para o app
   useEffect(() => {
+    const sessaoJson = sessionStorage.getItem('usuarioLogado')
+    if (!sessaoJson) return
     try {
-      const s = sessionStorage.getItem('usuarioLogado')
-      if (s) {
-        const data = JSON.parse(s)
-        if (data && data.id) navigate('/app', { replace: true })
-      }
-    } catch {
-      // ignora
-    }
+      const sessao = JSON.parse(sessaoJson)
+      if (sessao?.id) navigate('/app', { replace: true })
+    } catch {}
   }, [navigate])
 
   async function handleSubmit(e) {
@@ -51,9 +47,9 @@ export default function Login() {
       return
     }
     try {
-      const resultado = await window.electronAPI.validarLogin(usuario.trim(), senha)
-      if (resultado) {
-        sessionStorage.setItem('usuarioLogado', JSON.stringify({ id: resultado.id, login: resultado.login }))
+      const usuarioValidado = await window.electronAPI.validarLogin(usuario.trim(), senha)
+      if (usuarioValidado) {
+        sessionStorage.setItem('usuarioLogado', JSON.stringify({ id: usuarioValidado.id, login: usuarioValidado.login }))
         window.electronAPI?.loginSuccessResize?.()
         navigate('/app', { replace: true })
       } else {

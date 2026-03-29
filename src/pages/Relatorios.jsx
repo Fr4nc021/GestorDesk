@@ -42,6 +42,13 @@ function formatarDataParaExibir(dateStr) {
   })
 }
 
+function textoPeriodoRelatorioPdf(dataInicioStr, dataFimStr) {
+  if (dataInicioStr === dataFimStr) {
+    return `Data: ${formatarDataParaExibir(dataInicioStr)}`
+  }
+  return `Período: ${formatarDataParaExibir(dataInicioStr)} a ${formatarDataParaExibir(dataFimStr)}`
+}
+
 function formatDataHoraVendaLista(dataStr) {
   if (!dataStr) return '—'
   const d = new Date(dataStr)
@@ -56,7 +63,6 @@ function formatDataHoraVendaLista(dataStr) {
   })
 }
 
-/** Nome para relatório: inclui variação quando existir (mesma linha = produto distinto). */
 function nomeProdutoRelatorio(p) {
   const n = (p?.nome || '').trim()
   const v = (p?.variacao || '').trim()
@@ -69,7 +75,14 @@ const TAB_LUCRO = 'lucro'
 const TAB_MAIS_VENDIDOS = 'mais_vendidos'
 const TAB_PRODUTOS = 'produtos'
 
-/** Snapshot ao abrir venda no PDV a partir desta página; restaurado ao voltar em /app/relatorios */
+const PREVIEW_TITULOS_PDF = {
+  geral: 'Relatório de Vendas — Visão geral',
+  lucro: 'Relatório de Lucro',
+  mais_vendidos: 'Produtos mais vendidos',
+  artesao: 'Vendas e custos por artesão',
+  produtos: 'Produtos — estoque e custo',
+}
+
 const SESSION_RELATORIOS_RESTORE = 'gestordesk_relatorios_restore'
 
 function obterScrollLayoutMain() {
@@ -94,6 +107,34 @@ function CardMetrica({ label, value, subtext, icon }) {
         <span className="rel-card-label">{label}</span>
         {subtext && <span className="rel-card-sub">{subtext}</span>}
       </div>
+    </div>
+  )
+}
+
+function GraficoVendasPorDiaRelatorio({ dadosGrafico, gradientId }) {
+  return (
+    <div className="relatorios-chart">
+      <ResponsiveContainer width="100%" height={280}>
+        <AreaChart data={dadosGrafico} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+          <defs>
+            <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#212121" stopOpacity={0.3} />
+              <stop offset="100%" stopColor="#212121" stopOpacity={0} />
+            </linearGradient>
+          </defs>
+          <CartesianGrid strokeDasharray="3 3" stroke="#eee" />
+          <XAxis dataKey="data" tick={{ fontSize: 12 }} />
+          <YAxis tickFormatter={v => `R$${v}`} tick={{ fontSize: 12 }} />
+          <Tooltip formatter={val => [formatBRL(val), 'Vendas']} labelFormatter={l => `Data: ${l}`} />
+          <Area
+            type="monotone"
+            dataKey="valor"
+            stroke="#212121"
+            strokeWidth={2}
+            fill={`url(#${gradientId})`}
+          />
+        </AreaChart>
+      </ResponsiveContainer>
     </div>
   )
 }
@@ -126,12 +167,16 @@ export default function Relatorios() {
   const [vendasArtesaoLista, setVendasArtesaoLista] = useState([])
   const [vendasArtesaoCarregando, setVendasArtesaoCarregando] = useState(false)
 
-  const carregarListaVendasModalArtesao = useCallback(async (di, df, aid) => {
+  const carregarListaVendasModalArtesao = useCallback(async (inicioPeriodo, fimPeriodo, idArtesao) => {
     if (!window.electronAPI?.listarVendasPorPeriodoEArtesao) return
     setVendasArtesaoCarregando(true)
     setVendasArtesaoLista([])
     try {
-      const lista = await window.electronAPI.listarVendasPorPeriodoEArtesao(di, df, aid)
+      const lista = await window.electronAPI.listarVendasPorPeriodoEArtesao(
+        inicioPeriodo,
+        fimPeriodo,
+        idArtesao
+      )
       setVendasArtesaoLista(lista || [])
     } catch (err) {
       console.error(err)
@@ -156,14 +201,14 @@ export default function Relatorios() {
       try {
         sessionStorage.removeItem(SESSION_RELATORIOS_RESTORE)
       } catch {
-        /* ignore */
+        void 0
       }
       return
     }
     try {
       sessionStorage.removeItem(SESSION_RELATORIOS_RESTORE)
     } catch {
-      /* ignore */
+      void 0
     }
     if (data.aba) setAba(data.aba)
     if (data.dataInicio) setDataInicio(data.dataInicio)
@@ -205,7 +250,7 @@ export default function Relatorios() {
     try {
       sessionStorage.setItem(SESSION_RELATORIOS_RESTORE, JSON.stringify(payload))
     } catch {
-      /* ignore */
+      void 0
     }
     navigate('/app/pdv', {
       state: { editarVendaId: vendaId, relatoriosRestore: payload },
@@ -226,57 +271,67 @@ export default function Relatorios() {
 
   useEffect(() => {
     if (aba !== TAB_PRODUTOS && dataInicio > dataFim) return
-    setCarregando(true)
-    const api = window.electronAPI
-    if (!api) {
-      setCarregando(false)
-      return
-    }
 
-    const promessas = []
-
-    if (aba === TAB_GERAL || aba === TAB_ARTESAO) {
-      promessas.push(
-        api.obterResumoVendasPeriodo(dataInicio, dataFim, aba === TAB_ARTESAO ? artesaoId : null).then(setResumo),
-        api.obterVendasPorDia(dataInicio, dataFim, aba === TAB_ARTESAO ? artesaoId : null).then(r => {
-          setVendasPorDia(r || [])
-        }),
-        api.obterResumoVendasPeriodo(hoje, hoje, aba === TAB_ARTESAO ? artesaoId : null).then(setTotalHoje)
-      )
-      if (aba === TAB_ARTESAO && artesaoId) {
-        promessas.push(api.contarProdutosPorArtesao(artesaoId).then(setProdutosCadastrados))
-      } else {
-        setProdutosCadastrados(0)
+    async function carregarDadosDaAba() {
+      setCarregando(true)
+      const api = window.electronAPI
+      if (!api) {
+        setCarregando(false)
+        return
       }
-    } else if (aba === TAB_LUCRO) {
-      promessas.push(api.obterLucroPeriodo(dataInicio, dataFim).then(setLucro))
-    } else if (aba === TAB_MAIS_VENDIDOS) {
-      promessas.push(
-        api.listarProdutosMaisVendidosPorPeriodoEArtesao(dataInicio, dataFim, artesaoId || null).then(r => {
-          setMaisVendidos(r || [])
-        })
-      )
-    } else if (aba === TAB_PRODUTOS) {
-      promessas.push(
-        api.listarProdutos().then(lista => {
-          const produtos = lista || []
-          const filtrados = artesaoId
-            ? produtos.filter(p => p.artesao_id === artesaoId)
-            : produtos
-          setProdutosRelatorio(filtrados)
-        })
-      )
+
+      const promessasCarregamento = []
+
+      if (aba === TAB_GERAL || aba === TAB_ARTESAO) {
+        const filtroArtesao = aba === TAB_ARTESAO ? artesaoId : null
+        promessasCarregamento.push(
+          api.obterResumoVendasPeriodo(dataInicio, dataFim, filtroArtesao).then(setResumo),
+          api.obterVendasPorDia(dataInicio, dataFim, filtroArtesao).then(vendasDia => {
+            setVendasPorDia(vendasDia || [])
+          }),
+          api.obterResumoVendasPeriodo(hoje, hoje, filtroArtesao).then(setTotalHoje)
+        )
+        if (aba === TAB_ARTESAO && artesaoId) {
+          promessasCarregamento.push(api.contarProdutosPorArtesao(artesaoId).then(setProdutosCadastrados))
+        } else {
+          setProdutosCadastrados(0)
+        }
+      } else if (aba === TAB_LUCRO) {
+        promessasCarregamento.push(api.obterLucroPeriodo(dataInicio, dataFim).then(setLucro))
+      } else if (aba === TAB_MAIS_VENDIDOS) {
+        promessasCarregamento.push(
+          api.listarProdutosMaisVendidosPorPeriodoEArtesao(dataInicio, dataFim, artesaoId || null).then(
+            ranking => {
+              setMaisVendidos(ranking || [])
+            }
+          )
+        )
+      } else if (aba === TAB_PRODUTOS) {
+        promessasCarregamento.push(
+          api.listarProdutos().then(lista => {
+            const todos = lista || []
+            setProdutosRelatorio(
+              artesaoId ? todos.filter(p => p.artesao_id === artesaoId) : todos
+            )
+          })
+        )
+      }
+
+      try {
+        await Promise.all(promessasCarregamento)
+      } catch (err) {
+        console.error(err)
+      } finally {
+        setCarregando(false)
+      }
     }
 
-    Promise.all(promessas)
-      .catch(err => console.error(err))
-      .finally(() => setCarregando(false))
+    void carregarDadosDaAba()
   }, [aba, dataInicio, dataFim, artesaoId, hoje])
 
   const dadosGrafico = vendasPorDia.map(d => ({
     data: formatarDataCurta(d.data),
     valor: d.valor_total ?? 0,
-    fullData: d.data,
   }))
 
   function buildRelatorioGeralDoc() {
@@ -290,11 +345,7 @@ export default function Relatorios() {
 
     doc.setFontSize(11)
     doc.setTextColor(80, 80, 80)
-    const periodoTexto =
-      dataInicio === dataFim
-        ? `Data: ${formatarDataParaExibir(dataInicio)}`
-        : `Período: ${formatarDataParaExibir(dataInicio)} a ${formatarDataParaExibir(dataFim)}`
-    doc.text(periodoTexto, margin, y)
+    doc.text(textoPeriodoRelatorioPdf(dataInicio, dataFim), margin, y)
     y += 15
 
     doc.setTextColor(0, 0, 0)
@@ -375,11 +426,7 @@ export default function Relatorios() {
 
     doc.setFontSize(11)
     doc.setTextColor(80, 80, 80)
-    const periodoTexto =
-      dataInicio === dataFim
-        ? `Data: ${formatarDataParaExibir(dataInicio)}`
-        : `Período: ${formatarDataParaExibir(dataInicio)} a ${formatarDataParaExibir(dataFim)}`
-    doc.text(periodoTexto, margin, y)
+    doc.text(textoPeriodoRelatorioPdf(dataInicio, dataFim), margin, y)
     y += 15
 
     doc.setTextColor(0, 0, 0)
@@ -476,11 +523,7 @@ export default function Relatorios() {
 
     doc.setFontSize(11)
     doc.setTextColor(80, 80, 80)
-    const periodoTexto =
-      dataInicio === dataFim
-        ? `Data: ${formatarDataParaExibir(dataInicio)}`
-        : `Período: ${formatarDataParaExibir(dataInicio)} a ${formatarDataParaExibir(dataFim)}`
-    doc.text(periodoTexto, margin, y)
+    doc.text(textoPeriodoRelatorioPdf(dataInicio, dataFim), margin, y)
     y += 6
     doc.text(`Filtro de artesão: ${artesaoNome}`, margin, y)
     y += 15
@@ -552,11 +595,7 @@ export default function Relatorios() {
 
     doc.setFontSize(11)
     doc.setTextColor(80, 80, 80)
-    const periodoTexto =
-      dataInicio === dataFim
-        ? `Data: ${formatarDataParaExibir(dataInicio)}`
-        : `Período: ${formatarDataParaExibir(dataInicio)} a ${formatarDataParaExibir(dataFim)}`
-    doc.text(periodoTexto, margin, y)
+    doc.text(textoPeriodoRelatorioPdf(dataInicio, dataFim), margin, y)
     y += 6
     doc.text(`Filtro: ${artesaoNome}`, margin, y)
     y += 15
@@ -709,47 +748,33 @@ export default function Relatorios() {
     try {
       let doc
       let filename
-      let titulo
 
       switch (tipo) {
         case 'geral': {
-          const r = buildRelatorioGeralDoc()
-          doc = r.doc
-          filename = r.filename
-          titulo = 'Relatório de Vendas — Visão geral'
+          ;({ doc, filename } = buildRelatorioGeralDoc())
           break
         }
         case 'lucro': {
-          const r = await buildRelatorioLucroDoc()
-          doc = r.doc
-          filename = r.filename
-          titulo = 'Relatório de Lucro'
+          ;({ doc, filename } = await buildRelatorioLucroDoc())
           break
         }
         case 'mais_vendidos': {
-          const r = buildRelatorioMaisVendidosDoc()
-          doc = r.doc
-          filename = r.filename
-          titulo = 'Produtos mais vendidos'
+          ;({ doc, filename } = buildRelatorioMaisVendidosDoc())
           break
         }
         case 'artesao': {
-          const r = await buildRelatorioArtesaoDoc()
-          doc = r.doc
-          filename = r.filename
-          titulo = 'Vendas e custos por artesão'
+          ;({ doc, filename } = await buildRelatorioArtesaoDoc())
           break
         }
         case 'produtos': {
-          const r = buildRelatorioProdutosDoc()
-          doc = r.doc
-          filename = r.filename
-          titulo = 'Produtos — estoque e custo'
+          ;({ doc, filename } = buildRelatorioProdutosDoc())
           break
         }
         default:
           return
       }
+
+      const titulo = PREVIEW_TITULOS_PDF[tipo]
 
       const base64 = doc.output('datauristring').split(',')[1]
       const blob = doc.output('blob')
@@ -1025,32 +1050,7 @@ export default function Relatorios() {
                 <span>O gráfico será exibido quando houver vendas</span>
               </div>
             ) : (
-              <div className="relatorios-chart">
-                <ResponsiveContainer width="100%" height={280}>
-                  <AreaChart data={dadosGrafico} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-                    <defs>
-                      <linearGradient id="relGradGeral" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="#212121" stopOpacity={0.3} />
-                        <stop offset="100%" stopColor="#212121" stopOpacity={0} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#eee" />
-                    <XAxis dataKey="data" tick={{ fontSize: 12 }} />
-                    <YAxis tickFormatter={v => `R$${v}`} tick={{ fontSize: 12 }} />
-                    <Tooltip
-                      formatter={(val) => [formatBRL(val), 'Vendas']}
-                      labelFormatter={l => `Data: ${l}`}
-                    />
-                    <Area
-                      type="monotone"
-                      dataKey="valor"
-                      stroke="#212121"
-                      strokeWidth={2}
-                      fill="url(#relGradGeral)"
-                    />
-                  </AreaChart>
-                </ResponsiveContainer>
-              </div>
+              <GraficoVendasPorDiaRelatorio dadosGrafico={dadosGrafico} gradientId="relGradGeral" />
             )}
           </section>
         </>
@@ -1109,32 +1109,7 @@ export default function Relatorios() {
                 <span>O gráfico será exibido quando houver vendas</span>
               </div>
             ) : (
-              <div className="relatorios-chart">
-                <ResponsiveContainer width="100%" height={280}>
-                  <AreaChart data={dadosGrafico} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-                    <defs>
-                      <linearGradient id="relGradArtesao" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="#212121" stopOpacity={0.3} />
-                        <stop offset="100%" stopColor="#212121" stopOpacity={0} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#eee" />
-                    <XAxis dataKey="data" tick={{ fontSize: 12 }} />
-                    <YAxis tickFormatter={v => `R$${v}`} tick={{ fontSize: 12 }} />
-                    <Tooltip
-                      formatter={(val) => [formatBRL(val), 'Vendas']}
-                      labelFormatter={l => `Data: ${l}`}
-                    />
-                    <Area
-                      type="monotone"
-                      dataKey="valor"
-                      stroke="#212121"
-                      strokeWidth={2}
-                      fill="url(#relGradArtesao)"
-                    />
-                  </AreaChart>
-                </ResponsiveContainer>
-              </div>
+              <GraficoVendasPorDiaRelatorio dadosGrafico={dadosGrafico} gradientId="relGradArtesao" />
             )}
           </section>
         </>
@@ -1285,9 +1260,7 @@ export default function Relatorios() {
               </button>
             </div>
             <p className="relatorio-vendas-artesao-desc">
-              {dataInicio === dataFim
-                ? `Data: ${formatarDataParaExibir(dataInicio)}`
-                : `Período: ${formatarDataParaExibir(dataInicio)} a ${formatarDataParaExibir(dataFim)}`}
+              {textoPeriodoRelatorioPdf(dataInicio, dataFim)}
               {' · '}
               Filtro:{' '}
               {artesaoId ? artesoes.find(a => a.id === artesaoId)?.nome || 'Artesão' : 'Todos os artesãos'}

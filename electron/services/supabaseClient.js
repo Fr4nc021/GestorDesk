@@ -59,8 +59,8 @@ async function getAuthedSupabaseClient() {
     return { client: null, error: error?.message || 'Falha ao autenticar no Supabase.' }
   }
 
-  if (error || !data?.session) {
-    return { client: null, error: error?.message || 'Falha ao autenticar no Supabase.' }
+  if (!data?.session) {
+    return { client: null, error: 'Falha ao autenticar no Supabase.' }
   }
 
   cached = {

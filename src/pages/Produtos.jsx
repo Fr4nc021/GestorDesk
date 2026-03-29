@@ -1,13 +1,13 @@
 import loupeIcon from '../assets/complements/loupe.png'
 import filterIcon from '../assets/complements/filter.png'
-import { useState, useEffect, useRef, useMemo } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import Barcode from 'react-barcode'
 import JsBarcode from 'jsbarcode'
 
 export default function Produtos() {
   const [produtos, setProdutos] = useState([])
   const [artesoes, setArtesoes] = useState([])
-  const [valoresVariacao, setValoresVariacao] = useState(['P', 'M', 'G', 'GG']) // fallback inicial
+  const [valoresVariacao, setValoresVariacao] = useState(['P', 'M', 'G', 'GG'])
   const [loading, setLoading] = useState(true)
   const [busca, setBusca] = useState('')
 
@@ -26,7 +26,6 @@ export default function Produtos() {
   const [salvando, setSalvando] = useState(false)
   const [toast, setToast] = useState({ visible: false, message: '', type: 'success' })
 
-  // Variações (gestão de tipos e valores)
   const [tiposVariacao, setTiposVariacao] = useState([])
   const [novoTipoNome, setNovoTipoNome] = useState('')
   const [novoValorPorTipo, setNovoValorPorTipo] = useState({})
@@ -38,20 +37,17 @@ export default function Produtos() {
   const [erroTipoVariacaoProduto, setErroTipoVariacaoProduto] = useState('')
   const [valorVariacaoParaExcluir, setValorVariacaoParaExcluir] = useState(null)
 
-  // Etiquetas
   const [modalEtiquetasAberto, setModalEtiquetasAberto] = useState(false)
   const [modalVisualizarEtiquetasAberto, setModalVisualizarEtiquetasAberto] = useState(false)
-  const [produtosParaEtiquetas, setProdutosParaEtiquetas] = useState([]) // { produto, quantidade }
+  const [produtosParaEtiquetas, setProdutosParaEtiquetas] = useState([])
   const [buscaEtiqueta, setBuscaEtiqueta] = useState('')
   const [sugestaoQtdPorChave, setSugestaoQtdPorChave] = useState({})
-  const etiquetasContainerRef = useRef(null)
 
-  // Configuração de tamanho das etiquetas (em mm) – ajustável pelo usuário
   const [configEtiquetas, setConfigEtiquetas] = useState({
-    larguraEtiqueta: 28, // mm
-    alturaEtiqueta: 18,  // mm
-    larguraPapel: 60,    // mm
-    alturaPapel: 40,     // mm
+    larguraEtiqueta: 28,
+    alturaEtiqueta: 18,
+    larguraPapel: 60,
+    alturaPapel: 40,
     colunas: 2,
     linhas: 2,
   })
@@ -96,8 +92,8 @@ export default function Produtos() {
         const vals = await window.electronAPI.listarTodosValoresVariacao()
         setValoresVariacao(vals && vals.length > 0 ? vals : ['P', 'M', 'G', 'GG'])
       }
-    } catch (_) {
-      // fallback mantém P, M, G, GG
+    } catch {
+      /* ignore */
     }
   }
 
@@ -107,12 +103,11 @@ export default function Produtos() {
         const lista = await window.electronAPI.listarTiposVariacao()
         setTiposVariacao(lista || [])
       }
-    } catch (_) {
+    } catch {
       setTiposVariacao([])
     }
   }
 
-  // Carregar configuração de etiquetas do localStorage (se existir)
   useEffect(() => {
     try {
       const raw = localStorage.getItem('gestordesk_config_etiquetas')
@@ -123,8 +118,8 @@ export default function Produtos() {
           ...parsed,
         }))
       }
-    } catch (_) {
-      // se der erro, mantemos os valores padrão
+    } catch {
+      /* ignore */
     }
   }, [])
 
@@ -133,8 +128,8 @@ export default function Produtos() {
       const next = { ...prev, ...parcial }
       try {
         localStorage.setItem('gestordesk_config_etiquetas', JSON.stringify(next))
-      } catch (_) {
-        // ignore falha em salvar
+      } catch {
+        /* ignore */
       }
       return next
     })
@@ -284,9 +279,9 @@ export default function Produtos() {
     setProdutoEmEdicao(null)
     setNome('')
     setAdicionarVariacao(false)
-    const obj = {}
-    valoresVariacao.forEach((v) => { obj[v] = 0 })
-    setVariacoesComQuantidade(obj)
+    const quantidadesIniciais = {}
+    valoresVariacao.forEach((v) => { quantidadesIniciais[v] = 0 })
+    setVariacoesComQuantidade(quantidadesIniciais)
     setPrecoCusto('')
     setPrecoVenda('')
     setEstoque('')
@@ -335,9 +330,111 @@ export default function Produtos() {
     setErroTipoVariacaoProduto('')
     const tipo = tiposVariacao.find((t) => String(t.id) === String(tipoId))
     const valores = (tipo?.valores || []).map((v) => v.valor)
-    const obj = {}
-    valores.forEach((v) => { obj[v] = 0 })
-    setVariacoesComQuantidade(obj)
+    const quantidadesPorValor = {}
+    valores.forEach((v) => { quantidadesPorValor[v] = 0 })
+    setVariacoesComQuantidade(quantidadesPorValor)
+  }
+
+  function parsePrecoInput(valor) {
+    return parseFloat(String(valor).replace(',', '.')) || 0
+  }
+
+  function parseEstoqueInput(valor) {
+    return parseInt(String(valor).replace(/\D/g, ''), 10) || 0
+  }
+
+  async function salvarProdutoEmEdicaoComVariacao(custo, venda, artesaoVal) {
+    const tipoSelecionado = tiposVariacao.find((t) => String(t.id) === String(tipoVariacaoProdutoId))
+    if (!tipoSelecionado) {
+      setErroTipoVariacaoProduto('Selecione um tipo de variação.')
+      setSalvando(false)
+      return false
+    }
+    const valoresDoTipo = (tipoSelecionado.valores || []).map((v) => v.valor)
+    const variacoesSelecionadas = valoresDoTipo.filter((v) => variacoesComQuantidade[v] > 0)
+    if (variacoesSelecionadas.length === 0) {
+      alert('Selecione pelo menos uma variação e informe a quantidade.')
+      setSalvando(false)
+      return false
+    }
+    const variacaoPrincipal =
+      produtoEmEdicao.variacao && variacoesSelecionadas.includes(produtoEmEdicao.variacao)
+        ? produtoEmEdicao.variacao
+        : variacoesSelecionadas[0]
+    const qtdPrincipal = variacoesComQuantidade[variacaoPrincipal] ?? 0
+    await window.electronAPI.atualizarProduto(produtoEmEdicao.id, {
+      nome: nome.trim(),
+      variacao: variacaoPrincipal,
+      preco_custo: custo,
+      preco_venda: venda,
+      estoque: qtdPrincipal,
+      artesao_id: artesaoVal,
+    })
+    for (const variacao of variacoesSelecionadas) {
+      if (variacao === variacaoPrincipal) continue
+      const qtd = variacoesComQuantidade[variacao]
+      await window.electronAPI.criarProduto({
+        nome: nome.trim(),
+        variacao,
+        preco_custo: custo,
+        preco_venda: venda,
+        estoque: qtd,
+        artesao_id: artesaoVal,
+      })
+    }
+    return true
+  }
+
+  async function salvarProdutoEmEdicaoSemVariacao(custo, venda, artesaoVal) {
+    const qtd = parseEstoqueInput(estoque)
+    await window.electronAPI.atualizarProduto(produtoEmEdicao.id, {
+      nome: nome.trim(),
+      variacao: null,
+      preco_custo: custo,
+      preco_venda: venda,
+      estoque: qtd,
+      artesao_id: artesaoVal,
+    })
+  }
+
+  async function salvarNovoProdutoComVariacoes(custo, venda, artesaoVal) {
+    const tipoSelecionado = tiposVariacao.find((t) => String(t.id) === String(tipoVariacaoProdutoId))
+    if (!tipoSelecionado) {
+      setErroTipoVariacaoProduto('Selecione um tipo de variação.')
+      setSalvando(false)
+      return false
+    }
+    const valoresDoTipo = (tipoSelecionado.valores || []).map((v) => v.valor)
+    const variacoesSelecionadas = valoresDoTipo.filter((v) => variacoesComQuantidade[v] > 0)
+    if (variacoesSelecionadas.length === 0) {
+      alert('Selecione pelo menos uma variação e informe a quantidade.')
+      setSalvando(false)
+      return false
+    }
+    for (const variacao of variacoesSelecionadas) {
+      const qtd = variacoesComQuantidade[variacao]
+      await window.electronAPI.criarProduto({
+        nome: nome.trim(),
+        variacao,
+        preco_custo: custo,
+        preco_venda: venda,
+        estoque: qtd,
+        artesao_id: artesaoVal,
+      })
+    }
+    return true
+  }
+
+  async function salvarNovoProdutoSemVariacao(custo, venda, artesaoVal) {
+    const qtd = parseEstoqueInput(estoque)
+    await window.electronAPI.criarProduto({
+      nome: nome.trim(),
+      variacao: null,
+      preco_custo: custo,
+      preco_venda: venda,
+      estoque: qtd,
+      artesao_id: artesaoVal,
+    })
   }
 
   async function handleSalvarProduto(e) {
@@ -354,8 +451,8 @@ export default function Produtos() {
       return
     }
 
-    const custo = parseFloat(String(precoCusto).replace(',', '.')) || 0
-    const venda = parseFloat(String(precoVenda).replace(',', '.')) || 0
+    const custo = parsePrecoInput(precoCusto)
+    const venda = parsePrecoInput(precoVenda)
 
     if (!window.electronAPI) {
       alert('Execute o app pelo Electron (npm start). O banco de dados não está disponível no navegador.')
@@ -366,94 +463,16 @@ export default function Produtos() {
     try {
       if (produtoEmEdicao) {
         if (adicionarVariacao) {
-          const tipoSelecionado = tiposVariacao.find((t) => String(t.id) === String(tipoVariacaoProdutoId))
-          if (!tipoSelecionado) {
-            setErroTipoVariacaoProduto('Selecione um tipo de variação.')
-            setSalvando(false)
-            return
-          }
-
-          const valoresDoTipo = (tipoSelecionado.valores || []).map((v) => v.valor)
-          const variacoesSelecionadas = valoresDoTipo.filter((v) => variacoesComQuantidade[v] > 0)
-          if (variacoesSelecionadas.length === 0) {
-            alert('Selecione pelo menos uma variação e informe a quantidade.')
-            setSalvando(false)
-            return
-          }
-
-          const variacaoPrincipal =
-            produtoEmEdicao.variacao && variacoesSelecionadas.includes(produtoEmEdicao.variacao)
-              ? produtoEmEdicao.variacao
-              : variacoesSelecionadas[0]
-          const qtdPrincipal = variacoesComQuantidade[variacaoPrincipal] ?? 0
-
-          await window.electronAPI.atualizarProduto(produtoEmEdicao.id, {
-            nome: nome.trim(),
-            variacao: variacaoPrincipal,
-            preco_custo: custo,
-            preco_venda: venda,
-            estoque: qtdPrincipal,
-            artesao_id: artesaoVal,
-          })
-
-          for (const variacao of variacoesSelecionadas) {
-            if (variacao === variacaoPrincipal) continue
-            const qtd = variacoesComQuantidade[variacao]
-            await window.electronAPI.criarProduto({
-              nome: nome.trim(),
-              variacao,
-              preco_custo: custo,
-              preco_venda: venda,
-              estoque: qtd,
-              artesao_id: artesaoVal,
-            })
-          }
+          const ok = await salvarProdutoEmEdicaoComVariacao(custo, venda, artesaoVal)
+          if (!ok) return
         } else {
-          const qtd = parseInt(String(estoque).replace(/\D/g, ''), 10) || 0
-          await window.electronAPI.atualizarProduto(produtoEmEdicao.id, {
-            nome: nome.trim(),
-            variacao: null,
-            preco_custo: custo,
-            preco_venda: venda,
-            estoque: qtd,
-            artesao_id: artesaoVal,
-          })
+          await salvarProdutoEmEdicaoSemVariacao(custo, venda, artesaoVal)
         }
       } else if (adicionarVariacao) {
-        const tipoSelecionado = tiposVariacao.find((t) => String(t.id) === String(tipoVariacaoProdutoId))
-        if (!tipoSelecionado) {
-          setErroTipoVariacaoProduto('Selecione um tipo de variação.')
-          setSalvando(false)
-          return
-        }
-        const valoresDoTipo = (tipoSelecionado.valores || []).map((v) => v.valor)
-        const variacoesSelecionadas = valoresDoTipo.filter((v) => variacoesComQuantidade[v] > 0)
-        if (variacoesSelecionadas.length === 0) {
-          alert('Selecione pelo menos uma variação e informe a quantidade.')
-          setSalvando(false)
-          return
-        }
-        for (const variacao of variacoesSelecionadas) {
-          const qtd = variacoesComQuantidade[variacao]
-          await window.electronAPI.criarProduto({
-            nome: nome.trim(),
-            variacao,
-            preco_custo: custo,
-            preco_venda: venda,
-            estoque: qtd,
-            artesao_id: artesaoVal,
-          })
-        }
+        const ok = await salvarNovoProdutoComVariacoes(custo, venda, artesaoVal)
+        if (!ok) return
       } else {
-        const qtd = parseInt(String(estoque).replace(/\D/g, ''), 10) || 0
-        await window.electronAPI.criarProduto({
-          nome: nome.trim(),
-          variacao: null,
-          preco_custo: custo,
-          preco_venda: venda,
-          estoque: qtd,
-          artesao_id: artesaoVal,
-        })
+        await salvarNovoProdutoSemVariacao(custo, venda, artesaoVal)
       }
       setModalAberto(false)
       carregarProdutos()
@@ -494,7 +513,6 @@ export default function Produtos() {
     const termo = buscaEtiqueta.trim()
     if (!termo) return
 
-    // Busca por código de barras
     if (window.electronAPI?.buscarProdutoPorCodigo) {
       const porCodigo = await window.electronAPI.buscarProdutoPorCodigo(termo)
       if (porCodigo) {
@@ -504,7 +522,6 @@ export default function Produtos() {
       }
     }
 
-    // Busca por nome (primeira correspondência exata ou parcial)
     const termoLower = termo.toLowerCase()
     const encontrado = produtos.find(
       (p) =>
@@ -589,7 +606,6 @@ export default function Produtos() {
       .replace(/"/g, '&quot;')
   }
 
-  /** HTML de uma etiqueta para impressão (não depende do DOM do preview). */
   function htmlEtiquetaProdutoParaImpressao(produto, idx) {
     const nome =
       escapeHtmlEtiqueta(produto.nome) +
@@ -610,7 +626,7 @@ export default function Produtos() {
           displayValue: false,
         })
         barcodeInner = svg.outerHTML
-      } catch (_) {
+      } catch {
         barcodeInner = `<span class="etiqueta-codigo-fallback">${escapeHtmlEtiqueta(code)}</span>`
       }
     }
@@ -635,48 +651,15 @@ export default function Produtos() {
     setModalVisualizarEtiquetasAberto(true)
   }
 
-  /** Imprime N etiquetas (1 item na lista = 1 etiqueta). Pagina em colunas×linhas por folha. */
-  function imprimirEtiquetasEmJanelaDedicada(listaProdutos) {
-    if (!listaProdutos || listaProdutos.length === 0) return false
-
-    const labelHtmls = listaProdutos.map((produto, i) =>
-      htmlEtiquetaProdutoParaImpressao(produto, i)
-    )
-
-    const {
-      larguraEtiqueta,
-      alturaEtiqueta,
-      larguraPapel,
-      alturaPapel,
-      colunas,
-      linhas,
-    } = configEtiquetas
-
-    const labelWidthMm = Number(larguraEtiqueta) || 28
-    const labelHeightMm = Number(alturaEtiqueta) || 18
-    const paperWidthMm = Number(larguraPapel) || 60
-    const paperHeightMm = Number(alturaPapel) || 40
-    const columns = Math.max(1, parseInt(colunas, 10) || 1)
-    const rows = Math.max(1, parseInt(linhas, 10) || 1)
-    const labelsPerPage = columns * rows
-
-    const pageChunks = []
-    for (let i = 0; i < labelHtmls.length; i += labelsPerPage) {
-      pageChunks.push(labelHtmls.slice(i, i + labelsPerPage))
-    }
-
-    const pageHtml = pageChunks
-      .map(
-        (chunk) =>
-          `<div class="print-page">
-  <div class="etiquetas-container">
-${chunk.join('\n')}
-  </div>
-</div>`
-      )
-      .join('\n')
-
-    const printCss = `
+  function montarCssImpressaoEtiquetas({
+    paperWidthMm,
+    paperHeightMm,
+    labelWidthMm,
+    labelHeightMm,
+    columns,
+    rows,
+  }) {
+    return `
       * { margin: 0; padding: 0; box-sizing: border-box; }
       @page {
         margin: 0;
@@ -728,6 +711,56 @@ ${chunk.join('\n')}
         .print-page:last-child { page-break-after: auto; }
       }
     `
+  }
+
+  function imprimirEtiquetasEmJanelaDedicada(listaProdutos) {
+    if (!listaProdutos || listaProdutos.length === 0) return false
+
+    const labelHtmls = listaProdutos.map((produto, i) =>
+      htmlEtiquetaProdutoParaImpressao(produto, i)
+    )
+
+    const {
+      larguraEtiqueta,
+      alturaEtiqueta,
+      larguraPapel,
+      alturaPapel,
+      colunas,
+      linhas,
+    } = configEtiquetas
+
+    const labelWidthMm = Number(larguraEtiqueta) || 28
+    const labelHeightMm = Number(alturaEtiqueta) || 18
+    const paperWidthMm = Number(larguraPapel) || 60
+    const paperHeightMm = Number(alturaPapel) || 40
+    const columns = Math.max(1, parseInt(colunas, 10) || 1)
+    const rows = Math.max(1, parseInt(linhas, 10) || 1)
+    const labelsPerPage = columns * rows
+
+    const pageChunks = []
+    for (let i = 0; i < labelHtmls.length; i += labelsPerPage) {
+      pageChunks.push(labelHtmls.slice(i, i + labelsPerPage))
+    }
+
+    const pageHtml = pageChunks
+      .map(
+        (chunk) =>
+          `<div class="print-page">
+  <div class="etiquetas-container">
+${chunk.join('\n')}
+  </div>
+</div>`
+      )
+      .join('\n')
+
+    const printCss = montarCssImpressaoEtiquetas({
+      paperWidthMm,
+      paperHeightMm,
+      labelWidthMm,
+      labelHeightMm,
+      columns,
+      rows,
+    })
 
     const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Etiquetas</title><style>${printCss}</style></head><body>${pageHtml}</body></html>`
 
@@ -742,7 +775,13 @@ ${chunk.join('\n')}
     const imprimirDepois = () => {
       printWin.print()
       printWin.onafterprint = () => printWin.close()
-      setTimeout(() => { try { printWin.close() } catch (_) {} }, 3000)
+      setTimeout(() => {
+        try {
+          printWin.close()
+        } catch {
+          /* ignore */
+        }
+      }, 3000)
     }
     if (printWin.document.readyState === 'complete') {
       setTimeout(imprimirDepois, 400)
@@ -768,14 +807,15 @@ ${chunk.join('\n')}
     }
   }
 
-  const produtosFiltrados = produtos.filter((p) => {
+  const produtosFiltrados = useMemo(() => {
     const termo = busca.toLowerCase().trim()
-    if (!termo) return true
-    return (
-      (p.nome && p.nome.toLowerCase().includes(termo)) ||
-      (p.codigo_barras && String(p.codigo_barras).includes(termo))
-    )
-  })
+    if (!termo) return produtos
+    return produtos.filter((produto) => {
+      const nomeOk = produto.nome && produto.nome.toLowerCase().includes(termo)
+      const codigoOk = produto.codigo_barras && String(produto.codigo_barras).includes(termo)
+      return nomeOk || codigoOk
+    })
+  }, [produtos, busca])
 
   return (
     <div className="produtos">
@@ -1280,7 +1320,6 @@ ${chunk.join('\n')}
               </button>
             </div>
             <div
-              ref={etiquetasContainerRef}
               className="etiquetas-container"
               style={{
                 gridTemplateColumns: `repeat(${configEtiquetas.colunas || 2}, minmax(0, 1fr))`,
@@ -1394,7 +1433,7 @@ ${chunk.join('\n')}
                                   <polyline points="3 6 5 6 21 6" />
                                   <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
                                   <line x1="10" y1="11" x2="10" y2="17" />
-                                  <line x2="14" y1="11" y2="17" />
+                                  <line x1="14" y1="11" x2="14" y2="17" />
                                 </svg>
                               </button>
                             </div>
@@ -1459,7 +1498,7 @@ ${chunk.join('\n')}
                                       <polyline points="3 6 5 6 21 6" />
                                       <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
                                       <line x1="10" y1="11" x2="10" y2="17" />
-                                      <line x2="14" y1="11" y2="17" />
+                                      <line x1="14" y1="11" x2="14" y2="17" />
                                     </svg>
                                   </button>
                                 </div>
