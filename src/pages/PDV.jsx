@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import codeIcon from '../assets/complements/code.png'
 import ProdutoSearchModal from '../components/ProdutoSearchModal'
+import { recoverInputFocus } from '../utils/focusRecovery'
 
 const FORMAS_PAGAMENTO = [
   { id: 'credito', label: 'Cartão de Crédito', icon: 'credit' },
@@ -14,8 +15,30 @@ function formatBRL(val) {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val ?? 0)
 }
 
+/** Parse de valor monetário digitado (pt-BR: vírgula decimal; pontos como milhar). */
 function parseDecimalBR(str) {
-  return parseFloat(String(str ?? '').replace(',', '.')) || 0
+  const s = String(str ?? '').trim()
+  if (!s) return 0
+  let normalized = s
+  if (s.includes(',')) {
+    normalized = s.replace(/\./g, '').replace(',', '.')
+  }
+  const n = parseFloat(normalized)
+  return Number.isFinite(n) ? n : 0
+}
+
+/** Centavos inteiros para comparar valores em R$ sem erro de ponto flutuante. */
+function centavosBRL(n) {
+  const x = Number(n)
+  if (!Number.isFinite(x)) return 0
+  return Math.round(x * 100 + Number.EPSILON)
+}
+
+/** Campo vazio = cliente pagou o valor exato (sem troco). */
+function valorRecebidoEfetivoDinheiro(valorRecebidoStr, totalVenda) {
+  const s = String(valorRecebidoStr ?? '').trim()
+  if (!s) return totalVenda
+  return parseDecimalBR(s)
 }
 
 function avaliarEstoqueParaAdicionar(produto, itens, vendaEdicaoId) {
@@ -249,6 +272,16 @@ export default function PDV() {
     setShowModalPagamento(true)
   }
 
+  function fecharModalPagamentoERestaurarFoco() {
+    setValorRecebido('')
+    setValoresPorForma({})
+    setShowModalPagamento(false)
+    queueMicrotask(() => {
+      inputRef.current?.focus()
+      if (document.activeElement !== inputRef.current) recoverInputFocus()
+    })
+  }
+
   async function handleConfirmarPagamento() {
     if (formasSelecionadas.length === 0) {
       alert('Selecione pelo menos uma forma de pagamento.')
@@ -266,15 +299,15 @@ export default function PDV() {
         return acc + parseDecimalBR(valoresPorForma[formaId])
       }, 0)
 
-      if (somaPagamentos < total) {
+      if (centavosBRL(somaPagamentos) < centavosBRL(total)) {
         alert('A soma dos valores das formas de pagamento é menor que o total da venda.')
         return
       }
     } else if (formasSelecionadas.length === 1) {
       const unica = formasSelecionadas[0]
       if (unica === 'dinheiro') {
-        const valorRecebidoNumerico = parseDecimalBR(valorRecebido)
-        if (valorRecebidoNumerico < total) {
+        const valorRecebidoNumerico = valorRecebidoEfetivoDinheiro(valorRecebido, total)
+        if (centavosBRL(valorRecebidoNumerico) < centavosBRL(total)) {
           alert('Valor recebido é menor que o total da venda.')
           return
         }
@@ -318,10 +351,14 @@ export default function PDV() {
       setValoresPorForma({})
       setValorRecebido('')
       setVendaEdicaoId(null)
-      inputRef.current?.focus()
+      queueMicrotask(() => {
+        inputRef.current?.focus()
+        if (document.activeElement !== inputRef.current) recoverInputFocus()
+      })
     } catch (err) {
-      console.error(err)
+      console.error('[PDV] Erro ao finalizar venda:', err)
       alert('Erro ao finalizar venda')
+      fecharModalPagamentoERestaurarFoco()
     }
   }
 
@@ -338,10 +375,13 @@ export default function PDV() {
   finalizarRef.current = handleFinalizarVenda
   useEffect(() => {
     function onKey(e) {
-      if (e.key === 'F1') {
-        e.preventDefault()
-        finalizarRef.current?.()
+      if (e.key !== 'F1') return
+      const target = e.target
+      if (target && typeof target.closest === 'function') {
+        if (target.closest('.modal-overlay, .modal-content')) return
       }
+      e.preventDefault()
+      finalizarRef.current?.()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -352,13 +392,17 @@ export default function PDV() {
   const desconto = tipoDesconto === 'percent'
     ? subtotal * (Math.min(100, Math.max(0, valorDesconto)) / 100)
     : Math.max(0, Math.min(valorDesconto, subtotal))
-  const total = Math.max(0, subtotal - desconto)
+  const total = Math.round(Math.max(0, subtotal - desconto) * 100) / 100
 
-  const valorRecebidoNum = parseDecimalBR(valorRecebido)
   const formaPrincipal = formasSelecionadas[0] || null
-  const troco = formasSelecionadas.length === 1 && formaPrincipal === 'dinheiro'
-    ? Math.max(valorRecebidoNum - total, 0)
-    : 0
+  const valorRecebidoNum =
+    formasSelecionadas.length === 1 && formaPrincipal === 'dinheiro'
+      ? valorRecebidoEfetivoDinheiro(valorRecebido, total)
+      : parseDecimalBR(valorRecebido)
+  const troco =
+    formasSelecionadas.length === 1 && formaPrincipal === 'dinheiro'
+      ? Math.max(valorRecebidoNum - total, 0)
+      : 0
 
   function handleVoltarRelatorios() {
     navigate('/app/relatorios')
@@ -580,21 +624,13 @@ export default function PDV() {
       {showModalPagamento && (
         <div
           className="modal-overlay"
-          onClick={() => {
-            setValorRecebido('')
-            setValoresPorForma({})
-            setShowModalPagamento(false)
-          }}
+          onClick={fecharModalPagamentoERestaurarFoco}
         >
           <div className="modal-content pdv-modal-pagamento" onClick={(e) => e.stopPropagation()}>
             <button
               type="button"
               className="pdv-modal-close"
-              onClick={() => {
-                setValorRecebido('')
-                setValoresPorForma({})
-                setShowModalPagamento(false)
-              }}
+              onClick={fecharModalPagamentoERestaurarFoco}
               aria-label="Fechar"
             >
               ×
@@ -602,6 +638,23 @@ export default function PDV() {
             <h2 className="pdv-modal-title">Pagamento</h2>
             <p className="pdv-modal-total-label">Total a pagar</p>
             <p className="pdv-modal-total-valor">{formatBRL(total)}</p>
+            {formasSelecionadas.length === 1 && formasSelecionadas[0] === 'dinheiro' && (
+              <div className="pdv-modal-dinheiro">
+                <p className="pdv-modal-dinheiro-label">Valor recebido em dinheiro</p>
+                <p className="pdv-modal-dinheiro-hint">
+                  Deixe em branco se o cliente pagou o valor exato (sem troco).
+                </p>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  className="pdv-modal-dinheiro-input"
+                  placeholder={String(total.toFixed(2)).replace('.', ',')}
+                  value={valorRecebido}
+                  onChange={(e) => setValorRecebido(e.target.value)}
+                  autoFocus
+                />
+              </div>
+            )}
             {formasSelecionadas.length > 1 && (
               <div className="pdv-modal-multiplos">
                 <p style={{ marginTop: 16, marginBottom: 8 }}>
@@ -646,11 +699,7 @@ export default function PDV() {
               <button
                 type="button"
                 className="pdv-modal-cancelar"
-                onClick={() => {
-                  setValorRecebido('')
-                  setValoresPorForma({})
-                  setShowModalPagamento(false)
-                }}
+                onClick={fecharModalPagamentoERestaurarFoco}
               >
                 Cancelar
               </button>
@@ -679,7 +728,13 @@ export default function PDV() {
       )}
       <ProdutoSearchModal
         open={showModalPesquisa}
-        onClose={() => setShowModalPesquisa(false)}
+        onClose={() => {
+          setShowModalPesquisa(false)
+          queueMicrotask(() => {
+            inputRef.current?.focus()
+            if (document.activeElement !== inputRef.current) recoverInputFocus()
+          })
+        }}
         onSelect={selecionarProduto}
       />
     </div>

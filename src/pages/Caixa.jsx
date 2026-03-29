@@ -1,4 +1,5 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
+import { recoverInputFocus } from '../utils/focusRecovery'
 import { useNavigate } from 'react-router-dom'
 import { jsPDF } from 'jspdf'
 import ProdutoSearchModal from '../components/ProdutoSearchModal'
@@ -235,6 +236,19 @@ export default function Caixa() {
     }
   }, [previewPdf?.blobUrl])
 
+  const anyCaixaModalOpen =
+    modalFiltroPeriodoAberto ||
+    modalExportarAberto ||
+    modalLocalizarVendaAberto ||
+    Boolean(previewPdf)
+  const prevCaixaModal = useRef(false)
+  useEffect(() => {
+    if (prevCaixaModal.current && !anyCaixaModalOpen) {
+      queueMicrotask(() => recoverInputFocus())
+    }
+    prevCaixaModal.current = anyCaixaModalOpen
+  }, [anyCaixaModalOpen])
+
   const transacoesVisiveis = useMemo(() => {
     if (!formaPagamentoFiltro || !FORMAS_PAGAMENTO_ORDEM.includes(formaPagamentoFiltro)) {
       return transacoes
@@ -402,7 +416,7 @@ export default function Caixa() {
         setModalExportarAberto(false)
       }
     } catch (err) {
-      console.error(err)
+      console.error('[Caixa] Erro ao exportar relatório PDF:', err)
     }
   }
 
@@ -411,6 +425,7 @@ export default function Caixa() {
       if (prev?.blobUrl) URL.revokeObjectURL(prev.blobUrl)
       return null
     })
+    queueMicrotask(() => recoverInputFocus())
   }
 
   async function handleVisualizarRelatorio() {
@@ -441,7 +456,7 @@ export default function Caixa() {
       })
       setModalExportarAberto(false)
     } catch (err) {
-      console.error(err)
+      console.error('[Caixa] Erro ao visualizar relatório PDF:', err)
       alert('Erro ao gerar relatório.')
     } finally {
       setPreviewGerando(false)
@@ -456,8 +471,10 @@ export default function Caixa() {
       if (!result?.ok) alert('Erro ao salvar PDF.')
       else fecharPreviewPdf()
     } catch (err) {
-      console.error(err)
+      console.error('[Caixa] Erro ao salvar PDF (preview):', err)
       alert('Erro ao salvar PDF.')
+    } finally {
+      queueMicrotask(() => recoverInputFocus())
     }
   }
 
@@ -756,7 +773,10 @@ export default function Caixa() {
 
       <ProdutoSearchModal
         open={modalLocalizarVendaAberto}
-        onClose={() => setModalLocalizarVendaAberto(false)}
+        onClose={() => {
+          setModalLocalizarVendaAberto(false)
+          queueMicrotask(() => recoverInputFocus())
+        }}
         onSelect={aoSelecionarProdutoLocalizar}
         apenasComEstoque={false}
         titulo="Localizar venda por produto"

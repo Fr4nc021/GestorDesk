@@ -1,6 +1,7 @@
 import loupeIcon from '../assets/complements/loupe.png'
 import filterIcon from '../assets/complements/filter.png'
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
+import { recoverInputFocus } from '../utils/focusRecovery'
 import Barcode from 'react-barcode'
 import JsBarcode from 'jsbarcode'
 
@@ -62,6 +63,25 @@ export default function Produtos() {
     return () => clearTimeout(timer)
   }, [toast.visible])
 
+  const buscaInputRef = useRef(null)
+  const anyModalOpen =
+    modalAberto ||
+    modalVariacoesAberto ||
+    modalExcluirAberto ||
+    modalEtiquetasAberto ||
+    modalVisualizarEtiquetasAberto ||
+    Boolean(valorVariacaoParaExcluir)
+  const prevModalOpen = useRef(false)
+  useEffect(() => {
+    if (prevModalOpen.current && !anyModalOpen) {
+      queueMicrotask(() => {
+        buscaInputRef.current?.focus()
+        if (document.activeElement !== buscaInputRef.current) recoverInputFocus()
+      })
+    }
+    prevModalOpen.current = anyModalOpen
+  }, [anyModalOpen])
+
   function fecharToast() {
     setToast((prev) => ({ ...prev, visible: false }))
   }
@@ -71,7 +91,7 @@ export default function Produtos() {
       const lista = await window.electronAPI.listarProdutos()
       setProdutos(lista)
     } catch (err) {
-      console.error(err)
+      console.error('[Produtos] Erro ao carregar lista de produtos:', err)
     } finally {
       setLoading(false)
     }
@@ -479,7 +499,7 @@ export default function Produtos() {
       const msgSucesso = produtoEmEdicao ? 'Produto atualizado com sucesso!' : 'Produto cadastrado com sucesso!'
       mostrarToast(msgSucesso, 'success')
     } catch (err) {
-      console.error(err)
+      console.error('[Produtos] Erro ao salvar produto:', err)
       const msg = err?.message || String(err)
       mostrarToast(`Erro ao salvar produto: ${msg}`, 'error')
     } finally {
@@ -836,6 +856,7 @@ ${chunk.join('\n')}
             <div className="produtos-search-wrapper">
               <img src={loupeIcon} alt="" className="pdv-input-icon" />
               <input
+                ref={buscaInputRef}
                 type="text"
                 placeholder="Buscar por nome ou código..."
                 value={busca}

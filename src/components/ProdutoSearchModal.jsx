@@ -36,7 +36,7 @@ export default function ProdutoSearchModal({
           : lista || []
         setProdutos(filtrados)
       } catch (err) {
-        console.error('Erro ao carregar produtos para pesquisa:', err)
+        console.error('[ProdutoSearchModal] Erro ao carregar produtos:', err)
       } finally {
         setLoading(false)
       }

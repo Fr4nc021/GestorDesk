@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
+import { recoverInputFocus } from '../utils/focusRecovery'
 import loupeIcon from '../assets/complements/loupe.png'
 
 const REGIOES_TELEFONE = [
@@ -35,7 +36,7 @@ export default function Artesaos() {
       const lista = await window.electronAPI.listarArtesoes()
       setArtesoes(lista)
     } catch (err) {
-      console.error(err)
+      console.error('[Artesãos] Erro ao carregar lista:', err)
     } finally {
       setLoading(false)
     }
@@ -44,6 +45,20 @@ export default function Artesaos() {
   useEffect(() => {
     carregarArtesoes()
   }, [])
+
+  const buscaInputRef = useRef(null)
+  const anyModalArtesao =
+    modalAberto || modalRegiaoAberto || modalExcluirAberto
+  const prevModalArtesao = useRef(false)
+  useEffect(() => {
+    if (prevModalArtesao.current && !anyModalArtesao) {
+      queueMicrotask(() => {
+        buscaInputRef.current?.focus()
+        if (document.activeElement !== buscaInputRef.current) recoverInputFocus()
+      })
+    }
+    prevModalArtesao.current = anyModalArtesao
+  }, [anyModalArtesao])
 
   function abrirModal() {
     setArtesaoEmEdicao(null)
@@ -125,7 +140,7 @@ export default function Artesaos() {
       setModalAberto(false)
       carregarArtesoes()
     } catch (err) {
-      console.error(err)
+      console.error('[Artesãos] Erro ao salvar artesão:', err)
       const msg = err?.message || String(err)
       alert(`Erro ao salvar artesão: ${msg}`)
     }
@@ -150,7 +165,7 @@ export default function Artesaos() {
       setArtesaoParaExcluir(null)
       carregarArtesoes()
     } catch (err) {
-      console.error(err)
+      console.error('[Artesãos] Erro ao excluir artesão:', err)
       const msg = err?.message || String(err)
       alert(`Erro ao excluir artesão: ${msg}`)
     }
@@ -166,6 +181,7 @@ export default function Artesaos() {
             <div className="artesaos-search-wrapper">
               <img src={loupeIcon} alt="" className="pdv-input-icon" />
               <input
+                ref={buscaInputRef}
                 type="text"
                 placeholder="Buscar por nome..."
                 value={termoBusca}

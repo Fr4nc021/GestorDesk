@@ -2072,6 +2072,47 @@ button.caixa-btn-filtro-periodo {
   margin: 0 0 32px 0;
 }
 
+.pdv-modal-dinheiro {
+  margin: -24px 0 24px 0;
+  padding: 16px 18px 14px;
+  border-radius: 12px;
+  border: 1px solid #e3e3e3;
+  background: #fafafa;
+  text-align: left;
+}
+
+.pdv-modal-dinheiro-label {
+  font-size: 14px;
+  color: #555;
+  margin: 0 0 6px 0;
+}
+
+.pdv-modal-dinheiro-hint {
+  font-size: 12px;
+  color: #777;
+  margin: 0 0 10px 0;
+  line-height: 1.35;
+}
+
+.pdv-modal-dinheiro-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid #d0d0d0;
+  font-size: 16px;
+  background: #fff;
+  text-align: right;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
+}
+
+.pdv-modal-dinheiro-input:focus {
+  outline: none;
+  border-color: #212121;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.06);
+  background-color: #ffffff;
+}
+
 /* Pagamento com múltiplas formas - campos de valor */
 .pdv-modal-multiplos {
   margin-top: 8px;

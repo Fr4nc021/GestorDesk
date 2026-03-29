@@ -32,6 +32,7 @@ export default function Configuracoes() {
       const lista = await window.electronAPI.listarUsuarios()
       setUsuariosLocais(Array.isArray(lista) ? lista : [])
     } catch (err) {
+      console.error('[Configurações] Erro ao carregar usuários:', err)
       setErroUsuarios(err?.message || 'Erro ao carregar usuários.')
     } finally {
       setCarregandoUsuarios(false)
@@ -57,6 +58,7 @@ export default function Configuracoes() {
       setSyncStatus('ok')
       setSyncMessage('Aplicativo sincronizado!')
     } catch (err) {
+      console.error('[Configurações] Erro na sincronização manual:', err)
       setSyncStatus('error')
       setSyncMessage(err?.message || 'Erro ao sincronizar.')
     }

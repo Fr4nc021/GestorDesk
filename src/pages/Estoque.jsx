@@ -1,5 +1,6 @@
 import loupeIcon from '../assets/complements/loupe.png'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
+import { recoverInputFocus } from '../utils/focusRecovery'
 
 function hojeISO() {
   const d = new Date()
@@ -47,7 +48,7 @@ export default function Estoque() {
       const lista = await window.electronAPI.listarProdutos()
       setProdutos(lista)
     } catch (err) {
-      console.error(err)
+      console.error('[Estoque] Erro ao carregar produtos:', err)
     } finally {
       setLoading(false)
     }
@@ -59,7 +60,7 @@ export default function Estoque() {
       const lista = await buscarLista()
       setLista(lista)
     } catch (err) {
-      console.error(err)
+      console.error('[Estoque] Erro na consulta de período:', err)
     } finally {
       setLoadingConsulta(false)
     }
@@ -95,6 +96,18 @@ export default function Estoque() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  const buscaInputRef = useRef(null)
+  const prevModalEntrada = useRef(false)
+  useEffect(() => {
+    if (prevModalEntrada.current && !modalEntradaAberto) {
+      queueMicrotask(() => {
+        buscaInputRef.current?.focus()
+        if (document.activeElement !== buscaInputRef.current) recoverInputFocus()
+      })
+    }
+    prevModalEntrada.current = modalEntradaAberto
+  }, [modalEntradaAberto])
+
   const buscaTrim = busca.trim()
   const termoBusca = buscaTrim.toLowerCase()
   const produtosFiltrados = termoBusca
@@ -129,7 +142,7 @@ export default function Estoque() {
       setConsultaAtiva('movimentacoes')
       buscarMovimentacoes()
     } catch (err) {
-      console.error(err)
+      console.error('[Estoque] Erro ao adicionar estoque:', err)
       alert(`Erro ao adicionar estoque: ${err?.message || err}`)
     } finally {
       setSalvando(false)
@@ -146,6 +159,7 @@ export default function Estoque() {
             <div className="estoque-search-wrapper">
               <img src={loupeIcon} alt="" className="pdv-input-icon" />
               <input
+                ref={buscaInputRef}
                 type="text"
                 placeholder="Buscar produto para lançar estoque..."
                 value={busca}

@@ -1,6 +1,7 @@
 import { useState, useEffect, useLayoutEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { jsPDF } from 'jspdf'
+import { recoverInputFocus } from '../utils/focusRecovery'
 import {
   XAxis,
   YAxis,
@@ -179,7 +180,7 @@ export default function Relatorios() {
       )
       setVendasArtesaoLista(lista || [])
     } catch (err) {
-      console.error(err)
+      console.error('[Relatórios] Erro ao carregar vendas (modal artesão):', err)
       alert('Erro ao carregar vendas.')
     } finally {
       setVendasArtesaoCarregando(false)
@@ -236,6 +237,7 @@ export default function Relatorios() {
 
   function fecharModalVendasArtesao() {
     setModalVendasArtesaoAberto(false)
+    queueMicrotask(() => recoverInputFocus())
   }
 
   function localizarVendaNoPdv(vendaId) {
@@ -263,7 +265,7 @@ export default function Relatorios() {
         const lista = await window.electronAPI.listarArtesoes()
         setArtesoes(lista || [])
       } catch (err) {
-        console.error(err)
+        console.error('[Relatórios] Erro ao carregar artesãos:', err)
       }
     }
     carregarArtesoes()
@@ -271,6 +273,8 @@ export default function Relatorios() {
 
   useEffect(() => {
     if (aba !== TAB_PRODUTOS && dataInicio > dataFim) return
+
+    let cancelled = false
 
     async function carregarDadosDaAba() {
       setCarregando(true)
@@ -320,13 +324,18 @@ export default function Relatorios() {
       try {
         await Promise.all(promessasCarregamento)
       } catch (err) {
-        console.error(err)
+        console.error('[Relatórios] Erro ao carregar dados da aba:', err)
       } finally {
-        setCarregando(false)
+        if (!cancelled) setCarregando(false)
       }
     }
 
     void carregarDadosDaAba()
+
+    return () => {
+      cancelled = true
+      setCarregando(false)
+    }
   }, [aba, dataInicio, dataFim, artesaoId, hoje])
 
   const dadosGrafico = vendasPorDia.map(d => ({
@@ -735,6 +744,7 @@ export default function Relatorios() {
       if (prev?.blobUrl) URL.revokeObjectURL(prev.blobUrl)
       return null
     })
+    queueMicrotask(() => recoverInputFocus())
   }, [])
 
   async function gerarEAbrirPreview(tipo) {
@@ -785,7 +795,7 @@ export default function Relatorios() {
         return { blobUrl, base64, filename, titulo }
       })
     } catch (err) {
-      console.error(err)
+      console.error('[Relatórios] Erro ao gerar preview PDF:', err)
       alert('Erro ao gerar relatório.')
     } finally {
       setPreviewGerando(false)
@@ -800,8 +810,10 @@ export default function Relatorios() {
       if (!result?.ok) alert('Erro ao salvar PDF.')
       else fecharPreviewPdf()
     } catch (err) {
-      console.error(err)
+      console.error('[Relatórios] Erro ao salvar PDF (preview):', err)
       alert('Erro ao salvar PDF.')
+    } finally {
+      queueMicrotask(() => recoverInputFocus())
     }
   }
 
