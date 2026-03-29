@@ -41,7 +41,7 @@
     font-weight: 700;
     color: #212121;
     margin-bottom: 24px;
-    padding:  4px;
+    padding: 4px;
   }
 
   .sidebar-nav {
@@ -135,7 +135,7 @@
     padding: 0 25px;
     flex-wrap: wrap;
     margin-top: 20px;
-    width: 100%;           /* usa toda a largura */
+    width: 100%;
   }
 
 /* Botão de sincronização manual no Dashboard */
@@ -194,12 +194,6 @@
   margin-bottom: 24px;
 }
 
-.configuracoes-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
-  gap: 20px;
-}
-
 .config-tabs {
   display: flex;
   gap: 8px;
@@ -250,54 +244,6 @@
   align-items: center;
   gap: 12px;
   flex-wrap: wrap;
-}
-
-.config-form {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.config-form label {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  font-size: 14px;
-  font-weight: 600;
-  color: #333;
-}
-
-.config-form input {
-  padding: 10px 12px;
-  border: 1px solid #e0e0e0;
-  border-radius: 10px;
-  font-size: 14px;
-  outline: none;
-}
-
-.config-form input:focus {
-  border-color: #212121;
-}
-
-.config-submit-btn {
-  margin-top: 4px;
-  padding: 11px 16px;
-  background: #212121;
-  color: #fff;
-  border: none;
-  border-radius: 10px;
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.config-submit-btn:hover:not(:disabled) {
-  background: #333;
-}
-
-.config-submit-btn:disabled {
-  opacity: 0.7;
-  cursor: not-allowed;
 }
 
 .config-feedback {
@@ -564,7 +510,7 @@
     border: none;
     background: transparent;
     padding: 28px 20px 28px 12px;
-    font-size: 22px; /* tamanho do código digitado */
+    font-size: 22px;
     outline: none;
     color: #212121;
     font-weight: 700;
@@ -572,7 +518,7 @@
   }
 
   .pdv-search-input::placeholder {
-    font-size: 16px; /* tamanho do texto "Escaneie ou digite..." */
+    font-size: 16px;
     color: #888;
     font-weight: 500;
   }
@@ -672,7 +618,7 @@
 /* Empty state (Caixa Livre) */
 .pdv-empty-state {
   position: absolute;
-  top: 49px;      /* altura aproximada do thead */
+  top: 49px;
   left: 0;
   right: 0;
   bottom: 0;
@@ -903,15 +849,6 @@
   cursor: pointer;
 }
 
-.pdv-desconto-pct {
-  padding: 12px;
-  background: #f0f0f0;
-  border: 1px solid #e0e0e0;
-  border-radius: 8px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
 .pdv-cancelar {
   padding: 12px;
   background: #fee2e2;
@@ -1009,7 +946,6 @@
   cursor: pointer;
 }
 
-/* Tabela - pode reusar pdv-products-table ou criar .produtos-table */
 .produtos-table-wrapper {
   margin-top: 24px;
   border: 1px solid #e0e0e0;
@@ -1259,32 +1195,6 @@
 
 .estoque-search-wrapper input::placeholder {
   color: #888;
-}
-
-.estoque-history-btn {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 12px 20px;
-  background: #fff;
-  color: #212121;
-  border: 1px solid #e0e0e0;
-  border-radius: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background-color 0.2s, border-color 0.2s;
-}
-
-.estoque-history-btn:hover {
-  background-color: #f9f9f9;
-  border-color: #ccc;
-}
-
-.estoque-history-icon {
-  width: 20px;
-  height: 20px;
-  flex-shrink: 0;
-  color: #555;
 }
 
 /* Layout duas colunas: lista de produtos + histórico */
@@ -1833,143 +1743,6 @@
   flex-shrink: 0;
 }
 
-.caixa-input-data--periodo-inline {
-  padding: 9px 12px;
-  border: 1px solid #e0e0e0;
-  border-radius: 10px;
-  font-size: 0.85rem;
-  color: #212121;
-  background: #fff;
-  cursor: pointer;
-  outline: none;
-  transition: border-color 0.2s;
-}
-
-.caixa-input-data--periodo-inline:hover,
-.caixa-input-data--periodo-inline:focus {
-  border-color: #bbb;
-}
-
-.caixa-btn-buscar-produto {
-  padding: 9px 16px;
-  background: #fff;
-  color: #212121;
-  border: 1px solid #e0e0e0;
-  border-radius: 10px;
-  font-size: 0.85rem;
-  font-weight: 600;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: background 0.2s, border-color 0.2s;
-}
-
-.caixa-btn-buscar-produto:hover {
-  background: #f5f5f5;
-  border-color: #ccc;
-}
-
-.caixa-btn-limpar-produto {
-  padding: 9px 14px;
-  background: transparent;
-  color: #666;
-  border: 1px dashed #ccc;
-  border-radius: 10px;
-  font-size: 0.8rem;
-  font-weight: 600;
-  cursor: pointer;
-  white-space: nowrap;
-}
-
-.caixa-btn-limpar-produto:hover {
-  color: #212121;
-  border-color: #999;
-}
-
-.caixa-subtitle-aviso {
-  color: #b45309;
-}
-
-.modal-pesquisa-produto-caixa {
-  width: 100%;
-  max-width: 480px;
-  max-height: min(85vh, 640px);
-  display: flex;
-  flex-direction: column;
-}
-
-.modal-pesquisa-produto-caixa .modal-body {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  flex: 1;
-}
-
-.modal-pesquisa-produto-desc {
-  margin: 0 0 12px;
-  font-size: 14px;
-  color: #555;
-  line-height: 1.45;
-}
-
-.modal-pesquisa-produto-input {
-  width: 100%;
-  padding: 12px 14px;
-  border: 1px solid #e0e0e0;
-  border-radius: 10px;
-  font-size: 15px;
-  margin-bottom: 12px;
-  outline: none;
-}
-
-.modal-pesquisa-produto-input:focus {
-  border-color: #212121;
-}
-
-.modal-pesquisa-produto-lista {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  overflow-y: auto;
-  border: 1px solid #eee;
-  border-radius: 10px;
-  max-height: 320px;
-}
-
-.modal-pesquisa-produto-item {
-  display: block;
-  width: 100%;
-  text-align: left;
-  padding: 12px 14px;
-  border: none;
-  border-bottom: 1px solid #f0f0f0;
-  background: #fff;
-  font-size: 14px;
-  color: #212121;
-  cursor: pointer;
-  transition: background 0.15s;
-}
-
-.modal-pesquisa-produto-item:hover {
-  background: #f7f7f7;
-}
-
-.modal-pesquisa-produto-lista li:last-child .modal-pesquisa-produto-item {
-  border-bottom: none;
-}
-
-.modal-pesquisa-produto-vazio {
-  padding: 24px 16px;
-  text-align: center;
-  color: #888;
-  font-size: 14px;
-}
-
-.modal-pesquisa-produto-mais {
-  margin: 10px 0 0;
-  font-size: 12px;
-  color: #888;
-}
-
 .caixa-btn-hoje {
   padding: 9px 16px;
   background: #212121;
@@ -2083,19 +1856,6 @@ button.caixa-btn-filtro-periodo {
 .caixa-card-total .caixa-card-value {
   font-size: 24px;
   font-weight: 700;
-}
-
-.caixa-card-value-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.caixa-card-icon {
-  width: 24px;
-  height: 24px;
-  flex-shrink: 0;
-  color: #999;
 }
 
 .caixa-transacoes {
@@ -2598,21 +2358,6 @@ button.caixa-btn-filtro-periodo {
   box-sizing: border-box;
 }
 
-.modal-variacao-edit {
-  margin-top: 12px;
-}
-
-.modal-variacao-select {
-  width: 100%;
-  max-width: 120px;
-  padding: 10px 14px;
-  border: 1px solid #e0e0e0;
-  border-radius: 8px;
-  font-size: 14px;
-  background: #fff;
-  cursor: pointer;
-}
-
 .modal-field select {
   width: 100%;
   padding: 12px 16px;
@@ -2714,7 +2459,6 @@ button.caixa-btn-filtro-periodo {
   opacity: 0.9;
 }
 
-/* Modal Imprimir Etiquetas */
 /* Modal Gerenciar Variações */
 .modal-content.modal-variacoes {
   width: 560px;
@@ -3824,15 +3568,6 @@ button.caixa-btn-filtro-periodo {
   height: auto;
   display: block;
   margin: 24px auto 8px;
-}
-
-.login-title {
-  font-size: 1.5rem;
-  font-weight: 700;
-  color: #212121;
-  text-align: center;
-  margin-top: 28px;
-  margin-bottom: 4px;
 }
 
 .login-subtitle {

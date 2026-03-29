@@ -6,7 +6,7 @@ import relatoriosIcon from '../assets/icons/relatorios.png'
 import sairIcon from '../assets/icons/sair.png'
 import logo from '../assets/logo.png'
 
-const menuItems = [
+const sidebarNavItems = [
   { to: '/app', label: 'Dashboard', icon: relatoriosIcon },
   { to: '/app/pdv', label: 'PDV (Venda)', icon: pdvIcon },
   { to: '/app/produtos', label: 'Produtos', icon: estoqueIcon },
@@ -20,13 +20,11 @@ const menuItems = [
 export default function Sidebar() {
   const navigate = useNavigate()
 
-  function handleLogout(e) {
-    e.preventDefault()
+  function handleLogout(event) {
+    event.preventDefault()
     try {
       sessionStorage.removeItem('usuarioLogado')
-    } catch {
-      // ignore
-    }
+    } catch {}
     window.electronAPI?.loginShowResize?.()
     navigate('/login', { replace: true })
   }
@@ -36,7 +34,7 @@ export default function Sidebar() {
       <img src={logo} alt="Espaço da Arte" />
 
       <ul className="sidebar-nav">
-        {menuItems.map(({ to, label, icon }) => (
+        {sidebarNavItems.map(({ to, label, icon }) => (
           <li key={to}>
             <NavLink
               to={to}

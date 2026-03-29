@@ -1,91 +1,78 @@
 const { contextBridge, ipcRenderer } = require('electron')
 
+function invoke(channel, ...args) {
+  return ipcRenderer.invoke(channel, ...args)
+}
+
 contextBridge.exposeInMainWorld('electronAPI', {
-
-  // Usuarios
-  validarLogin: (login, senha) => ipcRenderer.invoke('validar-login', login, senha),
-  criarUsuario: (login, senha) => ipcRenderer.invoke('criar-usuario', login, senha),
-  loginSuccessResize: () => ipcRenderer.invoke('login-success-resize'),
-  loginShowResize: () => ipcRenderer.invoke('login-show-resize'),
-
+  // Usuários e janela de login
+  validarLogin: (login, senha) => invoke('validar-login', login, senha),
+  loginSuccessResize: () => invoke('login-success-resize'),
+  loginShowResize: () => invoke('login-show-resize'),
 
   // Artesãos
-  criarArtesao: (data) => ipcRenderer.invoke('criar-artesao', data),
-  listarArtesoes: () => ipcRenderer.invoke('listar-artesoes'),
-  atualizarArtesao: (id, data) => ipcRenderer.invoke('atualizar-artesao', id, data),
-  excluirArtesao: (id) => ipcRenderer.invoke('excluir-artesao', id),
+  criarArtesao: (data) => invoke('criar-artesao', data),
+  listarArtesoes: () => invoke('listar-artesoes'),
+  atualizarArtesao: (id, data) => invoke('atualizar-artesao', id, data),
+  excluirArtesao: (id) => invoke('excluir-artesao', id),
 
   // Produtos
-  criarProduto: (data) => ipcRenderer.invoke('criar-produto', data),
-  listarProdutos: () => ipcRenderer.invoke('listar-produtos'),
-  atualizarProduto: (id, data) => ipcRenderer.invoke('atualizar-produto', id, data),
-  excluirProduto: (id) => ipcRenderer.invoke('excluir-produto', id),
-  buscarProdutoPorCodigo: (codigo) => ipcRenderer.invoke('buscar-produto-por-codigo', codigo),
+  criarProduto: (data) => invoke('criar-produto', data),
+  listarProdutos: () => invoke('listar-produtos'),
+  atualizarProduto: (id, data) => invoke('atualizar-produto', id, data),
+  excluirProduto: (id) => invoke('excluir-produto', id),
+  buscarProdutoPorCodigo: (codigo) => invoke('buscar-produto-por-codigo', codigo),
 
   // Variações (tipos e valores)
-  listarTiposVariacao: () => ipcRenderer.invoke('listar-tipos-variacao'),
-  criarTipoVariacao: (data) => ipcRenderer.invoke('criar-tipo-variacao', data),
-  atualizarTipoVariacao: (id, data) => ipcRenderer.invoke('atualizar-tipo-variacao', id, data),
-  excluirTipoVariacao: (id) => ipcRenderer.invoke('excluir-tipo-variacao', id),
-  listarValoresVariacao: (tipoVariacaoId) => ipcRenderer.invoke('listar-valores-variacao', tipoVariacaoId),
-  criarValorVariacao: (data) => ipcRenderer.invoke('criar-valor-variacao', data),
-  atualizarValorVariacao: (id, data) => ipcRenderer.invoke('atualizar-valor-variacao', id, data),
-  excluirValorVariacao: (id) => ipcRenderer.invoke('excluir-valor-variacao', id),
-  listarTodosValoresVariacao: () => ipcRenderer.invoke('listar-todos-valores-variacao'),
+  listarTiposVariacao: () => invoke('listar-tipos-variacao'),
+  criarTipoVariacao: (data) => invoke('criar-tipo-variacao', data),
+  atualizarTipoVariacao: (id, data) => invoke('atualizar-tipo-variacao', id, data),
+  excluirTipoVariacao: (id) => invoke('excluir-tipo-variacao', id),
+  criarValorVariacao: (data) => invoke('criar-valor-variacao', data),
+  atualizarValorVariacao: (id, data) => invoke('atualizar-valor-variacao', id, data),
+  excluirValorVariacao: (id) => invoke('excluir-valor-variacao', id),
+  listarTodosValoresVariacao: () => invoke('listar-todos-valores-variacao'),
 
   // Vendas
-  criarVenda: (data) => ipcRenderer.invoke('criar-venda', data),
-  listarVendas: () => ipcRenderer.invoke('listar-vendas'),
-  listarVendasDoDia: () => ipcRenderer.invoke('listar-vendas-do-dia'),
+  criarVenda: (data) => invoke('criar-venda', data),
+  listarVendas: () => invoke('listar-vendas'),
 
-  // Caixa
-  criarMovimentacaoCaixa: (data) => ipcRenderer.invoke('criar-movimentacao-caixa', data),
-  listarVendasPorData: (data) => ipcRenderer.invoke('listar-vendas-por-data', data),
-  listarPagamentosCaixaPorData: (data) => ipcRenderer.invoke('listar-pagamentos-caixa-por-data', data),
+  // Caixa e vendas por período
   listarPagamentosCaixaPorPeriodo: (dataInicio, dataFim) =>
-    ipcRenderer.invoke('listar-pagamentos-caixa-por-periodo', dataInicio, dataFim),
+    invoke('listar-pagamentos-caixa-por-periodo', dataInicio, dataFim),
   listarPagamentosCaixaPorPeriodoEProduto: (dataInicio, dataFim, produtoId) =>
-    ipcRenderer.invoke('listar-pagamentos-caixa-por-periodo-e-produto', dataInicio, dataFim, produtoId),
-  listarVendasPorPeriodo: (dataInicio, dataFim) => ipcRenderer.invoke('listar-vendas-por-periodo', dataInicio, dataFim),
+    invoke('listar-pagamentos-caixa-por-periodo-e-produto', dataInicio, dataFim, produtoId),
+  listarVendasPorPeriodo: (dataInicio, dataFim) =>
+    invoke('listar-vendas-por-periodo', dataInicio, dataFim),
   listarVendasPorPeriodoEArtesao: (dataInicio, dataFim, artesaoId) =>
-    ipcRenderer.invoke('listar-vendas-por-periodo-e-artesao', dataInicio, dataFim, artesaoId),
-  excluirVenda: (id) => ipcRenderer.invoke('excluir-venda', id),
-  obterVendaParaEdicao: (id) => ipcRenderer.invoke('obter-venda-para-edicao', id),
-  atualizarVenda: (id, data) => ipcRenderer.invoke('atualizar-venda', id, data),
-  salvarRelatorioPDF: (pdfBase64, filename) => ipcRenderer.invoke('salvar-relatorio-pdf', pdfBase64, filename),
-
-  // Impressão
-  imprimirEtiquetas: () => ipcRenderer.invoke('imprimir-etiquetas'),
+    invoke('listar-vendas-por-periodo-e-artesao', dataInicio, dataFim, artesaoId),
+  excluirVenda: (id) => invoke('excluir-venda', id),
+  obterVendaParaEdicao: (id) => invoke('obter-venda-para-edicao', id),
+  atualizarVenda: (id, data) => invoke('atualizar-venda', id, data),
+  salvarRelatorioPDF: (pdfBase64, filename) => invoke('salvar-relatorio-pdf', pdfBase64, filename),
 
   // Estoque
-  adicionarEstoque: (produtoId, quantidade, origem) => 
-    ipcRenderer.invoke('adicionar-estoque', produtoId, quantidade, origem),
-  listarMovimentacoesRecentes: (limite) => 
-    ipcRenderer.invoke('listar-movimentacoes-recentes', limite),
-  listarProdutosMaisVendidos: () => 
-    ipcRenderer.invoke('listar-produtos-mais-vendidos'),
-  listarMovimentacoesPorPeriodo: (dataInicio, dataFim) => 
-    ipcRenderer.invoke('listar-movimentacoes-por-periodo', dataInicio, dataFim),
-  listarProdutosMaisVendidosPorPeriodo: (dataInicio, dataFim) => 
-    ipcRenderer.invoke('listar-produtos-mais-vendidos-por-periodo', dataInicio, dataFim),
+  adicionarEstoque: (produtoId, quantidade, origem) =>
+    invoke('adicionar-estoque', produtoId, quantidade, origem),
+  listarMovimentacoesPorPeriodo: (dataInicio, dataFim) =>
+    invoke('listar-movimentacoes-por-periodo', dataInicio, dataFim),
+  listarProdutosMaisVendidosPorPeriodo: (dataInicio, dataFim) =>
+    invoke('listar-produtos-mais-vendidos-por-periodo', dataInicio, dataFim),
 
   // Relatórios
-  obterResumoVendasPeriodo: (dataInicio, dataFim, artesaoId) => 
-    ipcRenderer.invoke('obter-resumo-vendas-periodo', dataInicio, dataFim, artesaoId),
-  obterVendasPorDia: (dataInicio, dataFim, artesaoId) => 
-    ipcRenderer.invoke('obter-vendas-por-dia', dataInicio, dataFim, artesaoId),
-  obterTotalVendasHoje: () => ipcRenderer.invoke('obter-total-vendas-hoje'),
-  obterLucroPeriodo: (dataInicio, dataFim) => 
-    ipcRenderer.invoke('obter-lucro-periodo', dataInicio, dataFim),
-  listarProdutosMaisVendidosPorPeriodoEArtesao: (dataInicio, dataFim, artesaoId) => 
-    ipcRenderer.invoke('listar-produtos-mais-vendidos-por-periodo-e-artesao', dataInicio, dataFim, artesaoId),
-  contarProdutosPorArtesao: (artesaoId) => 
-    ipcRenderer.invoke('contar-produtos-por-artesao', artesaoId),
-  obterRelatorioCustoVendasPeriodo: (dataInicio, dataFim, artesaoId) => 
-    ipcRenderer.invoke('obter-relatorio-custo-vendas-periodo', dataInicio, dataFim, artesaoId),
+  obterResumoVendasPeriodo: (dataInicio, dataFim, artesaoId) =>
+    invoke('obter-resumo-vendas-periodo', dataInicio, dataFim, artesaoId),
+  obterVendasPorDia: (dataInicio, dataFim, artesaoId) =>
+    invoke('obter-vendas-por-dia', dataInicio, dataFim, artesaoId),
+  obterTotalVendasHoje: () => invoke('obter-total-vendas-hoje'),
+  obterLucroPeriodo: (dataInicio, dataFim) => invoke('obter-lucro-periodo', dataInicio, dataFim),
+  listarProdutosMaisVendidosPorPeriodoEArtesao: (dataInicio, dataFim, artesaoId) =>
+    invoke('listar-produtos-mais-vendidos-por-periodo-e-artesao', dataInicio, dataFim, artesaoId),
+  contarProdutosPorArtesao: (artesaoId) => invoke('contar-produtos-por-artesao', artesaoId),
+  obterRelatorioCustoVendasPeriodo: (dataInicio, dataFim, artesaoId) =>
+    invoke('obter-relatorio-custo-vendas-periodo', dataInicio, dataFim, artesaoId),
   obterTotaisPagamentosPorPeriodo: (dataInicio, dataFim) =>
-    ipcRenderer.invoke('obter-totais-pagamentos-por-periodo', dataInicio, dataFim),
+    invoke('obter-totais-pagamentos-por-periodo', dataInicio, dataFim),
 
-  // Sincronização manual
-  sincronizarAgora: () => ipcRenderer.invoke('sync-agora'),
+  sincronizarAgora: () => invoke('sync-agora'),
 })

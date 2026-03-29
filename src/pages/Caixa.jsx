@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { jsPDF } from 'jspdf'
 import ProdutoSearchModal from '../components/ProdutoSearchModal'
@@ -30,7 +30,6 @@ function formatHora(dataStr) {
   })
 }
 
-/** Quando o período cobre mais de um dia, exibe data + hora na tabela. */
 function formatDataHoraCaixa(dataStr) {
   if (!dataStr) return '--'
   const d = new Date(dataStr)
@@ -57,10 +56,31 @@ function formatarDataParaExibir(dateStr) {
   })
 }
 
-function nomeProdutoRotulo(p) {
-  const n = (p?.nome || '').trim()
-  const v = (p?.variacao || '').trim()
+function nomeProdutoRotulo(produto) {
+  const n = (produto?.nome || '').trim()
+  const v = (produto?.variacao || '').trim()
   return v ? `${n} (${v})` : n
+}
+
+function filtrosCaixaPadrao(dataIso) {
+  return {
+    periodoDe: dataIso,
+    periodoAte: dataIso,
+    formaPagamentoFiltro: '',
+    modoBuscaProduto: null,
+  }
+}
+
+function montarTotaisPorForma(totaisDb) {
+  const totaisPorForma = {}
+  for (const forma of FORMAS_PAGAMENTO_ORDEM) {
+    const row = totaisDb.find((r) => r.forma_pagamento === forma) || { total: 0, qtd_transacoes: 0 }
+    totaisPorForma[forma] = {
+      total: row.total || 0,
+      qtd: row.qtd_transacoes || 0,
+    }
+  }
+  return totaisPorForma
 }
 
 function readInitialCaixaFiltros() {
@@ -68,11 +88,11 @@ function readInitialCaixaFiltros() {
   try {
     const raw = sessionStorage.getItem(CAIXA_FILTROS_STORAGE_KEY)
     if (!raw) {
-      return { periodoDe: hoje, periodoAte: hoje, formaPagamentoFiltro: '', modoBuscaProduto: null }
+      return filtrosCaixaPadrao(hoje)
     }
     const o = JSON.parse(raw)
     if (!o || typeof o !== 'object') {
-      return { periodoDe: hoje, periodoAte: hoje, formaPagamentoFiltro: '', modoBuscaProduto: null }
+      return filtrosCaixaPadrao(hoje)
     }
     let periodoDe = o.periodoDe
     let periodoAte = o.periodoAte
@@ -101,29 +121,53 @@ function readInitialCaixaFiltros() {
         : ''
     return { periodoDe, periodoAte, formaPagamentoFiltro: formaOk, modoBuscaProduto }
   } catch {
-    return { periodoDe: hoje, periodoAte: hoje, formaPagamentoFiltro: '', modoBuscaProduto: null }
+    return filtrosCaixaPadrao(hoje)
   }
+}
+
+function IconeFormaPagamentoCaixa({ forma }) {
+  if (forma === 'credito' || forma === 'debito') {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <rect x="1" y="4" width="22" height="16" rx="2" ry="2" />
+        <line x1="1" y1="10" x2="23" y2="10" />
+      </svg>
+    )
+  }
+  if (forma === 'pix') {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <path d="M12 2L2 7l10 5 10-5-10-5z" />
+        <path d="M2 17l10 5 10-5" />
+      </svg>
+    )
+  }
+  if (forma === 'dinheiro') {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <line x1="12" y1="1" x2="12" y2="23" />
+        <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
+      </svg>
+    )
+  }
+  return null
 }
 
 export default function Caixa() {
   const navigate = useNavigate()
   const hoje = hojeISO()
 
-  const filtrosIniciaisRef = useRef(null)
-  if (!filtrosIniciaisRef.current) {
-    filtrosIniciaisRef.current = readInitialCaixaFiltros()
-  }
-  const ini = filtrosIniciaisRef.current
+  const [filtrosIniciais] = useState(() => readInitialCaixaFiltros())
 
   const [transacoes, setTransacoes] = useState([])
-  const [periodoDe, setPeriodoDe] = useState(ini.periodoDe)
-  const [periodoAte, setPeriodoAte] = useState(ini.periodoAte)
+  const [periodoDe, setPeriodoDe] = useState(filtrosIniciais.periodoDe)
+  const [periodoAte, setPeriodoAte] = useState(filtrosIniciais.periodoAte)
 
   const [modalFiltroPeriodoAberto, setModalFiltroPeriodoAberto] = useState(false)
-  const [filtroDraftDe, setFiltroDraftDe] = useState(ini.periodoDe)
-  const [filtroDraftAte, setFiltroDraftAte] = useState(ini.periodoAte)
+  const [filtroDraftDe, setFiltroDraftDe] = useState(filtrosIniciais.periodoDe)
+  const [filtroDraftAte, setFiltroDraftAte] = useState(filtrosIniciais.periodoAte)
 
-  const [formaPagamentoFiltro, setFormaPagamentoFiltro] = useState(ini.formaPagamentoFiltro)
+  const [formaPagamentoFiltro, setFormaPagamentoFiltro] = useState(filtrosIniciais.formaPagamentoFiltro)
 
   const [modalExportarAberto, setModalExportarAberto] = useState(false)
   const [exportarDataDe, setExportarDataDe] = useState(hoje)
@@ -132,7 +176,7 @@ export default function Caixa() {
   const [previewGerando, setPreviewGerando] = useState(false)
 
   const [modalLocalizarVendaAberto, setModalLocalizarVendaAberto] = useState(false)
-  const [modoBuscaProduto, setModoBuscaProduto] = useState(ini.modoBuscaProduto)
+  const [modoBuscaProduto, setModoBuscaProduto] = useState(filtrosIniciais.modoBuscaProduto)
 
   useEffect(() => {
     try {
@@ -195,10 +239,10 @@ export default function Caixa() {
     if (!formaPagamentoFiltro || !FORMAS_PAGAMENTO_ORDEM.includes(formaPagamentoFiltro)) {
       return transacoes
     }
-    return transacoes.filter((t) => t.forma_pagamento === formaPagamentoFiltro)
+    return transacoes.filter((transacao) => transacao.forma_pagamento === formaPagamentoFiltro)
   }, [transacoes, formaPagamentoFiltro])
 
-  const totalFiltrado = transacoesVisiveis.reduce((acc, t) => acc + (t.valor || 0), 0)
+  const totalFiltrado = transacoesVisiveis.reduce((acc, transacao) => acc + (transacao.valor || 0), 0)
 
   function irParaHoje() {
     setPeriodoDe(hoje)
@@ -230,7 +274,7 @@ export default function Caixa() {
     if (!confirm(msg)) return
     try {
       await window.electronAPI.excluirVenda(pagamento.venda_id)
-      setTransacoes((prev) => prev.filter((t) => t.venda_id !== pagamento.venda_id))
+      setTransacoes((prev) => prev.filter((transacao) => transacao.venda_id !== pagamento.venda_id))
     } catch (err) {
       console.error(err)
       alert('Erro ao excluir venda.')
@@ -247,12 +291,12 @@ export default function Caixa() {
     setModoBuscaProduto(null)
   }
 
-  function aoSelecionarProdutoLocalizar(p) {
-    setModoBuscaProduto({ produtoId: p.id, label: nomeProdutoRotulo(p) })
+  function aoSelecionarProdutoLocalizar(produto) {
+    setModoBuscaProduto({ produtoId: produto.id, label: nomeProdutoRotulo(produto) })
     setModalLocalizarVendaAberto(false)
   }
 
-  async function montarDocumentoRelatorioCaixa(dataDe, dataAte, formaPagamentoFiltro = null) {
+  async function montarDocumentoRelatorioCaixa(dataDe, dataAte, filtroFormaPagamento = null) {
     if (!window.electronAPI) return null
     if (dataDe > dataAte) {
       alert('A data "De" deve ser anterior ou igual à data "Até".')
@@ -260,8 +304,8 @@ export default function Caixa() {
     }
 
     const filtroForma =
-      formaPagamentoFiltro && FORMAS_PAGAMENTO_ORDEM.includes(formaPagamentoFiltro)
-        ? formaPagamentoFiltro
+      filtroFormaPagamento && FORMAS_PAGAMENTO_ORDEM.includes(filtroFormaPagamento)
+        ? filtroFormaPagamento
         : null
     const formasNoRelatorio = filtroForma ? [filtroForma] : FORMAS_PAGAMENTO_ORDEM
 
@@ -276,18 +320,10 @@ export default function Caixa() {
       return null
     }
 
-    const totaisPorForma = {}
+    const totaisPorForma = montarTotaisPorForma(totaisDb)
     let totalGeral = 0
-
-    for (const fp of FORMAS_PAGAMENTO_ORDEM) {
-      const row = totaisDb.find((r) => r.forma_pagamento === fp) || { total: 0, qtd_transacoes: 0 }
-      const total = row.total || 0
-      const qtd = row.qtd_transacoes || 0
-      totaisPorForma[fp] = { total, qtd }
-    }
-
-    for (const fp of formasNoRelatorio) {
-      totalGeral += totaisPorForma[fp].total
+    for (const forma of formasNoRelatorio) {
+      totalGeral += totaisPorForma[forma].total
     }
 
     const doc = new jsPDF()
@@ -322,9 +358,9 @@ export default function Caixa() {
     y += 10
 
     doc.setFontSize(10)
-    for (const fp of formasNoRelatorio) {
-      const { total, qtd } = totaisPorForma[fp]
-      const label = LABEL_PAGAMENTO[fp]
+    for (const forma of formasNoRelatorio) {
+      const { total, qtd } = totaisPorForma[forma]
+      const label = LABEL_PAGAMENTO[forma]
       doc.text(`${label}:`, margin, y)
       doc.text(formatBRL(total), 120, y)
       doc.text(`(${qtd} transações)`, 160, y)
@@ -339,9 +375,7 @@ export default function Caixa() {
     doc.setFont('helvetica', 'normal')
     y += 8
     doc.setFontSize(10)
-    const qtdTransacoesRodape = filtroForma
-      ? totaisPorForma[filtroForma].qtd
-      : vendas.length
+    const qtdTransacoesRodape = filtroForma ? totaisPorForma[filtroForma].qtd : vendas.length
     doc.text(`Total de ${qtdTransacoesRodape} transação(ões)`, margin, y)
 
     const sufixoForma = filtroForma ? `-${filtroForma}` : ''
@@ -372,12 +406,12 @@ export default function Caixa() {
     }
   }
 
-  const fecharPreviewPdf = useCallback(() => {
+  function fecharPreviewPdf() {
     setPreviewPdf((prev) => {
       if (prev?.blobUrl) URL.revokeObjectURL(prev.blobUrl)
       return null
     })
-  }, [])
+  }
 
   async function handleVisualizarRelatorio() {
     if (!window.electronAPI) return
@@ -467,9 +501,9 @@ export default function Caixa() {
               onChange={(e) => setFormaPagamentoFiltro(e.target.value)}
             >
               <option value="">Todas</option>
-              {FORMAS_PAGAMENTO_ORDEM.map((fp) => (
-                <option key={fp} value={fp}>
-                  {LABEL_PAGAMENTO[fp]}
+              {FORMAS_PAGAMENTO_ORDEM.map((forma) => (
+                <option key={forma} value={forma}>
+                  {LABEL_PAGAMENTO[forma]}
                 </option>
               ))}
             </select>
@@ -551,51 +585,28 @@ export default function Caixa() {
                   </td>
                 </tr>
               ) : (
-                transacoesVisiveis.map((t) => (
-                  <tr key={`${t.venda_id}-${t.sequencia}`}>
-                    <td>{periodoUmDia ? formatHora(t.data) : formatDataHoraCaixa(t.data)}</td>
-                    <td>#{String(t.venda_id).padStart(4, '0')}/{t.sequencia}</td>
-                    <td title={t.itens_resumo || undefined}>{t.qtd_itens ?? 0} itens</td>
+                transacoesVisiveis.map((transacao) => (
+                  <tr key={`${transacao.venda_id}-${transacao.sequencia}`}>
+                    <td>{periodoUmDia ? formatHora(transacao.data) : formatDataHoraCaixa(transacao.data)}</td>
+                    <td>#{String(transacao.venda_id).padStart(4, '0')}/{transacao.sequencia}</td>
+                    <td title={transacao.itens_resumo || undefined}>{transacao.qtd_itens ?? 0} itens</td>
                     {modoBuscaProduto && (
-                      <td>{t.qtd_produto_filtrado != null ? t.qtd_produto_filtrado : '—'}</td>
+                      <td>{transacao.qtd_produto_filtrado != null ? transacao.qtd_produto_filtrado : '—'}</td>
                     )}
                     <td>
                       <span className="caixa-pagamento-badge">
-                        {t.forma_pagamento === 'credito' && (
-                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <rect x="1" y="4" width="22" height="16" rx="2" ry="2" />
-                            <line x1="1" y1="10" x2="23" y2="10" />
-                          </svg>
-                        )}
-                        {t.forma_pagamento === 'debito' && (
-                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <rect x="1" y="4" width="22" height="16" rx="2" ry="2" />
-                            <line x1="1" y1="10" x2="23" y2="10" />
-                          </svg>
-                        )}
-                        {t.forma_pagamento === 'pix' && (
-                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <path d="M12 2L2 7l10 5 10-5-10-5z" />
-                            <path d="M2 17l10 5 10-5" />
-                          </svg>
-                        )}
-                        {t.forma_pagamento === 'dinheiro' && (
-                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <line x1="12" y1="1" x2="12" y2="23" />
-                            <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
-                          </svg>
-                        )}
-                        {LABEL_PAGAMENTO[t.forma_pagamento] ?? t.forma_pagamento}
+                        <IconeFormaPagamentoCaixa forma={transacao.forma_pagamento} />
+                        {LABEL_PAGAMENTO[transacao.forma_pagamento] ?? transacao.forma_pagamento}
                       </span>
                     </td>
-                    <td>{formatBRL(t.valor)}</td>
+                    <td>{formatBRL(transacao.valor)}</td>
                     <td>
                       <div className="caixa-acoes-cell">
-                        {t.sequencia === 1 && (
+                        {transacao.sequencia === 1 && (
                           <button
                             type="button"
                             className="caixa-btn-editar"
-                            onClick={() => abrirVendaNoPdvParaEdicao(t.venda_id)}
+                            onClick={() => abrirVendaNoPdvParaEdicao(transacao.venda_id)}
                             title="Editar venda no PDV"
                             aria-label="Editar venda no PDV"
                           >
@@ -609,7 +620,7 @@ export default function Caixa() {
                         <button
                           type="button"
                           className="caixa-btn-excluir"
-                          onClick={() => handleExcluirVenda(t)}
+                          onClick={() => handleExcluirVenda(transacao)}
                           title="Excluir venda"
                           aria-label="Excluir venda"
                         >

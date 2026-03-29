@@ -3,9 +3,35 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import codeIcon from '../assets/complements/code.png'
 import ProdutoSearchModal from '../components/ProdutoSearchModal'
 
+const FORMAS_PAGAMENTO = [
+  { id: 'credito', label: 'Cartão de Crédito', icon: 'credit' },
+  { id: 'debito', label: 'Cartão de Débito', icon: 'credit' },
+  { id: 'pix', label: 'PIX', icon: 'pix' },
+  { id: 'dinheiro', label: 'Dinheiro', icon: 'money' },
+]
 
 function formatBRL(val) {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val ?? 0)
+}
+
+function parseDecimalBR(str) {
+  return parseFloat(String(str ?? '').replace(',', '.')) || 0
+}
+
+function avaliarEstoqueParaAdicionar(produto, itens, vendaEdicaoId) {
+  const qNoCarrinho = itens.find((i) => i.id === produto.id)?.quantidade ?? 0
+  const estoqueAtual = produto.estoque ?? 0
+  const maxPermitido = estoqueAtual + (vendaEdicaoId ? qNoCarrinho : 0)
+  if (qNoCarrinho + 1 > maxPermitido) {
+    return { permitido: false, toastErro: { tipo: 'erro', mensagem: 'Produto sem estoque disponível.' } }
+  }
+  const alertaUltimoItem = maxPermitido - qNoCarrinho <= 1
+  return {
+    permitido: true,
+    toastAlerta: alertaUltimoItem
+      ? { tipo: 'alerta', mensagem: 'Atenção: este é o último item em estoque.' }
+      : null,
+  }
 }
 
 export default function PDV() {
@@ -13,17 +39,17 @@ export default function PDV() {
   const navigate = useNavigate()
   const [codigoInput, setCodigoInput] = useState('')
   const [itens, setItens] = useState([])
-  const [tipoDesconto, setTipoDesconto] = useState('valor') // 'valor' ou 'percent'
+  const [tipoDesconto, setTipoDesconto] = useState('valor')
   const [descontoInput, setDescontoInput] = useState('')
-  const [formasSelecionadas, setFormasSelecionadas] = useState([]) // ['credito','pix',...]
-  const [valoresPorForma, setValoresPorForma] = useState({}) // { credito: '50', pix: '20' }
+  const [formasSelecionadas, setFormasSelecionadas] = useState([])
+  const [valoresPorForma, setValoresPorForma] = useState({})
   const [showModalPagamento, setShowModalPagamento] = useState(false)
   const [showModalPesquisa, setShowModalPesquisa] = useState(false)
   const [valorRecebido, setValorRecebido] = useState('')
   const [vendaEdicaoId, setVendaEdicaoId] = useState(null)
   const inputRef = useRef(null)
   const finalizarRef = useRef(null)
-  const [toast, setToast] = useState(null) // ex: { mensagem: '...', tipo: 'sucesso' }
+  const [toast, setToast] = useState(null)
   const [voltarRelatorios, setVoltarRelatorios] = useState(false)
 
   useEffect(() => {
@@ -73,16 +99,16 @@ export default function PDV() {
           setDescontoInput('')
         }
         if (forms.length > 1) {
-          const vm = {}
+          const valoresIniciaisPorForma = {}
           for (const p of v.pagamentos) {
-            vm[p.forma_pagamento] = String(Number(p.valor).toFixed(2)).replace('.', ',')
+            valoresIniciaisPorForma[p.forma_pagamento] = String(Number(p.valor).toFixed(2)).replace('.', ',')
           }
-          setValoresPorForma(vm)
+          setValoresPorForma(valoresIniciaisPorForma)
           setValorRecebido('')
         } else {
           setValoresPorForma({})
-          const u = forms[0]
-          if (u === 'dinheiro' && v.pagamentos[0]) {
+          const formaUnica = forms[0]
+          if (formaUnica === 'dinheiro' && v.pagamentos[0]) {
             setValorRecebido(String(Number(v.pagamentos[0].valor).toFixed(2)).replace('.', ','))
           } else {
             setValorRecebido('')
@@ -99,20 +125,13 @@ export default function PDV() {
     }
   }, [location.state, navigate])
 
-  const FORMAS_PAGAMENTO = [
-    { id: 'credito', label: 'Cartão de Crédito', icon: 'credit' },
-    { id: 'debito', label: 'Cartão de Débito', icon: 'credit' },
-    { id: 'pix', label: 'PIX', icon: 'pix' },
-    { id: 'dinheiro', label: 'Dinheiro', icon: 'money' },
-  ]
-
   function adicionarItemNaVenda(produto) {
     if (!produto) return
     setItens((prev) => {
       const existe = prev.find((i) => i.id === produto.id)
-      const qBase = existe ? existe.quantidade : 0
-      const maxQ = (produto.estoque ?? 0) + (vendaEdicaoId ? qBase : 0)
-      if (qBase + 1 > maxQ) {
+      const quantidadeAtual = existe ? existe.quantidade : 0
+      const maxQ = (produto.estoque ?? 0) + (vendaEdicaoId ? quantidadeAtual : 0)
+      if (quantidadeAtual + 1 > maxQ) {
         return prev
       }
       if (existe) {
@@ -133,16 +152,12 @@ export default function PDV() {
         alert('Produto não encontrado')
         return
       }
-      const qNoCarrinho = itens.find((i) => i.id === produto.id)?.quantidade ?? 0
-      const estoqueAtual = produto.estoque ?? 0
-      const maxPermitido = estoqueAtual + (vendaEdicaoId ? qNoCarrinho : 0)
-      if (qNoCarrinho + 1 > maxPermitido) {
-        setToast({ tipo: 'erro', mensagem: 'Produto sem estoque disponível.' })
+      const aval = avaliarEstoqueParaAdicionar(produto, itens, vendaEdicaoId)
+      if (!aval.permitido) {
+        setToast(aval.toastErro)
         return
       }
-      if (maxPermitido - qNoCarrinho <= 1) {
-        setToast({ tipo: 'alerta', mensagem: 'Atenção: este é o último item em estoque.' })
-      }
+      if (aval.toastAlerta) setToast(aval.toastAlerta)
       adicionarItemNaVenda(produto)
       setCodigoInput('')
       inputRef.current?.focus()
@@ -152,22 +167,14 @@ export default function PDV() {
     }
   }
 
-  function abrirModalPesquisa() {
-    setShowModalPesquisa(true)
-  }
-
   function selecionarProduto(produto) {
     if (!produto) return
-    const qNoCarrinho = itens.find((i) => i.id === produto.id)?.quantidade ?? 0
-    const estoqueAtual = produto.estoque ?? 0
-    const maxPermitido = estoqueAtual + (vendaEdicaoId ? qNoCarrinho : 0)
-    if (qNoCarrinho + 1 > maxPermitido) {
-      setToast({ tipo: 'erro', mensagem: 'Produto sem estoque disponível.' })
+    const aval = avaliarEstoqueParaAdicionar(produto, itens, vendaEdicaoId)
+    if (!aval.permitido) {
+      setToast(aval.toastErro)
       return
     }
-    if (maxPermitido - qNoCarrinho <= 1) {
-      setToast({ tipo: 'alerta', mensagem: 'Atenção: este é o último item em estoque.' })
-    }
+    if (aval.toastAlerta) setToast(aval.toastAlerta)
     adicionarItemNaVenda(produto)
     setShowModalPesquisa(false)
     inputRef.current?.focus()
@@ -178,7 +185,7 @@ export default function PDV() {
     if (codigo) {
       await buscarProdutoPorCodigo(codigo)
     } else {
-      abrirModalPesquisa()
+      setShowModalPesquisa(true)
     }
   }
 
@@ -207,9 +214,9 @@ export default function PDV() {
           setToast({ tipo: 'erro', mensagem: 'Produto não encontrado.' })
           return
         }
-        const nova = item.quantidade + delta
+        const novaQuantidade = item.quantidade + delta
         const maxQ = (prod.estoque ?? 0) + (vendaEdicaoId ? item.quantidade : 0)
-        if (nova > maxQ) {
+        if (novaQuantidade > maxQ) {
           setToast({ tipo: 'erro', mensagem: 'Estoque insuficiente.' })
           return
         }
@@ -223,8 +230,8 @@ export default function PDV() {
       prev
         .map((i) => {
           if (i.id !== id) return i
-          const nova = Math.max(0, i.quantidade + delta)
-          return nova === 0 ? null : { ...i, quantidade: nova }
+          const novaQuantidade = Math.max(0, i.quantidade + delta)
+          return novaQuantidade === 0 ? null : { ...i, quantidade: novaQuantidade }
         })
         .filter(Boolean),
     )
@@ -256,8 +263,7 @@ export default function PDV() {
       }
 
       const somaPagamentos = formasSelecionadas.reduce((acc, formaId) => {
-        const valor = parseFloat(String(valoresPorForma[formaId]).replace(',', '.')) || 0
-        return acc + valor
+        return acc + parseDecimalBR(valoresPorForma[formaId])
       }, 0)
 
       if (somaPagamentos < total) {
@@ -267,8 +273,8 @@ export default function PDV() {
     } else if (formasSelecionadas.length === 1) {
       const unica = formasSelecionadas[0]
       if (unica === 'dinheiro') {
-        const valorRecebidoNumLocal = parseFloat(String(valorRecebido).replace(',', '.')) || 0
-        if (valorRecebidoNumLocal < total) {
+        const valorRecebidoNumerico = parseDecimalBR(valorRecebido)
+        if (valorRecebidoNumerico < total) {
           alert('Valor recebido é menor que o total da venda.')
           return
         }
@@ -279,7 +285,7 @@ export default function PDV() {
     const pagamentos = formasSelecionadas.length > 1
       ? formasSelecionadas.map((formaId) => ({
           forma: formaId,
-          valor: parseFloat(String(valoresPorForma[formaId]).replace(',', '.')) || 0,
+          valor: parseDecimalBR(valoresPorForma[formaId]),
         }))
       : [
           {
@@ -342,13 +348,13 @@ export default function PDV() {
   }, [])
 
   const subtotal = itens.reduce((acc, i) => acc + i.preco_venda * i.quantidade, 0)
-  const valorDesconto = parseFloat(String(descontoInput).replace(',', '.')) || 0
+  const valorDesconto = parseDecimalBR(descontoInput)
   const desconto = tipoDesconto === 'percent'
     ? subtotal * (Math.min(100, Math.max(0, valorDesconto)) / 100)
     : Math.max(0, Math.min(valorDesconto, subtotal))
   const total = Math.max(0, subtotal - desconto)
 
-  const valorRecebidoNum = parseFloat(String(valorRecebido).replace(',', '.')) || 0
+  const valorRecebidoNum = parseDecimalBR(valorRecebido)
   const formaPrincipal = formasSelecionadas[0] || null
   const troco = formasSelecionadas.length === 1 && formaPrincipal === 'dinheiro'
     ? Math.max(valorRecebidoNum - total, 0)
@@ -630,8 +636,7 @@ export default function PDV() {
                   Soma das formas:{' '}
                   {formatBRL(
                     formasSelecionadas.reduce((acc, formaId) => {
-                      const valor = parseFloat(String(valoresPorForma[formaId]).replace(',', '.')) || 0
-                      return acc + valor
+                      return acc + parseDecimalBR(valoresPorForma[formaId])
                     }, 0)
                   )}
                 </p>

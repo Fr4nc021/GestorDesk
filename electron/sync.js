@@ -1,50 +1,48 @@
-// electron/sync.js
 const { getPendingRecordsForSync, markAsSynced, ORDEM_SYNC } = require('./database')
 const { getAuthedSupabaseClient } = require('./services/supabaseClient')
 
-let supabase = null
-
-function normalizarLinha(row) {
-  const out = {}
-  for (const [k, v] of Object.entries(row)) {
-    if (v === null || v === undefined) {
-      out[k] = null
-      continue
+function normalizarLinha(registro) {
+  const saida = {}
+  for (const [chave, valor] of Object.entries(registro)) {
+    if (valor == null) {
+      saida[chave] = null
+    } else if (typeof valor === 'number' && !Number.isInteger(valor)) {
+      saida[chave] = Number(valor)
+    } else {
+      saida[chave] = valor
     }
-    if (typeof v === 'number' && !Number.isInteger(v)) out[k] = Number(v)
-    else out[k] = v
   }
-  return out
+  return saida
 }
 
-async function enviarUpsert(tabela, registros) {
+async function enviarUpsert(clienteSupabase, nomeTabela, registros) {
   if (registros.length === 0) return { count: 0 }
-  const rows = registros.map(normalizarLinha)
-  const { error } = await supabase.from(tabela).upsert(rows, { onConflict: 'id' })
+  const linhas = registros.map(normalizarLinha)
+  const { error } = await clienteSupabase.from(nomeTabela).upsert(linhas, { onConflict: 'id' })
   if (error) throw error
-  return { count: rows.length }
+  return { count: linhas.length }
 }
 
-async function sincronizarTabela(tabela) {
-  const registros = getPendingRecordsForSync(tabela)
-  if (registros.length === 0) return { tabela, count: 0 }
-  await enviarUpsert(tabela, registros)
-  const ids = registros.map(r => r.id)
-  markAsSynced(tabela, ids)
-  return { tabela, count: registros.length }
+async function sincronizarTabela(clienteSupabase, nomeTabela) {
+  const registros = getPendingRecordsForSync(nomeTabela)
+  if (registros.length === 0) return { tabela: nomeTabela, count: 0 }
+  await enviarUpsert(clienteSupabase, nomeTabela, registros)
+  const ids = registros.map((r) => r.id)
+  markAsSynced(nomeTabela, ids)
+  return { tabela: nomeTabela, count: registros.length }
 }
 
 async function executarSincronizacao() {
   const { client, error } = await getAuthedSupabaseClient()
   if (!client) return { success: false, reason: error || 'Supabase não configurado' }
-  supabase = client
+
   const resultados = []
-  for (const tabela of ORDEM_SYNC) {
+  for (const nomeTabela of ORDEM_SYNC) {
     try {
-      const r = await sincronizarTabela(tabela)
+      const r = await sincronizarTabela(client, nomeTabela)
       resultados.push(r)
     } catch (err) {
-      console.error(`[Sync] Erro em ${tabela}:`, err.message)
+      console.error(`[Sync] Erro em ${nomeTabela}:`, err.message)
       throw err
     }
   }

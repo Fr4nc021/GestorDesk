@@ -1,5 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 
+function formatarPrecoVenda(valor) {
+  if (valor == null) return '-'
+  return `R$ ${Number(valor).toFixed(2).replace('.', ',')}`
+}
+
 export default function ProdutoSearchModal({
   open,
   onClose,
@@ -13,7 +18,9 @@ export default function ProdutoSearchModal({
   const inputRef = useRef(null)
 
   useEffect(() => {
-    if (open) setBusca('')
+    if (!open) return
+    setBusca('')
+    inputRef.current?.focus()
   }, [open])
 
   useEffect(() => {
@@ -25,7 +32,7 @@ export default function ProdutoSearchModal({
         if (!window.electronAPI?.listarProdutos) return
         const lista = await window.electronAPI.listarProdutos()
         const filtrados = apenasComEstoque
-          ? (lista || []).filter((p) => (p.estoque ?? 0) > 0)
+          ? (lista || []).filter((produto) => (produto.estoque ?? 0) > 0)
           : lista || []
         setProdutos(filtrados)
       } catch (err) {
@@ -38,19 +45,14 @@ export default function ProdutoSearchModal({
     carregarProdutos()
   }, [open, apenasComEstoque])
 
-  useEffect(() => {
-    if (open && inputRef.current) {
-      inputRef.current.focus()
-    }
-  }, [open])
-
   const produtosFiltrados = useMemo(() => {
-    const termo = busca.trim().toLowerCase()
-    if (!termo) return produtos
-    return produtos.filter((p) => {
-      const nome = (p.nome || '').toLowerCase()
-      const codigo = String(p.codigo_barras || '')
-      return nome.includes(termo) || codigo.includes(busca.trim())
+    const termoLower = busca.trim().toLowerCase()
+    const termoBruto = busca.trim()
+    if (!termoLower) return produtos
+    return produtos.filter((produto) => {
+      const nomeLower = (produto.nome || '').toLowerCase()
+      const codigo = String(produto.codigo_barras || '')
+      return nomeLower.includes(termoLower) || codigo.includes(termoBruto)
     })
   }, [busca, produtos])
 
@@ -112,26 +114,20 @@ export default function ProdutoSearchModal({
                     </td>
                   </tr>
                 ) : (
-                  produtosFiltrados.map((p) => (
-                    <tr key={p.id}>
-                      <td>{p.codigo_barras}</td>
+                  produtosFiltrados.map((produto) => (
+                    <tr key={produto.id}>
+                      <td>{produto.codigo_barras}</td>
                       <td>
-                        {p.nome}
-                        {p.variacao ? ` (${p.variacao})` : ''}
+                        {produto.nome}
+                        {produto.variacao ? ` (${produto.variacao})` : ''}
                       </td>
-                      <td>{p.estoque ?? 0}</td>
-                      <td>
-                        {p.preco_venda != null
-                          ? `R$ ${Number(p.preco_venda)
-                              .toFixed(2)
-                              .replace('.', ',')}`
-                          : '-'}
-                      </td>
+                      <td>{produto.estoque ?? 0}</td>
+                      <td>{formatarPrecoVenda(produto.preco_venda)}</td>
                       <td>
                         <button
                           type="button"
                           className="pdv-modal-pesquisa-select"
-                          onClick={() => onSelect?.(p)}
+                          onClick={() => onSelect?.(produto)}
                         >
                           Selecionar
                         </button>
@@ -147,4 +143,3 @@ export default function ProdutoSearchModal({
     </div>
   )
 }
-

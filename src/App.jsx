@@ -10,20 +10,21 @@ import Caixa from './pages/Caixa'
 import Configuracoes from './pages/Configuracoes'
 import Layout from './Layout'
 
+function obterUsuarioLogado() {
+  try {
+    const raw = sessionStorage.getItem('usuarioLogado')
+    if (!raw) return null
+    const usuario = JSON.parse(raw)
+    return usuario && usuario.id ? usuario : null
+  } catch {
+    return null
+  }
+}
+
 function RotaProtegida({ children }) {
   const location = useLocation()
 
-  let usuarioLogado = null
-  try {
-    const s = sessionStorage.getItem('usuarioLogado')
-    if (s) {
-      usuarioLogado = JSON.parse(s)
-    }
-  } catch {
-    usuarioLogado = null
-  }
-
-  if (!usuarioLogado || !usuarioLogado.id) {
+  if (!obterUsuarioLogado()) {
     return <Navigate to="/login" replace state={{ from: location }} />
   }
 
@@ -31,7 +32,7 @@ function RotaProtegida({ children }) {
 }
 
 export default function App() {
-  // Em produção (Electron empacotado, protocolo file://), usar HashRouter para evitar problemas de rota
+  // file:// (Electron empacotado): HashRouter evita rotas quebradas com BrowserRouter
   const isFileProtocol = typeof window !== 'undefined' && window.location.protocol === 'file:'
   const Router = isFileProtocol ? HashRouter : BrowserRouter
 

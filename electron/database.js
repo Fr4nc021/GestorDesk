@@ -40,12 +40,12 @@ function isDatabaseStillUnused(db) {
 }
 
 function variationCatalogRicherThan(legacyDb, userDb) {
-  const lt = countWhere(legacyDb, 'SELECT COUNT(*) as n FROM tipos_variacao WHERE deleted_at IS NULL')
-  const ut = countWhere(userDb, 'SELECT COUNT(*) as n FROM tipos_variacao WHERE deleted_at IS NULL')
-  const lv = countWhere(legacyDb, 'SELECT COUNT(*) as n FROM variacao_valores WHERE deleted_at IS NULL')
-  const uv = countWhere(userDb, 'SELECT COUNT(*) as n FROM variacao_valores WHERE deleted_at IS NULL')
-  if (lt < 0 || ut < 0 || lv < 0 || uv < 0) return false
-  return lt > ut || lv > uv
+  const legacyTipos = countWhere(legacyDb, 'SELECT COUNT(*) as n FROM tipos_variacao WHERE deleted_at IS NULL')
+  const userTipos = countWhere(userDb, 'SELECT COUNT(*) as n FROM tipos_variacao WHERE deleted_at IS NULL')
+  const legacyValores = countWhere(legacyDb, 'SELECT COUNT(*) as n FROM variacao_valores WHERE deleted_at IS NULL')
+  const userValores = countWhere(userDb, 'SELECT COUNT(*) as n FROM variacao_valores WHERE deleted_at IS NULL')
+  if (legacyTipos < 0 || userTipos < 0 || legacyValores < 0 || userValores < 0) return false
+  return legacyTipos > userTipos || legacyValores > userValores
 }
 
 // Garante que a pasta existe e, se não houver banco no destino, copia o modelo padrão (se existir)
@@ -60,15 +60,12 @@ const sameBundledAndUser =
 if (!fs.existsSync(dbPath) && fs.existsSync(bundledDbPath)) {
   try {
     fs.copyFileSync(bundledDbPath, dbPath)
-  } catch (_) {
-    // se a cópia falhar, better-sqlite3 vai criar um novo banco vazio
-  }
+  } catch (_) {}
 } else if (
   fs.existsSync(dbPath) &&
   fs.existsSync(bundledDbPath) &&
   !sameBundledAndUser
 ) {
-  // Ex.: app instalado criou só o seed em userData, mas o database.db na pasta do projeto tem todas as variações.
   const userRO = openReadonlyDb(dbPath)
   const bundledRO = openReadonlyDb(bundledDbPath)
   if (
@@ -111,9 +108,7 @@ const db = new Database(dbPath)
 
 db.pragma('foreign_keys = ON')
 
-/**
- * Gera dígito verificador EAN-13
- */
+/** Dígito verificador EAN-13 a partir dos 12 primeiros dígitos. */
 function calcularDigitoVerificadorEAN13(codigo12) {
   const pesos = [1, 3, 1, 3, 1, 3, 1, 3, 1, 3, 1, 3]
   let soma = 0
@@ -124,9 +119,7 @@ function calcularDigitoVerificadorEAN13(codigo12) {
   return resto === 0 ? 0 : 10 - resto
 }
 
-/**
- * Gera código de barras EAN-13 único para o produto
- */
+/** Gera código EAN-13 único (base temporal + dígito verificador). */
 function gerarCodigoBarras() {
   const base = Date.now().toString().slice(-11).padStart(12, '78900000000')
   const digito = calcularDigitoVerificadorEAN13(base)
@@ -189,7 +182,6 @@ function initDatabase() {
       FOREIGN KEY (produto_id) REFERENCES produtos(id)
     );
 
-    -- Pagamentos por venda (para suportar múltiplas formas)
     CREATE TABLE IF NOT EXISTS vendas_pagamentos (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       venda_id INTEGER NOT NULL,
@@ -244,7 +236,7 @@ function initDatabase() {
 
 initDatabase()
 
-// Migração: remover CHECK de variacao em produtos para aceitar valores dinâmicos
+// Migração idempotente: produtos.variacao sem CHECK fixo (valores dinâmicos).
 try {
   const tableInfo = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='produtos'").get()
   if (tableInfo && tableInfo.sql && tableInfo.sql.includes("CHECK(variacao IN")) {
@@ -269,11 +261,9 @@ try {
     `)
     db.pragma('foreign_keys = ON')
   }
-} catch (_) {
-  // migração já executada ou não necessária
-}
+} catch (_) {}
 
-// Seed: tipos de variação padrão (Tamanho com P, M, G, GG)
+// Seed idempotente: tipo "Tamanho" e P/M/G/GG se não houver tipos.
 try {
   const countTipos = db.prepare('SELECT COUNT(*) as n FROM tipos_variacao').get()
   if (countTipos.n === 0) {
@@ -283,22 +273,19 @@ try {
       db.prepare('INSERT INTO variacao_valores (tipo_variacao_id, valor, ordem) VALUES (?, ?, ?)').run(tipoId, v, 0)
     }
   }
-} catch (_) {
-  // seed já executado
-}
+} catch (_) {}
 
 const rowCount = db.prepare('SELECT COUNT(*) as n FROM usuarios').get()
 if (rowCount.n === 0) {
   db.prepare('INSERT INTO usuarios (login, senha) VALUES (?, ?)').run('admin', 'admin')
 }
 
+// Coluna origem em movimentacoes_estoque (idempotente).
 try {
   db.exec(`ALTER TABLE movimentacoes_estoque ADD COLUMN origem TEXT DEFAULT 'admin'`)
-} catch (_) {
-  // coluna origem já existe
-}
+} catch (_) {}
 
-// Migrar vendas antigas para vendas_pagamentos (uma linha por venda)
+// Migração idempotente: copiar forma/valor da venda para vendas_pagamentos.
 try {
   db.exec(`
     INSERT INTO vendas_pagamentos (venda_id, forma_pagamento, valor)
@@ -306,12 +293,10 @@ try {
     FROM vendas v
     WHERE NOT EXISTS (SELECT 1 FROM vendas_pagamentos vp WHERE vp.venda_id = v.id)
   `)
-} catch (_) {
-  // migração já executada ou erro
-}
+} catch (_) {}
 
-// --- Migração: coluna sync_status (pending | synced) para controle de sincronização ---
-const TABELAS_SYNC = [
+/** Ordem das tabelas para migração de sync e envio ao Supabase (FKs). */
+const ORDEM_SYNC = [
   'usuarios',
   'artesoes',
   'tipos_variacao',
@@ -330,7 +315,7 @@ function tabelaTemColuna(dbConn, nomeTabela, coluna) {
   return cols.some((c) => c.name === coluna)
 }
 
-for (const tabela of TABELAS_SYNC) {
+for (const tabela of ORDEM_SYNC) {
   try {
     if (!tabelaTemColuna(db, tabela, 'sync_status')) {
       db.exec(`ALTER TABLE ${tabela} ADD COLUMN sync_status TEXT DEFAULT 'pending'`)
@@ -341,13 +326,9 @@ for (const tabela of TABELAS_SYNC) {
     if (!tabelaTemColuna(db, tabela, 'deleted_at')) {
       db.exec(`ALTER TABLE ${tabela} ADD COLUMN deleted_at TEXT`)
     }
-  } catch (_) {
-    // coluna já existe ou migração já aplicada
-  }
+  } catch (_) {}
 }
 
-// --- Funções para o serviço de sincronização ---
-/** Retorna todos os registros da tabela com sync_status = 'pending'. */
 function getPendingRecordsForSync(tabela) {
   if (!tabelaTemColuna(db, tabela, 'sync_status')) {
     return db.prepare(`SELECT * FROM ${tabela}`).all()
@@ -355,18 +336,11 @@ function getPendingRecordsForSync(tabela) {
   return db.prepare(`SELECT * FROM ${tabela} WHERE sync_status = 'pending'`).all()
 }
 
-/** Marca os registros pelos ids como sincronizados (sync_status = 'synced'). */
 function markAsSynced(tabela, ids) {
   if (ids.length === 0 || !tabelaTemColuna(db, tabela, 'sync_status')) return
   const placeholders = ids.map(() => '?').join(',')
   db.prepare(`UPDATE ${tabela} SET sync_status = 'synced' WHERE id IN (${placeholders})`).run(...ids)
 }
-
-/** Ordem das tabelas para envio ao Supabase (respeitando FKs). */
-const ORDEM_SYNC = [
-  'usuarios', 'artesoes', 'tipos_variacao', 'variacao_valores', 'produtos',
-  'vendas', 'vendas_itens', 'vendas_pagamentos', 'movimentacoes_estoque', 'movimentacoes_caixa',
-]
 
 // --- Artesãos ---
 
@@ -461,6 +435,7 @@ function excluirProduto(id) {
   stmt.run(id)
   return { id }
 }
+
 function buscarProdutoPorCodigo(codigo_barras) {
   const stmt = db.prepare(`
     SELECT p.*, a.nome as artesao_nome
@@ -581,10 +556,9 @@ function excluirValorVariacao(id) {
   return { id }
 }
 
-/** Retorna lista de valores de variação para uso em produtos (ex: ['P','M','G','GG','Vermelho','Azul']) */
 function listarTodosValoresVariacao() {
   const stmt = db.prepare(`
-    SELECT t.nome as tipo_nome, v.valor, v.id
+    SELECT v.valor
     FROM variacao_valores v
     JOIN tipos_variacao t ON t.id = v.tipo_variacao_id
     WHERE v.deleted_at IS NULL
@@ -710,14 +684,7 @@ function atribuirSequenciaPagamentosCaixa(rows) {
   return result
 }
 
-/**
- * Lista pagamentos por data para o Caixa (uma linha por forma de pagamento).
- * Formato: #0018/1 — PIX R$ 50,00 | #0018/2 — Crédito R$ 30,00
- * @param {string} dataISO - YYYY-MM-DD
- * @returns {Array<{ venda_id, sequencia, forma_pagamento, valor, data, valor_total, itens_resumo, qtd_itens }>}
- */
-function listarPagamentosCaixaPorData(dataISO) {
-  const rows = db.prepare(`
+const SQL_PAGAMENTOS_CAIXA_BASE = `
     SELECT
       v.id as venda_id,
       v.data,
@@ -729,40 +696,32 @@ function listarPagamentosCaixaPorData(dataISO) {
     FROM vendas_pagamentos vp
     JOIN vendas v ON v.id = vp.venda_id
     WHERE v.deleted_at IS NULL
-      AND vp.deleted_at IS NULL
+      AND vp.deleted_at IS NULL`
+
+/** Pagamentos do Caixa por dia ou intervalo (uma linha por forma de pagamento; sequência por venda). */
+function listarPagamentosCaixaPorData(dataISO) {
+  const rows = db
+    .prepare(
+      `${SQL_PAGAMENTOS_CAIXA_BASE}
       AND date(v.data) = date(?)
-    ORDER BY v.data DESC, v.id DESC, vp.id ASC
-  `).all(dataISO)
+    ORDER BY v.data DESC, v.id DESC, vp.id ASC`,
+    )
+    .all(dataISO)
   return atribuirSequenciaPagamentosCaixa(rows)
 }
 
-/**
- * Pagamentos do Caixa em um intervalo de datas (mesmo formato que por dia).
- */
 function listarPagamentosCaixaPorPeriodo(dataInicio, dataFim) {
-  const rows = db.prepare(`
-    SELECT
-      v.id as venda_id,
-      v.data,
-      v.valor_total,
-      vp.forma_pagamento,
-      vp.valor,
-      (SELECT GROUP_CONCAT(p.nome || ' x' || vi.quantidade) FROM vendas_itens vi JOIN produtos p ON p.id = vi.produto_id WHERE vi.venda_id = v.id AND vi.deleted_at IS NULL) as itens_resumo,
-      (SELECT COALESCE(SUM(vi.quantidade), 0) FROM vendas_itens vi WHERE vi.venda_id = v.id AND vi.deleted_at IS NULL) as qtd_itens
-    FROM vendas_pagamentos vp
-    JOIN vendas v ON v.id = vp.venda_id
-    WHERE v.deleted_at IS NULL
-      AND vp.deleted_at IS NULL
+  const rows = db
+    .prepare(
+      `${SQL_PAGAMENTOS_CAIXA_BASE}
       AND date(v.data) >= date(?)
       AND date(v.data) <= date(?)
-    ORDER BY v.data DESC, v.id DESC, vp.id ASC
-  `).all(dataInicio, dataFim)
+    ORDER BY v.data DESC, v.id DESC, vp.id ASC`,
+    )
+    .all(dataInicio, dataFim)
   return atribuirSequenciaPagamentosCaixa(rows)
 }
 
-/**
- * Pagamentos em um período apenas de vendas que contêm o produto.
- */
 function listarPagamentosCaixaPorPeriodoEProduto(dataInicio, dataFim, produtoId) {
   const pid = Number(produtoId)
   if (!Number.isFinite(pid) || pid <= 0) return []
@@ -995,7 +954,7 @@ function criarMovimentacaoCaixa({ tipo, valor, forma_pagamento, descricao = null
 }
 
 // --- Estoque ---
-// Adicionar estoque e registrar movimentação
+
 function adicionarEstoque(produto_id, quantidade, origem = 'admin') {
   const insertMov = db.prepare(`
     INSERT INTO movimentacoes_estoque (produto_id, tipo, quantidade, origem, data)
@@ -1011,7 +970,6 @@ function adicionarEstoque(produto_id, quantidade, origem = 'admin') {
   return { produto_id, quantidade, tipo: 'entrada' }
 }
 
-// Listar histórico recente
 function listarMovimentacoesRecentes(limite = 20) {
   return db.prepare(`
     SELECT m.*, p.nome as produto_nome, p.codigo_barras
@@ -1022,7 +980,6 @@ function listarMovimentacoesRecentes(limite = 20) {
   `).all(limite)
 }
 
-// Produtos mais vendidos (maior → menor)
 function listarProdutosMaisVendidos() {
   return db.prepare(`
     SELECT p.id, p.nome, p.codigo_barras, p.estoque, p.variacao, SUM(vi.quantidade) as total_vendido
@@ -1035,7 +992,6 @@ function listarProdutosMaisVendidos() {
   `).all()
 }
 
-// Movimentações por período (data em formato YYYY-MM-DD)
 function listarMovimentacoesPorPeriodo(dataInicio, dataFim) {
   return db.prepare(`
     SELECT m.*, p.nome as produto_nome, p.codigo_barras
@@ -1046,7 +1002,6 @@ function listarMovimentacoesPorPeriodo(dataInicio, dataFim) {
   `).all(dataInicio, dataFim)
 }
 
-// Produtos mais vendidos por período (maior → menor)
 function listarProdutosMaisVendidosPorPeriodo(dataInicio, dataFim) {
   return db.prepare(`
     SELECT p.id, p.nome, p.codigo_barras, p.estoque, p.variacao, p.artesao_id, a.nome as artesao_nome, SUM(vi.quantidade) as total_vendido
@@ -1203,26 +1158,10 @@ function obterLucroPeriodo(dataInicio, dataFim) {
   }
 }
 
-/**
- * Produtos mais vendidos no período, opcionalmente filtrado por artesão.
- * @param {string} dataInicio - YYYY-MM-DD
- * @param {string} dataFim - YYYY-MM-DD
- * @param {number|null} artesaoId - ID do artesão ou null para ranking geral
- * @returns {Array}
- */
+/** Ranking no período; com `artesaoId` filtra itens daquele artesão. */
 function listarProdutosMaisVendidosPorPeriodoEArtesao(dataInicio, dataFim, artesaoId = null) {
   if (artesaoId == null) {
-    return db.prepare(`
-      SELECT p.id, p.nome, p.codigo_barras, p.estoque, p.variacao, p.artesao_id, a.nome as artesao_nome, SUM(vi.quantidade) as total_vendido
-      FROM vendas_itens vi
-      JOIN vendas v ON v.id = vi.venda_id AND v.deleted_at IS NULL
-      JOIN produtos p ON p.id = vi.produto_id AND p.deleted_at IS NULL
-      LEFT JOIN artesoes a ON a.id = p.artesao_id
-      WHERE vi.deleted_at IS NULL
-        AND date(v.data) >= date(?) AND date(v.data) <= date(?)
-      GROUP BY vi.produto_id
-      ORDER BY total_vendido DESC
-    `).all(dataInicio, dataFim)
+    return listarProdutosMaisVendidosPorPeriodo(dataInicio, dataFim)
   }
 
   return db.prepare(`
@@ -1354,20 +1293,20 @@ function obterTotaisPagamentosPorPeriodo(dataInicio, dataFim) {
     GROUP BY vp.forma_pagamento
   `).all(dataInicio, dataFim)
 }
-  function validarLogin(login, senha) {
-    const row = db.prepare('SELECT id, login FROM usuarios WHERE login = ? AND senha = ?')
-      .get(String(login).trim(), senha)
-    return row || null
-  }
 
-  function criarUsuario(login, senha) {
-    const loginTrim = String(login).trim()
-    if (!loginTrim || !senha) throw new Error('Login e senha são obrigatórios.')
-    const existente = db.prepare('SELECT id FROM usuarios WHERE login = ?').get(loginTrim)
-    if (existente) throw new Error('Usuário já cadastrado.')
-    const result = db.prepare('INSERT INTO usuarios (login, senha) VALUES (?, ?)').run(loginTrim, senha)
-    return { id: result.lastInsertRowid, login: loginTrim }
-  }
+function validarLogin(login, senha) {
+  const row = db.prepare('SELECT id, login FROM usuarios WHERE login = ? AND senha = ?').get(String(login).trim(), senha)
+  return row || null
+}
+
+function criarUsuario(login, senha) {
+  const loginTrim = String(login).trim()
+  if (!loginTrim || !senha) throw new Error('Login e senha são obrigatórios.')
+  const existente = db.prepare('SELECT id FROM usuarios WHERE login = ?').get(loginTrim)
+  if (existente) throw new Error('Usuário já cadastrado.')
+  const result = db.prepare('INSERT INTO usuarios (login, senha) VALUES (?, ?)').run(loginTrim, senha)
+  return { id: result.lastInsertRowid, login: loginTrim }
+}
 
 // --- Exportações ---
 

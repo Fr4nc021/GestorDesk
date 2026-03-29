@@ -4,7 +4,7 @@ import pdvIcon from '../assets/icons/pdv.png'
 import estoqueIcon from '../assets/icons/estoque.png'
 import relatoriosIcon from '../assets/icons/relatorios.png'
 
-const quickActions = [
+const dashboardQuickActions = [
   { to: '/app/pdv', label: 'Vendas', icon: pdvIcon },
   { to: '/app/produtos', label: 'Produtos', icon: estoqueIcon },
   { to: '/app/caixa', label: 'Caixa', icon: relatoriosIcon },
@@ -12,22 +12,49 @@ const quickActions = [
 
 const TZ_BRASILIA = 'America/Sao_Paulo'
 
-function formatBRL(val) {
-  return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val ?? 0)
+const SYNC_TOOLBAR_ROW_STYLE = {
+  marginBottom: '1rem',
+  display: 'flex',
+  alignItems: 'center',
+  gap: '0.75rem',
+  flexWrap: 'wrap',
+}
+
+function formatBRL(valor) {
+  return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(valor ?? 0)
 }
 
 function hojeISO() {
   return new Date().toLocaleDateString('sv-SE', { timeZone: TZ_BRASILIA })
 }
 
-const LABEL_PAGAMENTO = {
+function intervaloMesAnteriorISO(hojeISOString) {
+  const d = new Date(`${hojeISOString}T12:00:00`)
+  d.setMonth(d.getMonth() - 1)
+  const ano = d.getFullYear()
+  const mes = String(d.getMonth() + 1).padStart(2, '0')
+  const ultimoDia = new Date(ano, d.getMonth() + 1, 0).getDate()
+  const fim = String(ultimoDia).padStart(2, '0')
+  return { inicio: `${ano}-${mes}-01`, fim: `${ano}-${mes}-${fim}` }
+}
+
+function percentualVariacaoVsMesAnterior(resumoAtual, resumoAnterior) {
+  if (resumoAtual && resumoAnterior != null && resumoAnterior.totalVendas > 0) {
+    return (((resumoAtual.totalVendas - resumoAnterior.totalVendas) / resumoAnterior.totalVendas) * 100).toFixed(1)
+  }
+  if (resumoAtual && resumoAtual.totalVendas > 0 && (!resumoAnterior || resumoAnterior.totalVendas === 0)) {
+    return '100'
+  }
+  return null
+}
+
+const FORMA_PAGAMENTO_LABEL = {
   credito: 'credit',
   debito: 'debit',
   pix: 'pix',
   dinheiro: 'cash',
 }
 
-// Ícones SVG
 const IconDolar = () => (
   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
     <line x1="12" y1="1" x2="12" y2="23" />
@@ -54,36 +81,27 @@ export default function Dashboard() {
   const [vendasRecentes, setVendasRecentes] = useState([])
   const [resumoMesAtual, setResumoMesAtual] = useState(null)
   const [resumoMesAnterior, setResumoMesAnterior] = useState(null)
-  const [syncStatus, setSyncStatus] = useState('idle') // idle | checking | syncing | ok | error | no-internet
+  const [syncStatus, setSyncStatus] = useState('idle')
   const [syncMessage, setSyncMessage] = useState('')
 
   useEffect(() => {
     async function carregar() {
       try {
         const hoje = hojeISO()
-        const [totalHoje, prods, vendas] = await Promise.all([
+        const [totalHoje, listaProdutos, listaVendas] = await Promise.all([
           window.electronAPI.obterTotalVendasHoje(),
           window.electronAPI.listarProdutos(),
           window.electronAPI.listarVendas(),
         ])
         setVendasHoje(totalHoje)
-        setProdutos(prods ?? [])
-        setVendasRecentes((vendas ?? []).slice(0, 4))
+        setProdutos(listaProdutos ?? [])
+        setVendasRecentes((listaVendas ?? []).slice(0, 4))
 
-        const inicioMes = hoje.slice(0, 8) + '01'
+        const inicioMes = `${hoje.slice(0, 8)}01`
+        const { inicio, fim } = intervaloMesAnteriorISO(hoje)
         const [resAtual, resAnterior] = await Promise.all([
           window.electronAPI.obterResumoVendasPeriodo(inicioMes, hoje),
-          (async () => {
-            const d = new Date(hoje + 'T12:00:00')
-            d.setMonth(d.getMonth() - 1)
-            const ano = d.getFullYear()
-            const mes = String(d.getMonth() + 1).padStart(2, '0')
-            const ultimoDia = new Date(ano, d.getMonth() + 1, 0).getDate()
-            return window.electronAPI.obterResumoVendasPeriodo(
-              `${ano}-${mes}-01`,
-              `${ano}-${mes}-${String(ultimoDia).padStart(2, '0')}`
-            )
-          })(),
+          window.electronAPI.obterResumoVendasPeriodo(inicio, fim),
         ])
         setResumoMesAtual(resAtual)
         setResumoMesAnterior(resAnterior)
@@ -121,27 +139,21 @@ export default function Dashboard() {
   const totalProdutosAtivos = produtos.filter(p => (p.estoque ?? 0) > 0).length
   const totalItensEstoque = produtos.reduce((acc, p) => acc + (p.estoque ?? 0), 0)
   const vendasTotais = vendasHoje?.totalVendas ?? 0
-
-  let variacaoPercentual = null
-  if (resumoMesAtual && resumoMesAnterior != null && resumoMesAnterior.totalVendas > 0) {
-    variacaoPercentual = (((resumoMesAtual.totalVendas - resumoMesAnterior.totalVendas) / resumoMesAnterior.totalVendas) * 100).toFixed(1)
-  } else if (resumoMesAtual && resumoMesAtual.totalVendas > 0 && (!resumoMesAnterior || resumoMesAnterior.totalVendas === 0)) {
-    variacaoPercentual = '100'
-  }
+  const variacaoPercentual = percentualVariacaoVsMesAnterior(resumoMesAtual, resumoMesAnterior)
 
   return (
     <div className="dashboard">
       <section className="dashboard-section">
         <h2 className="dashboard-heading">Ações Rápidas</h2>
         <hr className="dashboard-divider" />
-        <div style={{ marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+        <div style={SYNC_TOOLBAR_ROW_STYLE}>
           <button
             type="button"
             onClick={handleSyncClick}
             className="btn-sync-manual"
-            disabled={syncStatus === 'checking' || syncStatus === 'syncing'}
+            disabled={syncStatus === 'checking'}
           >
-            {syncStatus === 'checking' || syncStatus === 'syncing' ? 'Sincronizando...' : 'Sincronizar agora'}
+            {syncStatus === 'checking' ? 'Sincronizando...' : 'Sincronizar agora'}
           </button>
           {syncMessage && (
             <span className="sync-status-text">
@@ -150,7 +162,7 @@ export default function Dashboard() {
           )}
         </div>
         <div className="quick-actions">
-          {quickActions.map(({ to, label, icon }) => (
+          {dashboardQuickActions.map(({ to, label, icon }) => (
             <Link key={to} to={to} className="quick-action-card">
               <img src={icon} alt="" className="quick-action-icon" />
               <span className="quick-action-label">{label}</span>
@@ -194,15 +206,15 @@ export default function Dashboard() {
             {vendasRecentes.length === 0 ? (
               <p className="vendas-recentes-vazio">Nenhuma venda recente.</p>
             ) : (
-              vendasRecentes.map((v) => (
-                <div key={v.id} className="venda-recente-item">
+              vendasRecentes.map((venda) => (
+                <div key={venda.id} className="venda-recente-item">
                   <div>
-                    <span className="venda-recente-id">Venda #{String(v.id).padStart(4, '0')}</span>
+                    <span className="venda-recente-id">Venda #{String(venda.id).padStart(4, '0')}</span>
                     <span className="venda-recente-detalhes">
-                      {v.qtd_itens ?? 0} itens - {LABEL_PAGAMENTO[v.forma_pagamento] ?? v.forma_pagamento}
+                      {venda.qtd_itens ?? 0} itens - {FORMA_PAGAMENTO_LABEL[venda.forma_pagamento] ?? venda.forma_pagamento}
                     </span>
                   </div>
-                  <span className="venda-recente-valor">{formatBRL(v.valor_total)}</span>
+                  <span className="venda-recente-valor">{formatBRL(venda.valor_total)}</span>
                 </div>
               ))
             )}
