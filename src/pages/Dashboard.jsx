@@ -105,10 +105,10 @@ export default function Dashboard() {
         ])
         setResumoMesAtual(resAtual)
         setResumoMesAnterior(resAnterior)
-      } catch (err) {
-        console.error(err)
-      }
+    } catch (err) {
+      console.error('[Dashboard] Erro ao carregar dados iniciais:', err)
     }
+  }
     carregar()
   }, [])
 
@@ -131,6 +131,7 @@ export default function Dashboard() {
       setSyncStatus('ok')
       setSyncMessage('Aplicativo sincronizado!')
     } catch (err) {
+      console.error('[Dashboard] Erro na sincronização manual:', err)
       setSyncStatus('error')
       setSyncMessage(err?.message || 'Erro ao sincronizar.')
     }
