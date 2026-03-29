@@ -42,8 +42,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
   criarMovimentacaoCaixa: (data) => ipcRenderer.invoke('criar-movimentacao-caixa', data),
   listarVendasPorData: (data) => ipcRenderer.invoke('listar-vendas-por-data', data),
   listarPagamentosCaixaPorData: (data) => ipcRenderer.invoke('listar-pagamentos-caixa-por-data', data),
+  listarPagamentosCaixaPorPeriodo: (dataInicio, dataFim) =>
+    ipcRenderer.invoke('listar-pagamentos-caixa-por-periodo', dataInicio, dataFim),
+  listarPagamentosCaixaPorPeriodoEProduto: (dataInicio, dataFim, produtoId) =>
+    ipcRenderer.invoke('listar-pagamentos-caixa-por-periodo-e-produto', dataInicio, dataFim, produtoId),
   listarVendasPorPeriodo: (dataInicio, dataFim) => ipcRenderer.invoke('listar-vendas-por-periodo', dataInicio, dataFim),
+  listarVendasPorPeriodoEArtesao: (dataInicio, dataFim, artesaoId) =>
+    ipcRenderer.invoke('listar-vendas-por-periodo-e-artesao', dataInicio, dataFim, artesaoId),
   excluirVenda: (id) => ipcRenderer.invoke('excluir-venda', id),
+  obterVendaParaEdicao: (id) => ipcRenderer.invoke('obter-venda-para-edicao', id),
+  atualizarVenda: (id, data) => ipcRenderer.invoke('atualizar-venda', id, data),
   salvarRelatorioPDF: (pdfBase64, filename) => ipcRenderer.invoke('salvar-relatorio-pdf', pdfBase64, filename),
 
   // Impressão

@@ -56,12 +56,12 @@ function loadEnv() {
 
 loadEnv()
 
-// Define caminho do banco em ambiente empacotado (instalado)
-if (app.isPackaged) {
+// Banco sempre em userData (dev e instalado): atualizar o app nao troca esse arquivo.
+// Sobrescreva com GESTORDESK_DB_PATH no ambiente se precisar de outro caminho.
+{
   const userDataDir = app.getPath('userData')
-  const dbPath = path.join(userDataDir, 'database.db')
   if (!process.env.GESTORDESK_DB_PATH) {
-    process.env.GESTORDESK_DB_PATH = dbPath
+    process.env.GESTORDESK_DB_PATH = path.join(userDataDir, 'database.db')
   }
   if (!process.env.GESTORDESK_USER_DATA_DIR) {
     process.env.GESTORDESK_USER_DATA_DIR = userDataDir
@@ -85,8 +85,13 @@ const {
   listarVendasDoDia,
   listarVendasPorData,
   listarPagamentosCaixaPorData,
+  listarPagamentosCaixaPorPeriodo,
+  listarPagamentosCaixaPorPeriodoEProduto,
   listarVendasPorPeriodo,
+  listarVendasPorPeriodoEArtesao,
   excluirVenda,
+  obterVendaParaEdicao,
+  atualizarVenda,
   criarMovimentacaoCaixa,
   adicionarEstoque,
   listarMovimentacoesRecentes,
@@ -159,10 +164,10 @@ function createWindow() {
 ipcMain.handle('validar-login', async (_, login, senha) => {
   const user = validarLogin(login, senha)
   if (user) {
-    // Usa o mesmo login/senha do GestorDesk para autenticar no Supabase (via "email virtual").
     setSupabaseAuthFromAppLogin(login, senha)
-    // Tenta sincronizar imediatamente após login (não bloqueia o login se falhar).
-    syncWithSupabase().catch(() => {})
+    // Aguarda o sync terminar antes de liberar o app — assim variações e demais dados do Supabase
+    // já estarão no banco local quando o usuário navegar para Produtos/Dashboard.
+    await syncWithSupabase().catch(() => {})
   }
   return user
 })
@@ -213,8 +218,19 @@ ipcMain.handle('criar-movimentacao-caixa', (_, data) => criarMovimentacaoCaixa(d
 //caixa filtro por data
 ipcMain.handle('listar-vendas-por-data', (_, data) => listarVendasPorData(data))
 ipcMain.handle('listar-pagamentos-caixa-por-data', (_, data) => listarPagamentosCaixaPorData(data))
+ipcMain.handle('listar-pagamentos-caixa-por-periodo', (_, dataInicio, dataFim) =>
+  listarPagamentosCaixaPorPeriodo(dataInicio, dataFim),
+)
+ipcMain.handle('listar-pagamentos-caixa-por-periodo-e-produto', (_, dataInicio, dataFim, produtoId) =>
+  listarPagamentosCaixaPorPeriodoEProduto(dataInicio, dataFim, produtoId),
+)
 ipcMain.handle('listar-vendas-por-periodo', (_, dataInicio, dataFim) => listarVendasPorPeriodo(dataInicio, dataFim))
+ipcMain.handle('listar-vendas-por-periodo-e-artesao', (_, dataInicio, dataFim, artesaoId) =>
+  listarVendasPorPeriodoEArtesao(dataInicio, dataFim, artesaoId ?? null),
+)
 ipcMain.handle('excluir-venda', (_, id) => excluirVenda(id))
+ipcMain.handle('obter-venda-para-edicao', (_, id) => obterVendaParaEdicao(id))
+ipcMain.handle('atualizar-venda', (_, id, data) => atualizarVenda(id, data))
 
 ipcMain.handle('imprimir-etiquetas', async (event) => {
   const win = BrowserWindow.fromWebContents(event.sender)

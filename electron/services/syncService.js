@@ -8,6 +8,124 @@ const { db, getPendingRecordsForSync, markAsSynced, ORDEM_SYNC } = require('../d
 const { hasInternetConnection } = require('../utils/internetCheck')
 const { getAuthedSupabaseClient } = require('./supabaseClient')
 
+function normalizeNome(v) {
+  return String(v || '').trim()
+}
+
+function normalizeValor(v) {
+  return String(v || '').trim()
+}
+
+/**
+ * Realinha PK local com o id remoto quando o mesmo `nome` já existe na nuvem com outro id.
+ * Evita: duplicate key value violates unique constraint "tipos_variacao_nome_key".
+ */
+function realizarTipoVariacaoLocalParaRemotoId(localId, remoteId) {
+  if (localId === remoteId) return
+  const localRow = db.prepare('SELECT nome FROM tipos_variacao WHERE id = ?').get(localId)
+  if (!localRow) return
+  const existente = db.prepare('SELECT id, nome FROM tipos_variacao WHERE id = ?').get(remoteId)
+  if (existente && normalizeNome(existente.nome) !== normalizeNome(localRow.nome)) {
+    console.warn(`[Sync] Ignorando alinhamento tipos_variacao: id ${remoteId} já usado com outro nome.`)
+    return
+  }
+
+  db.pragma('foreign_keys = OFF')
+  try {
+    if (existente) {
+      const vals = db.prepare('SELECT id FROM variacao_valores WHERE tipo_variacao_id = ?').all(localId)
+      for (const v of vals) {
+        const valorRow = db.prepare('SELECT valor FROM variacao_valores WHERE id = ?').get(v.id)
+        const val = normalizeValor(valorRow?.valor)
+        const dup = db.prepare('SELECT id FROM variacao_valores WHERE tipo_variacao_id = ? AND valor = ?').get(remoteId, val)
+        if (dup) {
+          db.prepare('DELETE FROM variacao_valores WHERE id = ?').run(v.id)
+        } else {
+          db.prepare('UPDATE variacao_valores SET tipo_variacao_id = ? WHERE id = ?').run(remoteId, v.id)
+        }
+      }
+      db.prepare('DELETE FROM tipos_variacao WHERE id = ?').run(localId)
+    } else {
+      const vals = db.prepare('SELECT id FROM variacao_valores WHERE tipo_variacao_id = ?').all(localId)
+      for (const v of vals) {
+        const valorRow = db.prepare('SELECT valor FROM variacao_valores WHERE id = ?').get(v.id)
+        const val = normalizeValor(valorRow?.valor)
+        const dup = db.prepare('SELECT id FROM variacao_valores WHERE tipo_variacao_id = ? AND valor = ?').get(remoteId, val)
+        if (dup) {
+          db.prepare('DELETE FROM variacao_valores WHERE id = ?').run(v.id)
+        } else {
+          db.prepare('UPDATE variacao_valores SET tipo_variacao_id = ? WHERE id = ?').run(remoteId, v.id)
+        }
+      }
+      db.prepare('UPDATE tipos_variacao SET id = ? WHERE id = ?').run(remoteId, localId)
+    }
+  } finally {
+    db.pragma('foreign_keys = ON')
+  }
+}
+
+/**
+ * Realinha id local com o remoto para o mesmo par (tipo_variacao_id, valor).
+ * Evita conflito com UNIQUE (tipo_variacao_id, valor) no Postgres ao fazer upsert só por id.
+ */
+function realizarVariacaoValorLocalParaRemotoId(localId, remoteId) {
+  if (localId === remoteId) return
+  const conflito = db.prepare('SELECT id FROM variacao_valores WHERE id = ?').get(remoteId)
+  db.pragma('foreign_keys = OFF')
+  try {
+    if (conflito) {
+      db.prepare('DELETE FROM variacao_valores WHERE id = ?').run(localId)
+    } else {
+      db.prepare('UPDATE variacao_valores SET id = ? WHERE id = ?').run(remoteId, localId)
+    }
+  } finally {
+    db.pragma('foreign_keys = ON')
+  }
+}
+
+async function alinearTiposVariacaoComSupabase(supabase) {
+  const { data: remote, error } = await supabase.from('tipos_variacao').select('id, nome')
+  if (error) throw error
+
+  const byNome = new Map()
+  for (const r of remote || []) {
+    const nome = normalizeNome(r.nome)
+    if (!nome) continue
+    if (!byNome.has(nome)) byNome.set(nome, r.id)
+  }
+
+  const locais = db.prepare('SELECT id, nome FROM tipos_variacao WHERE deleted_at IS NULL').all()
+  db.transaction(() => {
+    for (const row of locais) {
+      const nome = normalizeNome(row.nome)
+      const remoteId = byNome.get(nome)
+      if (!remoteId || remoteId === row.id) continue
+      realizarTipoVariacaoLocalParaRemotoId(row.id, remoteId)
+    }
+  })()
+}
+
+async function alinearVariacaoValoresComSupabase(supabase) {
+  const { data: remote, error } = await supabase.from('variacao_valores').select('id, tipo_variacao_id, valor')
+  if (error) throw error
+
+  const key = (tipoId, valor) => `${tipoId}:${normalizeValor(valor)}`
+  const byKey = new Map()
+  for (const r of remote || []) {
+    const k = key(r.tipo_variacao_id, r.valor)
+    if (!byKey.has(k)) byKey.set(k, r.id)
+  }
+
+  const locais = db.prepare('SELECT id, tipo_variacao_id, valor FROM variacao_valores WHERE deleted_at IS NULL').all()
+  db.transaction(() => {
+    for (const row of locais) {
+      const remoteId = byKey.get(key(row.tipo_variacao_id, row.valor))
+      if (!remoteId || remoteId === row.id) continue
+      realizarVariacaoValorLocalParaRemotoId(row.id, remoteId)
+    }
+  })()
+}
+
 /**
  * Normaliza uma linha do SQLite para o formato esperado pelo Supabase (tipos e null).
  */
@@ -149,6 +267,10 @@ async function syncWithSupabase() {
   const resultados = []
 
   try {
+    // 0) Alinha ids locais com a nuvem (UNIQUE em nome / par tipo+valor), antes do upsert por id
+    await alinearTiposVariacaoComSupabase(supabase)
+    await alinearVariacaoValoresComSupabase(supabase)
+
     // 1) Envia alterações locais (pending -> Supabase)
     for (const tabela of ORDEM_SYNC) {
       try {

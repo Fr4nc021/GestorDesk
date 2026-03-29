@@ -1,13 +1,13 @@
 {
   "name": "gestordesk",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.4.0",
   "main": "electron/main.cjs",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "sync:full": "electron scripts/full-resync.cjs",
-    "clean:db": "electron scripts/clean-db-before-build.cjs",
+    "clean:db": "node scripts/clean-db-before-build.cjs",
     "cleanup:supabase:produtos": "node scripts/cleanup-supabase-produtos-synced-zero.cjs",
     "seed:produtos": "electron scripts/seed-produtos.cjs",
     "seed:vendas": "electron scripts/seed-vendas.cjs",
@@ -18,7 +18,8 @@
     "electron": "electron .",
     "start": "concurrently \"npm run dev\" \"npm run electron\"",
     "postinstall": "electron-rebuild",
-    "dist": "npm run clean:db && npm run build && electron-builder"
+    "dist": "npm run build && node scripts/build-installer.cjs",
+    "dist:clean": "npm run clean:db && npm run build && node scripts/build-installer.cjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.97.0",

@@ -2,6 +2,17 @@ import loupeIcon from '../assets/complements/loupe.png'
 import { useState, useEffect } from 'react'
 
 
+const REGIOES_TELEFONE = [
+  { id: 'BR', nome: 'Brasil', codigo: '+55' },
+  { id: 'AR', nome: 'Argentina', codigo: '+54' },
+  { id: 'UY', nome: 'Uruguai', codigo: '+598' },
+  { id: 'PY', nome: 'Paraguai', codigo: '+595' },
+  { id: 'CL', nome: 'Chile', codigo: '+56' },
+  { id: 'BO', nome: 'Bolivia', codigo: '+591' },
+]
+
+const REGIAO_PADRAO = REGIOES_TELEFONE[0]
+
 
 export default function Artesaos() {
   const [artesoes, setArtesoes] = useState([])
@@ -14,6 +25,8 @@ export default function Artesaos() {
   const [artesaoParaExcluir, setArtesaoParaExcluir] = useState(null)
   const [nome, setNome] = useState('')
   const [telefoneWhatsapp, setTelefoneWhatsapp] = useState('')
+  const [modalRegiaoAberto, setModalRegiaoAberto] = useState(false)
+  const [regiaoTelefone, setRegiaoTelefone] = useState(REGIAO_PADRAO)
 
   async function carregarArtesoes() {
     try {
@@ -33,14 +46,17 @@ export default function Artesaos() {
   function abrirModal() {
     setArtesaoEmEdicao(null)
     setNome('')
-    setTelefoneWhatsapp('+55 ')
+    setTelefoneWhatsapp('')
+    setRegiaoTelefone(REGIAO_PADRAO)
     setModalAberto(true)
   }
 
   function abrirModalEdicao(artesao) {
     setArtesaoEmEdicao(artesao)
     setNome(artesao.nome)
-    setTelefoneWhatsapp(artesao.telefone_whats ? formatarTelefone(artesao.telefone_whats) : '+55 ')
+    const { regiao, telefoneLocal } = extrairRegiaoETelefone(artesao.telefone_whats)
+    setRegiaoTelefone(regiao)
+    setTelefoneWhatsapp(telefoneLocal)
     setModalAberto(true)
   }
 
@@ -49,18 +65,38 @@ export default function Artesaos() {
     setModalExcluirAberto(true)
   }
 
-  function formatarTelefone(valor) {
-    const digitos = valor.replace(/\D/g, '').replace(/^55/, '')
-    if (digitos.length === 0) return '+55 '
-    if (digitos.length <= 2) return `+55 (${digitos}`
-    if (digitos.length <= 7) return `+55 (${digitos.slice(0, 2)}) ${digitos.slice(2)}`
-    return `+55 (${digitos.slice(0, 2)}) ${digitos.slice(2, 7)}-${digitos.slice(7, 11)}`
+  function formatarTelefoneLocal(valor) {
+    const digitos = String(valor || '').replace(/\D/g, '').slice(0, 11)
+    if (digitos.length === 0) return ''
+    if (digitos.length <= 2) return `(${digitos}`
+    if (digitos.length <= 6) return `(${digitos.slice(0, 2)}) ${digitos.slice(2)}`
+    if (digitos.length <= 10) return `(${digitos.slice(0, 2)}) ${digitos.slice(2, 6)}-${digitos.slice(6)}`
+    return `(${digitos.slice(0, 2)}) ${digitos.slice(2, 7)}-${digitos.slice(7, 11)}`
+  }
+
+  function extrairRegiaoETelefone(telefoneCompleto) {
+    const digitos = String(telefoneCompleto || '').replace(/\D/g, '')
+    if (!digitos) return { regiao: REGIAO_PADRAO, telefoneLocal: '' }
+
+    const regioesOrdenadas = [...REGIOES_TELEFONE]
+      .sort((a, b) => b.codigo.replace(/\D/g, '').length - a.codigo.replace(/\D/g, '').length)
+
+    for (const regiao of regioesOrdenadas) {
+      const codigoDigitos = regiao.codigo.replace(/\D/g, '')
+      if (digitos.length > 11 && digitos.startsWith(codigoDigitos)) {
+        const telefoneLocal = formatarTelefoneLocal(digitos.slice(codigoDigitos.length))
+        return { regiao, telefoneLocal }
+      }
+    }
+
+    return { regiao: REGIAO_PADRAO, telefoneLocal: formatarTelefoneLocal(digitos) }
   }
 
   function handleTelefoneChange(e) {
     const valor = e.target.value
-    const digitos = valor.replace(/\D/g, '').replace(/^55/, '').slice(0, 11)
-    setTelefoneWhatsapp(formatarTelefone(digitos))
+    const { regiao, telefoneLocal } = extrairRegiaoETelefone(valor)
+    setRegiaoTelefone(regiao)
+    setTelefoneWhatsapp(telefoneLocal)
   }
 
   async function handleSalvarArtesao(e) {
@@ -73,15 +109,18 @@ export default function Artesaos() {
     }
 
     try {
+      const temTelefone = telefoneWhatsapp.replace(/\D/g, '').length > 0
+      const telefoneCompleto = temTelefone ? `${regiaoTelefone.codigo} ${telefoneWhatsapp.trim()}` : null
+
       if (artesaoEmEdicao) {
         await window.electronAPI.atualizarArtesao(artesaoEmEdicao.id, {
           nome: nome.trim(),
-          telefone_whats: telefoneWhatsapp.replace(/\D/g, '').length > 2 ? telefoneWhatsapp.trim() : null,
+          telefone_whats: telefoneCompleto,
         })
       } else {
         await window.electronAPI.criarArtesao({
           nome: nome.trim(),
-          telefone_whats: telefoneWhatsapp.replace(/\D/g, '').length > 2 ? telefoneWhatsapp.trim() : null,
+          telefone_whats: telefoneCompleto,
         })
       }
       setModalAberto(false)
@@ -248,18 +287,54 @@ export default function Artesaos() {
               </div>
               <div className="modal-field">
                 <label htmlFor="telefone">Telefone / WhatsApp</label>
+                <button
+                  type="button"
+                  className="modal-btn-cancelar"
+                  onClick={() => setModalRegiaoAberto(true)}
+                  style={{ marginBottom: '8px', width: '100%' }}
+                >
+                  Regiao: {regiaoTelefone.nome} ({regiaoTelefone.codigo})
+                </button>
                 <input
                   id="telefone"
                   type="tel"
                   value={telefoneWhatsapp}
                   onChange={handleTelefoneChange}
-                  placeholder="+55 (11) 99999-9999"
+                  placeholder="(11) 99999-9999"
                 />
               </div>
               <button type="submit" className="modal-submit">
                 {artesaoEmEdicao ? 'Salvar Alterações' : 'Salvar Artesão'}
               </button>
             </form>
+          </div>
+        </div>
+      )}
+
+      {modalRegiaoAberto && (
+        <div className="modal-overlay" onClick={() => setModalRegiaoAberto(false)}>
+          <div className="modal-content modal-confirm" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Selecionar regiao</h3>
+              <button type="button" className="modal-close" onClick={() => setModalRegiaoAberto(false)} aria-label="Fechar">
+                ×
+              </button>
+            </div>
+            <div className="modal-confirm-acoes" style={{ display: 'grid', gap: '8px' }}>
+              {REGIOES_TELEFONE.map((regiao) => (
+                <button
+                  key={regiao.id}
+                  type="button"
+                  className={regiao.id === regiaoTelefone.id ? 'modal-submit' : 'modal-btn-cancelar'}
+                  onClick={() => {
+                    setRegiaoTelefone(regiao)
+                    setModalRegiaoAberto(false)
+                  }}
+                >
+                  {regiao.nome} ({regiao.codigo})
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       )}

@@ -30,3 +30,7 @@ dist-ssr
 
 # Build/release artifacts
 release/
+
+# Local SQLite (não versionar dados reais)
+database.db
+*.db

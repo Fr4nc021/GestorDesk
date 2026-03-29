@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import codeIcon from '../assets/complements/code.png'
 import ProdutoSearchModal from '../components/ProdutoSearchModal'
 
@@ -8,6 +9,8 @@ function formatBRL(val) {
 }
 
 export default function PDV() {
+  const location = useLocation()
+  const navigate = useNavigate()
   const [codigoInput, setCodigoInput] = useState('')
   const [itens, setItens] = useState([])
   const [tipoDesconto, setTipoDesconto] = useState('valor') // 'valor' ou 'percent'
@@ -17,15 +20,84 @@ export default function PDV() {
   const [showModalPagamento, setShowModalPagamento] = useState(false)
   const [showModalPesquisa, setShowModalPesquisa] = useState(false)
   const [valorRecebido, setValorRecebido] = useState('')
+  const [vendaEdicaoId, setVendaEdicaoId] = useState(null)
   const inputRef = useRef(null)
   const finalizarRef = useRef(null)
   const [toast, setToast] = useState(null) // ex: { mensagem: '...', tipo: 'sucesso' }
+  const [voltarRelatorios, setVoltarRelatorios] = useState(false)
 
   useEffect(() => {
     if (!toast) return
     const timer = setTimeout(() => setToast(null), 3000)
     return () => clearTimeout(timer)
   }, [toast])
+
+  useEffect(() => {
+    if (location.state?.relatoriosRestore) {
+      setVoltarRelatorios(true)
+    }
+    const rawId = location.state?.editarVendaId
+    if (rawId == null) return
+    const id = Number(rawId)
+    if (!Number.isFinite(id)) return
+
+    let cancelled = false
+    ;(async () => {
+      try {
+        const v = await window.electronAPI.obterVendaParaEdicao(id)
+        if (cancelled) return
+        if (!v?.itens?.length) {
+          alert('Venda não encontrada ou sem itens.')
+          return
+        }
+        setVendaEdicaoId(id)
+        setItens(
+          v.itens.map((row) => ({
+            id: row.produto_id,
+            nome: row.nome,
+            codigo_barras: row.codigo_barras,
+            preco_venda: row.preco_unitario,
+            quantidade: row.quantidade,
+            estoque: row.estoque,
+          })),
+        )
+        const forms = v.pagamentos.map((p) => p.forma_pagamento)
+        setFormasSelecionadas(forms)
+        const sub = v.itens.reduce((a, r) => a + r.preco_unitario * r.quantidade, 0)
+        const descValor = sub - (v.valor_total ?? 0)
+        if (descValor > 0.009) {
+          setTipoDesconto('valor')
+          setDescontoInput(String(Number(descValor.toFixed(2))).replace('.', ','))
+        } else {
+          setTipoDesconto('valor')
+          setDescontoInput('')
+        }
+        if (forms.length > 1) {
+          const vm = {}
+          for (const p of v.pagamentos) {
+            vm[p.forma_pagamento] = String(Number(p.valor).toFixed(2)).replace('.', ',')
+          }
+          setValoresPorForma(vm)
+          setValorRecebido('')
+        } else {
+          setValoresPorForma({})
+          const u = forms[0]
+          if (u === 'dinheiro' && v.pagamentos[0]) {
+            setValorRecebido(String(Number(v.pagamentos[0].valor).toFixed(2)).replace('.', ','))
+          } else {
+            setValorRecebido('')
+          }
+        }
+        navigate('.', { replace: true, state: {} })
+      } catch (err) {
+        console.error(err)
+        alert('Erro ao carregar venda para edição.')
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [location.state, navigate])
 
   const FORMAS_PAGAMENTO = [
     { id: 'credito', label: 'Cartão de Crédito', icon: 'credit' },
@@ -38,6 +110,11 @@ export default function PDV() {
     if (!produto) return
     setItens((prev) => {
       const existe = prev.find((i) => i.id === produto.id)
+      const qBase = existe ? existe.quantidade : 0
+      const maxQ = (produto.estoque ?? 0) + (vendaEdicaoId ? qBase : 0)
+      if (qBase + 1 > maxQ) {
+        return prev
+      }
       if (existe) {
         return prev.map((i) =>
           i.id === produto.id ? { ...i, quantidade: i.quantidade + 1 } : i
@@ -56,12 +133,14 @@ export default function PDV() {
         alert('Produto não encontrado')
         return
       }
+      const qNoCarrinho = itens.find((i) => i.id === produto.id)?.quantidade ?? 0
       const estoqueAtual = produto.estoque ?? 0
-      if (estoqueAtual <= 0) {
+      const maxPermitido = estoqueAtual + (vendaEdicaoId ? qNoCarrinho : 0)
+      if (qNoCarrinho + 1 > maxPermitido) {
         setToast({ tipo: 'erro', mensagem: 'Produto sem estoque disponível.' })
         return
       }
-      if (estoqueAtual === 1) {
+      if (maxPermitido - qNoCarrinho <= 1) {
         setToast({ tipo: 'alerta', mensagem: 'Atenção: este é o último item em estoque.' })
       }
       adicionarItemNaVenda(produto)
@@ -79,12 +158,14 @@ export default function PDV() {
 
   function selecionarProduto(produto) {
     if (!produto) return
+    const qNoCarrinho = itens.find((i) => i.id === produto.id)?.quantidade ?? 0
     const estoqueAtual = produto.estoque ?? 0
-    if (estoqueAtual <= 0) {
+    const maxPermitido = estoqueAtual + (vendaEdicaoId ? qNoCarrinho : 0)
+    if (qNoCarrinho + 1 > maxPermitido) {
       setToast({ tipo: 'erro', mensagem: 'Produto sem estoque disponível.' })
       return
     }
-    if (estoqueAtual === 1) {
+    if (maxPermitido - qNoCarrinho <= 1) {
       setToast({ tipo: 'alerta', mensagem: 'Atenção: este é o último item em estoque.' })
     }
     adicionarItemNaVenda(produto)
@@ -111,13 +192,41 @@ export default function PDV() {
     setItens((prev) => prev.filter((i) => i.id !== id))
   }
 
-  function handleAlterarQtd(id, delta) {
+  async function handleAlterarQtd(id, delta) {
+    if (delta > 0) {
+      const item = itens.find((i) => i.id === id)
+      if (!item) return
+      const codigo = String(item.codigo_barras || '').trim()
+      if (!codigo) {
+        setToast({ tipo: 'erro', mensagem: 'Não foi possível validar o estoque deste item.' })
+        return
+      }
+      try {
+        const prod = await window.electronAPI.buscarProdutoPorCodigo(codigo)
+        if (!prod) {
+          setToast({ tipo: 'erro', mensagem: 'Produto não encontrado.' })
+          return
+        }
+        const nova = item.quantidade + delta
+        const maxQ = (prod.estoque ?? 0) + (vendaEdicaoId ? item.quantidade : 0)
+        if (nova > maxQ) {
+          setToast({ tipo: 'erro', mensagem: 'Estoque insuficiente.' })
+          return
+        }
+      } catch (err) {
+        console.error(err)
+        setToast({ tipo: 'erro', mensagem: 'Erro ao validar estoque.' })
+        return
+      }
+    }
     setItens((prev) =>
-      prev.map((i) => {
-        if (i.id !== id) return i
-        const nova = Math.max(0, i.quantidade + delta)
-        return nova === 0 ? null : { ...i, quantidade: nova }
-      }).filter(Boolean)
+      prev
+        .map((i) => {
+          if (i.id !== id) return i
+          const nova = Math.max(0, i.quantidade + delta)
+          return nova === 0 ? null : { ...i, quantidade: nova }
+        })
+        .filter(Boolean),
     )
   }
 
@@ -190,13 +299,19 @@ export default function PDV() {
         valor_total: total,
         pagamentos,
       }
-      await window.electronAPI.criarVenda(payload)
+      if (vendaEdicaoId != null) {
+        await window.electronAPI.atualizarVenda(vendaEdicaoId, payload)
+        setToast({ tipo: 'sucesso', mensagem: 'Venda atualizada com sucesso.' })
+      } else {
+        await window.electronAPI.criarVenda(payload)
+      }
       setShowModalPagamento(false)
       setItens([])
       setDescontoInput('')
       setFormasSelecionadas([])
       setValoresPorForma({})
       setValorRecebido('')
+      setVendaEdicaoId(null)
       inputRef.current?.focus()
     } catch (err) {
       console.error(err)
@@ -210,6 +325,7 @@ export default function PDV() {
     setFormasSelecionadas([])
     setValoresPorForma({})
     setValorRecebido('')
+    setVendaEdicaoId(null)
     inputRef.current?.focus()
   }
 
@@ -238,8 +354,26 @@ export default function PDV() {
     ? Math.max(valorRecebidoNum - total, 0)
     : 0
 
+  function handleVoltarRelatorios() {
+    navigate('/app/relatorios')
+  }
+
   return (
     <div>
+      {(vendaEdicaoId != null || voltarRelatorios) && (
+        <div className="pdv-edit-banner-row">
+          {vendaEdicaoId != null && (
+            <div className="pdv-edit-banner" role="status">
+              Editando venda #{String(vendaEdicaoId).padStart(4, '0')}. Ao salvar, a data e hora originais do lançamento são mantidas.
+            </div>
+          )}
+          {voltarRelatorios && (
+            <button type="button" className="pdv-voltar-relatorios" onClick={handleVoltarRelatorios}>
+              ← Voltar aos relatórios
+            </button>
+          )}
+        </div>
+      )}
       <div className="pdv-product-bar">
         <div className="pdv-search-input-wrapper">
           <img src={codeIcon} alt="" className="pdv-input-icon" />
@@ -295,9 +429,9 @@ export default function PDV() {
                   </td>
                   <td>{formatBRL(item.preco_venda)}</td>
                   <td>
-                    <button type="button" onClick={() => handleAlterarQtd(item.id, -1)}>−</button>
+                    <button type="button" onClick={() => void handleAlterarQtd(item.id, -1)}>−</button>
                     <span style={{ margin: '0 8px' }}>{item.quantidade}</span>
-                    <button type="button" onClick={() => handleAlterarQtd(item.id, 1)}>+</button>
+                    <button type="button" onClick={() => void handleAlterarQtd(item.id, 1)}>+</button>
                   </td>
                   <td>{formatBRL(item.preco_venda * item.quantidade)}</td>
                   <td>
@@ -428,7 +562,7 @@ export default function PDV() {
 
           <div className="pdv-actions">
             <button type="button" className="pdv-finalizar" onClick={handleFinalizarVenda}>
-              Finalizar venda (F1)
+              {vendaEdicaoId != null ? 'Salvar alterações (F1)' : 'Finalizar venda (F1)'}
             </button>
             <button type="button" className="pdv-cancelar" onClick={handleCancelar}>
               Cancelar
@@ -516,7 +650,7 @@ export default function PDV() {
                 Cancelar
               </button>
               <button type="button" className="pdv-modal-confirmar" onClick={handleConfirmarPagamento}>
-                Confirmar Pagamento
+                {vendaEdicaoId != null ? 'Salvar venda' : 'Confirmar Pagamento'}
               </button>
             </div>
           </div>

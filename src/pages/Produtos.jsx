@@ -29,12 +29,14 @@ export default function Produtos() {
   // Variações (gestão de tipos e valores)
   const [tiposVariacao, setTiposVariacao] = useState([])
   const [novoTipoNome, setNovoTipoNome] = useState('')
-  const [novoValorNome, setNovoValorNome] = useState('')
-  const [tipoSelecionadoParaValor, setTipoSelecionadoParaValor] = useState('')
+  const [novoValorPorTipo, setNovoValorPorTipo] = useState({})
   const [editandoTipoId, setEditandoTipoId] = useState(null)
   const [editandoTipoNome, setEditandoTipoNome] = useState('')
   const [editandoValorId, setEditandoValorId] = useState(null)
   const [editandoValorNome, setEditandoValorNome] = useState('')
+  const [tipoVariacaoProdutoId, setTipoVariacaoProdutoId] = useState('')
+  const [erroTipoVariacaoProduto, setErroTipoVariacaoProduto] = useState('')
+  const [valorVariacaoParaExcluir, setValorVariacaoParaExcluir] = useState(null)
 
   // Etiquetas
   const [modalEtiquetasAberto, setModalEtiquetasAberto] = useState(false)
@@ -140,8 +142,7 @@ export default function Produtos() {
 
   async function abrirModalVariacoes() {
     setNovoTipoNome('')
-    setNovoValorNome('')
-    setTipoSelecionadoParaValor('')
+    setNovoValorPorTipo({})
     setEditandoTipoId(null)
     setEditandoValorId(null)
     await carregarTiposVariacao()
@@ -191,16 +192,16 @@ export default function Produtos() {
     }
   }
 
-  async function handleCriarValorVariacao(e) {
+  async function handleCriarValorVariacaoPorTipo(e, tipoId) {
     e.preventDefault()
-    if (!novoValorNome.trim() || !tipoSelecionadoParaValor) return
+    const novoValor = novoValorPorTipo[tipoId] || ''
+    if (!novoValor.trim()) return
     try {
       await window.electronAPI.criarValorVariacao({
-        tipo_variacao_id: parseInt(tipoSelecionadoParaValor, 10),
-        valor: novoValorNome.trim(),
+        tipo_variacao_id: parseInt(tipoId, 10),
+        valor: novoValor.trim(),
       })
-      setNovoValorNome('')
-      setTipoSelecionadoParaValor('')
+      setNovoValorPorTipo((prev) => ({ ...prev, [tipoId]: '' }))
       await carregarTiposVariacao()
       await carregarValoresVariacao()
       mostrarToast('Valor de variação criado!', 'success')
@@ -209,22 +210,54 @@ export default function Produtos() {
     }
   }
 
-  async function handleExcluirValorVariacao(tipoId, valorId) {
-    if (!confirm('Excluir este valor?')) return
+  async function handleExcluirValorVariacao(valorId) {
+    const prevTipos = tiposVariacao
+    const valorRemovido = prevTipos
+      .flatMap((tipo) => tipo.valores || [])
+      .find((v) => v.id === valorId)?.valor
+    setTiposVariacao((prev) =>
+      prev.map((tipo) => ({
+        ...tipo,
+        valores: (tipo.valores || []).filter((v) => v.id !== valorId),
+      })),
+    )
+    if (valorRemovido) {
+      setValoresVariacao((prev) => prev.filter((valor) => valor !== valorRemovido))
+    }
     try {
       await window.electronAPI.excluirValorVariacao(valorId)
-      await carregarTiposVariacao()
-      await carregarValoresVariacao()
+      await Promise.all([carregarTiposVariacao(), carregarValoresVariacao()])
       mostrarToast('Valor excluído.', 'success')
     } catch (err) {
+      setTiposVariacao(prevTipos)
+      await carregarValoresVariacao()
       mostrarToast('Erro ao excluir: ' + (err?.message || err), 'error')
     }
   }
 
-  function iniciarEdicaoValor(tipoId, valor, valorId) {
+  function abrirModalExcluirValorVariacao(tipoId, valor) {
+    setValorVariacaoParaExcluir({
+      tipoId,
+      id: valor.id,
+      valor: valor.valor,
+      tipoNome: tiposVariacao.find((t) => t.id === tipoId)?.nome || '',
+    })
+  }
+
+  function fecharModalExcluirValorVariacao() {
+    setValorVariacaoParaExcluir(null)
+  }
+
+  async function confirmarExclusaoValorVariacao() {
+    if (!valorVariacaoParaExcluir?.id) return
+    const valorId = valorVariacaoParaExcluir.id
+    setValorVariacaoParaExcluir(null)
+    await handleExcluirValorVariacao(valorId)
+  }
+
+  function iniciarEdicaoValor(valor, valorId) {
     setEditandoValorId(valorId)
     setEditandoValorNome(valor)
-    setTipoSelecionadoParaValor(String(tipoId))
   }
 
   async function salvarEdicaoValor() {
@@ -244,6 +277,7 @@ export default function Produtos() {
     carregarProdutos()
     carregarArtesoes()
     carregarValoresVariacao()
+    carregarTiposVariacao()
   }, [])
 
   function abrirModal() {
@@ -257,6 +291,8 @@ export default function Produtos() {
     setPrecoVenda('')
     setEstoque('')
     setArtesaoId('')
+    setTipoVariacaoProdutoId('')
+    setErroTipoVariacaoProduto('')
     setModalAberto(true)
   }
 
@@ -264,14 +300,23 @@ export default function Produtos() {
     setProdutoEmEdicao(produto)
     setNome(produto.nome)
     setAdicionarVariacao(!!produto.variacao)
+    const tipoDoProduto = produto.variacao
+      ? tiposVariacao.find((tipo) => (tipo.valores || []).some((valor) => valor.valor === produto.variacao))
+      : null
     const variacoes = {}
-    valoresVariacao.forEach((v) => { variacoes[v] = 0 })
+    if (tipoDoProduto) {
+      ;(tipoDoProduto.valores || []).forEach((valor) => { variacoes[valor.valor] = 0 })
+    } else {
+      valoresVariacao.forEach((v) => { variacoes[v] = 0 })
+    }
     if (produto.variacao) variacoes[produto.variacao] = produto.estoque || 0
     setVariacoesComQuantidade(variacoes)
     setPrecoCusto(String(produto.preco_custo ?? ''))
     setPrecoVenda(String(produto.preco_venda ?? ''))
     setEstoque(String(produto.estoque ?? ''))
     setArtesaoId(String(produto.artesao_id ?? ''))
+    setTipoVariacaoProdutoId(tipoDoProduto ? String(tipoDoProduto.id) : '')
+    setErroTipoVariacaoProduto('')
     setModalAberto(true)
   }
 
@@ -283,6 +328,16 @@ export default function Produtos() {
   function handleVariacaoQuantidade(variacao, valor) {
     const qtd = parseInt(String(valor).replace(/\D/g, ''), 10) || 0
     setVariacoesComQuantidade((prev) => ({ ...prev, [variacao]: qtd }))
+  }
+
+  function handleSelecionarTipoVariacaoProduto(tipoId) {
+    setTipoVariacaoProdutoId(tipoId)
+    setErroTipoVariacaoProduto('')
+    const tipo = tiposVariacao.find((t) => String(t.id) === String(tipoId))
+    const valores = (tipo?.valores || []).map((v) => v.valor)
+    const obj = {}
+    valores.forEach((v) => { obj[v] = 0 })
+    setVariacoesComQuantidade(obj)
   }
 
   async function handleSalvarProduto(e) {
@@ -310,19 +365,69 @@ export default function Produtos() {
     setSalvando(true)
     try {
       if (produtoEmEdicao) {
-        const qtd = adicionarVariacao
-          ? variacoesComQuantidade[produtoEmEdicao.variacao] ?? 0
-          : parseInt(String(estoque).replace(/\D/g, ''), 10) || 0
-        await window.electronAPI.atualizarProduto(produtoEmEdicao.id, {
-          nome: nome.trim(),
-          variacao: produtoEmEdicao.variacao,
-          preco_custo: custo,
-          preco_venda: venda,
-          estoque: qtd,
-          artesao_id: artesaoVal,
-        })
+        if (adicionarVariacao) {
+          const tipoSelecionado = tiposVariacao.find((t) => String(t.id) === String(tipoVariacaoProdutoId))
+          if (!tipoSelecionado) {
+            setErroTipoVariacaoProduto('Selecione um tipo de variação.')
+            setSalvando(false)
+            return
+          }
+
+          const valoresDoTipo = (tipoSelecionado.valores || []).map((v) => v.valor)
+          const variacoesSelecionadas = valoresDoTipo.filter((v) => variacoesComQuantidade[v] > 0)
+          if (variacoesSelecionadas.length === 0) {
+            alert('Selecione pelo menos uma variação e informe a quantidade.')
+            setSalvando(false)
+            return
+          }
+
+          const variacaoPrincipal =
+            produtoEmEdicao.variacao && variacoesSelecionadas.includes(produtoEmEdicao.variacao)
+              ? produtoEmEdicao.variacao
+              : variacoesSelecionadas[0]
+          const qtdPrincipal = variacoesComQuantidade[variacaoPrincipal] ?? 0
+
+          await window.electronAPI.atualizarProduto(produtoEmEdicao.id, {
+            nome: nome.trim(),
+            variacao: variacaoPrincipal,
+            preco_custo: custo,
+            preco_venda: venda,
+            estoque: qtdPrincipal,
+            artesao_id: artesaoVal,
+          })
+
+          for (const variacao of variacoesSelecionadas) {
+            if (variacao === variacaoPrincipal) continue
+            const qtd = variacoesComQuantidade[variacao]
+            await window.electronAPI.criarProduto({
+              nome: nome.trim(),
+              variacao,
+              preco_custo: custo,
+              preco_venda: venda,
+              estoque: qtd,
+              artesao_id: artesaoVal,
+            })
+          }
+        } else {
+          const qtd = parseInt(String(estoque).replace(/\D/g, ''), 10) || 0
+          await window.electronAPI.atualizarProduto(produtoEmEdicao.id, {
+            nome: nome.trim(),
+            variacao: null,
+            preco_custo: custo,
+            preco_venda: venda,
+            estoque: qtd,
+            artesao_id: artesaoVal,
+          })
+        }
       } else if (adicionarVariacao) {
-        const variacoesSelecionadas = valoresVariacao.filter((v) => variacoesComQuantidade[v] > 0)
+        const tipoSelecionado = tiposVariacao.find((t) => String(t.id) === String(tipoVariacaoProdutoId))
+        if (!tipoSelecionado) {
+          setErroTipoVariacaoProduto('Selecione um tipo de variação.')
+          setSalvando(false)
+          return
+        }
+        const valoresDoTipo = (tipoSelecionado.valores || []).map((v) => v.valor)
+        const variacoesSelecionadas = valoresDoTipo.filter((v) => variacoesComQuantidade[v] > 0)
         if (variacoesSelecionadas.length === 0) {
           alert('Selecione pelo menos uma variação e informe a quantidade.')
           setSalvando(false)
@@ -797,109 +902,141 @@ ${chunk.join('\n')}
               </button>
             </div>
             <form onSubmit={handleSalvarProduto}>
-              <div className="modal-field">
-                <label htmlFor="nome">Nome do Produto</label>
-                <input
-                  id="nome"
-                  type="text"
-                  value={nome}
-                  onChange={(e) => setNome(e.target.value)}
-                  placeholder="Ex: Vaso de Barro"
-                  required
-                />
-              </div>
-
-              <div className="modal-produto-variacao">
-                <label className="modal-checkbox-label">
-                  <input
-                    type="checkbox"
-                    checked={adicionarVariacao}
-                    onChange={(e) => setAdicionarVariacao(e.target.checked)}
-                    disabled={!!produtoEmEdicao}
-                  />
-                  Adicionar variação
-                </label>
-                {adicionarVariacao && (
-                  <div className="modal-variacoes-grid">
-                    {(produtoEmEdicao?.variacao ? [produtoEmEdicao.variacao] : valoresVariacao).map((v) => (
-                      <div key={v} className="modal-variacao-item">
-                        <label className="modal-variacao-check">
-                          <input
-                            type="checkbox"
-                            checked={variacoesComQuantidade[v] > 0}
-                            onChange={(e) => handleVariacaoQuantidade(v, e.target.checked ? 1 : 0)}
-                          />
-                          {v}
-                        </label>
-                        <input
-                          type="number"
-                          min={0}
-                          placeholder="Qtd"
-                          value={variacoesComQuantidade[v] || ''}
-                          onChange={(e) => handleVariacaoQuantidade(v, e.target.value)}
-                          className="modal-variacao-qtd"
-                        />
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <div className="modal-produto-row modal-produto-row-3">
+              <div className="modal-produto-body">
                 <div className="modal-field">
-                  <label htmlFor="precoCusto">Preço Custo</label>
+                  <label htmlFor="nome">Nome do Produto</label>
                   <input
-                    id="precoCusto"
+                    id="nome"
                     type="text"
-                    inputMode="decimal"
-                    value={precoCusto}
-                    onChange={(e) => setPrecoCusto(e.target.value)}
-                    placeholder="0,00"
+                    value={nome}
+                    onChange={(e) => setNome(e.target.value)}
+                    placeholder="Ex: Vaso de Barro"
+                    required
                   />
                 </div>
-                <div className="modal-field">
-                  <label htmlFor="precoVenda">Preço Venda</label>
-                  <input
-                    id="precoVenda"
-                    type="text"
-                    inputMode="decimal"
-                    value={precoVenda}
-                    onChange={(e) => setPrecoVenda(e.target.value)}
-                    placeholder="0,00"
-                  />
-                </div>
-                {!adicionarVariacao && (
-                  <div className="modal-field">
-                    <label htmlFor="estoque">Estoque</label>
+
+                <div className="modal-produto-variacao">
+                  <label className="modal-checkbox-label">
                     <input
-                      id="estoque"
-                      type="number"
-                      min={0}
-                      value={estoque}
-                      onChange={(e) => setEstoque(e.target.value)}
-                      placeholder="0"
+                      type="checkbox"
+                      checked={adicionarVariacao}
+                      onChange={(e) => {
+                        const checked = e.target.checked
+                        setAdicionarVariacao(checked)
+                        if (!checked) {
+                          setErroTipoVariacaoProduto('')
+                          setTipoVariacaoProdutoId('')
+                        }
+                      }}
+                    />
+                    Adicionar variação
+                  </label>
+                  {adicionarVariacao && (
+                  <>
+                    <div className="modal-field">
+                      <label htmlFor="tipoVariacaoProduto">Tipo de variação</label>
+                      <select
+                        id="tipoVariacaoProduto"
+                        value={tipoVariacaoProdutoId}
+                        onChange={(e) => handleSelecionarTipoVariacaoProduto(e.target.value)}
+                      >
+                        <option value="">Selecione o tipo...</option>
+                        {tiposVariacao.map((t) => (
+                          <option key={t.id} value={t.id}>{t.nome}</option>
+                        ))}
+                      </select>
+                      {erroTipoVariacaoProduto && (
+                        <small className="modal-field-error">{erroTipoVariacaoProduto}</small>
+                      )}
+                    </div>
+                    {tipoVariacaoProdutoId ? (
+                      <div className="modal-variacoes-grid">
+                        {(tiposVariacao.find((t) => String(t.id) === String(tipoVariacaoProdutoId))?.valores || []).map((valorObj) => {
+                          const v = valorObj.valor
+                          return (
+                            <div key={`${tipoVariacaoProdutoId}-${valorObj.id}`} className="modal-variacao-item">
+                              <label className="modal-variacao-check">
+                                <input
+                                  type="checkbox"
+                                  checked={variacoesComQuantidade[v] > 0}
+                                  onChange={(e) => handleVariacaoQuantidade(v, e.target.checked ? 1 : 0)}
+                                />
+                                {v}
+                              </label>
+                              <input
+                                type="number"
+                                min={0}
+                                placeholder="Qtd"
+                                value={variacoesComQuantidade[v] || ''}
+                                onChange={(e) => handleVariacaoQuantidade(v, e.target.value)}
+                                className="modal-variacao-qtd"
+                              />
+                            </div>
+                          )
+                        })}
+                      </div>
+                    ) : (
+                      <p className="modal-variacoes-empty">Selecione um tipo de variação para exibir os valores.</p>
+                    )}
+                  </>
+                  )}
+                </div>
+
+                <div className="modal-produto-row modal-produto-row-3">
+                  <div className="modal-field">
+                    <label htmlFor="precoCusto">Preço Custo</label>
+                    <input
+                      id="precoCusto"
+                      type="text"
+                      inputMode="decimal"
+                      value={precoCusto}
+                      onChange={(e) => setPrecoCusto(e.target.value)}
+                      placeholder="0,00"
                     />
                   </div>
-                )}
-              </div>
+                  <div className="modal-field">
+                    <label htmlFor="precoVenda">Preço Venda</label>
+                    <input
+                      id="precoVenda"
+                      type="text"
+                      inputMode="decimal"
+                      value={precoVenda}
+                      onChange={(e) => setPrecoVenda(e.target.value)}
+                      placeholder="0,00"
+                    />
+                  </div>
+                  {!adicionarVariacao && (
+                    <div className="modal-field">
+                      <label htmlFor="estoque">Estoque</label>
+                      <input
+                        id="estoque"
+                        type="number"
+                        min={0}
+                        value={estoque}
+                        onChange={(e) => setEstoque(e.target.value)}
+                        placeholder="0"
+                      />
+                    </div>
+                  )}
+                </div>
 
-              <div className="modal-field">
-                <label htmlFor="artesao">Artesão</label>
-                <select
-                  id="artesao"
-                  value={artesaoId}
-                  onChange={(e) => setArtesaoId(e.target.value)}
-                  required
-                >
-                  <option value="">Selecione um artesão...</option>
-                  {artesoes.map((a) => (
-                    <option key={a.id} value={a.id}>
-                      {a.nome}
-                    </option>
-                  ))}
-                </select>
+                <div className="modal-field">
+                  <label htmlFor="artesao">Artesão</label>
+                  <select
+                    id="artesao"
+                    value={artesaoId}
+                    onChange={(e) => setArtesaoId(e.target.value)}
+                    required
+                  >
+                    <option value="">Selecione um artesão...</option>
+                    {artesoes.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.nome}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
-
               <button type="submit" className="modal-submit" disabled={salvando}>
                 {salvando ? 'Salvando...' : produtoEmEdicao ? 'Salvar Alterações' : 'Salvar Produto'}
               </button>
@@ -922,197 +1059,199 @@ ${chunk.join('\n')}
                 ×
               </button>
             </div>
-            <div className="modal-etiquetas-busca">
-              <div className="modal-etiquetas-config">
-                <span className="modal-etiquetas-config-title">Configuração do tamanho (mm)</span>
-                <div className="modal-etiquetas-config-grid">
-                  <label>
-                    Largura etiqueta
-                    <input
-                      type="number"
-                      min={5}
-                      value={configEtiquetas.larguraEtiqueta}
-                      onChange={(e) => atualizarConfigEtiquetas({ larguraEtiqueta: Number(e.target.value) || 0 })}
-                    />
-                  </label>
-                  <label>
-                    Altura etiqueta
-                    <input
-                      type="number"
-                      min={5}
-                      value={configEtiquetas.alturaEtiqueta}
-                      onChange={(e) => atualizarConfigEtiquetas({ alturaEtiqueta: Number(e.target.value) || 0 })}
-                    />
-                  </label>
-                  <label>
-                    Largura papel
-                    <input
-                      type="number"
-                      min={10}
-                      value={configEtiquetas.larguraPapel}
-                      onChange={(e) => atualizarConfigEtiquetas({ larguraPapel: Number(e.target.value) || 0 })}
-                    />
-                  </label>
-                  <label>
-                    Altura papel
-                    <input
-                      type="number"
-                      min={10}
-                      value={configEtiquetas.alturaPapel}
-                      onChange={(e) => atualizarConfigEtiquetas({ alturaPapel: Number(e.target.value) || 0 })}
-                    />
-                  </label>
-                  <label>
-                    Colunas
-                    <input
-                      type="number"
-                      min={1}
-                      max={12}
-                      value={configEtiquetas.colunas}
-                      onChange={(e) => atualizarConfigEtiquetas({ colunas: Number(e.target.value) || 1 })}
-                    />
-                  </label>
-                  <label>
-                    Linhas (por folha)
-                    <input
-                      type="number"
-                      min={1}
-                      max={12}
-                      value={configEtiquetas.linhas}
-                      onChange={(e) => atualizarConfigEtiquetas({ linhas: Number(e.target.value) || 1 })}
-                    />
-                  </label>
-                </div>
-              </div>
-              <div className="modal-etiquetas-input-wrapper">
-                <input
-                  type="text"
-                  placeholder="Digite o nome do produto ou leia o código de barras"
-                  value={buscaEtiqueta}
-                  onChange={(e) => setBuscaEtiqueta(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), pesquisarProdutoEtiqueta())}
-                />
-                <button type="button" className="modal-etiquetas-pesquisar" onClick={pesquisarProdutoEtiqueta}>
-                  Pesquisar
-                </button>
-              </div>
-              {buscaEtiqueta.trim() && (
-                <div className="modal-etiquetas-sugestoes">
-                  <div className="modal-etiquetas-sugestoes-table-wrapper">
-                    <table className="modal-etiquetas-tabela modal-etiquetas-sugestoes-tabela">
-                      <thead>
-                        <tr>
-                          <th>Código</th>
-                          <th>Produto</th>
-                          <th>Preço</th>
-                          <th>Qtd</th>
-                          <th></th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {produtosFiltradosEtiquetas.length === 0 ? (
-                          <tr>
-                            <td colSpan={5}>Nenhum produto encontrado.</td>
-                          </tr>
-                        ) : (
-                          produtosFiltradosEtiquetas.map((p) => {
-                            const chave = `${p.id}-${p.variacao || ''}`
-                            const qtdStr = sugestaoQtdPorChave[chave] ?? '1'
-                            const qtd = Math.max(1, parseInt(qtdStr, 10) || 1)
-                            return (
-                              <tr key={chave}>
-                                <td>{p.codigo_barras}</td>
-                                <td>{p.nome}{p.variacao ? ` (${p.variacao})` : ''}</td>
-                                <td>R$ {p.preco_venda?.toFixed(2).replace('.', ',')}</td>
-                                <td>
-                                  <input
-                                    type="number"
-                                    min={1}
-                                    className="modal-etiquetas-qtd-input modal-etiquetas-sugestao-qtd"
-                                    value={qtdStr}
-                                    onChange={(e) => setSugestaoQtdPorChave((prev) => ({ ...prev, [chave]: e.target.value }))}
-                                  />
-                                </td>
-                                <td>
-                                  <button
-                                    type="button"
-                                    className="modal-etiquetas-adicionar-sugestao"
-                                    onClick={() => {
-                                      adicionarProdutoParaEtiquetas(p, qtd)
-                                      setBuscaEtiqueta('')
-                                      setSugestaoQtdPorChave((prev) => { const next = { ...prev }; delete next[chave]; return next })
-                                    }}
-                                  >
-                                    Adicionar
-                                  </button>
-                                </td>
-                              </tr>
-                            )
-                          })
-                        )}
-                      </tbody>
-                    </table>
+            <div className="modal-etiquetas-body">
+              <div className="modal-etiquetas-busca">
+                <div className="modal-etiquetas-config">
+                  <span className="modal-etiquetas-config-title">Configuração do tamanho (mm)</span>
+                  <div className="modal-etiquetas-config-grid">
+                    <label>
+                      Largura etiqueta
+                      <input
+                        type="number"
+                        min={5}
+                        value={configEtiquetas.larguraEtiqueta}
+                        onChange={(e) => atualizarConfigEtiquetas({ larguraEtiqueta: Number(e.target.value) || 0 })}
+                      />
+                    </label>
+                    <label>
+                      Altura etiqueta
+                      <input
+                        type="number"
+                        min={5}
+                        value={configEtiquetas.alturaEtiqueta}
+                        onChange={(e) => atualizarConfigEtiquetas({ alturaEtiqueta: Number(e.target.value) || 0 })}
+                      />
+                    </label>
+                    <label>
+                      Largura papel
+                      <input
+                        type="number"
+                        min={10}
+                        value={configEtiquetas.larguraPapel}
+                        onChange={(e) => atualizarConfigEtiquetas({ larguraPapel: Number(e.target.value) || 0 })}
+                      />
+                    </label>
+                    <label>
+                      Altura papel
+                      <input
+                        type="number"
+                        min={10}
+                        value={configEtiquetas.alturaPapel}
+                        onChange={(e) => atualizarConfigEtiquetas({ alturaPapel: Number(e.target.value) || 0 })}
+                      />
+                    </label>
+                    <label>
+                      Colunas
+                      <input
+                        type="number"
+                        min={1}
+                        max={12}
+                        value={configEtiquetas.colunas}
+                        onChange={(e) => atualizarConfigEtiquetas({ colunas: Number(e.target.value) || 1 })}
+                      />
+                    </label>
+                    <label>
+                      Linhas (por folha)
+                      <input
+                        type="number"
+                        min={1}
+                        max={12}
+                        value={configEtiquetas.linhas}
+                        onChange={(e) => atualizarConfigEtiquetas({ linhas: Number(e.target.value) || 1 })}
+                      />
+                    </label>
                   </div>
                 </div>
-              )}
-            </div>
-            <div className="modal-etiquetas-tabela-wrapper">
-              <table className="modal-etiquetas-tabela">
-                <thead>
-                  <tr>
-                    <th>Código</th>
-                    <th>Produto</th>
-                    <th>Quantidade</th>
-                    <th>Preço</th>
-                    <th>Ações</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {produtosParaEtiquetas.length === 0 ? (
+                <div className="modal-etiquetas-input-wrapper">
+                  <input
+                    type="text"
+                    placeholder="Digite o nome do produto ou leia o código de barras"
+                    value={buscaEtiqueta}
+                    onChange={(e) => setBuscaEtiqueta(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), pesquisarProdutoEtiqueta())}
+                  />
+                  <button type="button" className="modal-etiquetas-pesquisar" onClick={pesquisarProdutoEtiqueta}>
+                    Pesquisar
+                  </button>
+                </div>
+                {buscaEtiqueta.trim() && (
+                  <div className="modal-etiquetas-sugestoes">
+                    <div className="modal-etiquetas-sugestoes-table-wrapper">
+                      <table className="modal-etiquetas-tabela modal-etiquetas-sugestoes-tabela">
+                        <thead>
+                          <tr>
+                            <th>Código</th>
+                            <th>Produto</th>
+                            <th>Preço</th>
+                            <th>Qtd</th>
+                            <th></th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {produtosFiltradosEtiquetas.length === 0 ? (
+                            <tr>
+                              <td colSpan={5}>Nenhum produto encontrado.</td>
+                            </tr>
+                          ) : (
+                            produtosFiltradosEtiquetas.map((p) => {
+                              const chave = `${p.id}-${p.variacao || ''}`
+                              const qtdStr = sugestaoQtdPorChave[chave] ?? '1'
+                              const qtd = Math.max(1, parseInt(qtdStr, 10) || 1)
+                              return (
+                                <tr key={chave}>
+                                  <td>{p.codigo_barras}</td>
+                                  <td>{p.nome}{p.variacao ? ` (${p.variacao})` : ''}</td>
+                                  <td>R$ {p.preco_venda?.toFixed(2).replace('.', ',')}</td>
+                                  <td>
+                                    <input
+                                      type="number"
+                                      min={1}
+                                      className="modal-etiquetas-qtd-input modal-etiquetas-sugestao-qtd"
+                                      value={qtdStr}
+                                      onChange={(e) => setSugestaoQtdPorChave((prev) => ({ ...prev, [chave]: e.target.value }))}
+                                    />
+                                  </td>
+                                  <td>
+                                    <button
+                                      type="button"
+                                      className="modal-etiquetas-adicionar-sugestao"
+                                      onClick={() => {
+                                        adicionarProdutoParaEtiquetas(p, qtd)
+                                        setBuscaEtiqueta('')
+                                        setSugestaoQtdPorChave((prev) => { const next = { ...prev }; delete next[chave]; return next })
+                                      }}
+                                    >
+                                      Adicionar
+                                    </button>
+                                  </td>
+                                </tr>
+                              )
+                            })
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </div>
+              <div className="modal-etiquetas-tabela-wrapper">
+                <table className="modal-etiquetas-tabela">
+                  <thead>
                     <tr>
-                      <td colSpan={5}>Nenhum produto adicionado. Pesquise e adicione produtos acima.</td>
+                      <th>Código</th>
+                      <th>Produto</th>
+                      <th>Quantidade</th>
+                      <th>Preço</th>
+                      <th>Ações</th>
                     </tr>
-                  ) : (
-                    produtosParaEtiquetas.map((item, idx) => (
-                      <tr key={`${item.produto.id}-${item.produto.variacao || ''}-${idx}`}>
-                        <td>{item.produto.codigo_barras}</td>
-                        <td>{item.produto.nome}{item.produto.variacao ? ` (${item.produto.variacao})` : ''}</td>
-                        <td>
-                          <div className="modal-etiquetas-qtd">
-                            <button type="button" onClick={() => alterarQuantidadeEtiqueta(idx, -1)}>−</button>
-                            <input
-                              type="number"
-                              min={1}
-                              className="modal-etiquetas-qtd-input"
-                              value={item.quantidade}
-                              onChange={(e) => definirQuantidadeEtiqueta(idx, e.target.value)}
-                            />
-                            <button type="button" onClick={() => alterarQuantidadeEtiqueta(idx, 1)}>+</button>
-                          </div>
-                        </td>
-                        <td>R$ {item.produto.preco_venda?.toFixed(2).replace('.', ',')}</td>
-                        <td>
-                          <div className="modal-etiquetas-acoes">
-                            <button
-                              type="button"
-                              className="artesaos-btn-edit"
-                              title="Remover"
-                              onClick={() => removerProdutoEtiqueta(idx)}
-                            >
-                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                <polyline points="3 6 5 6 21 6" />
-                                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                                <line x1="10" y1="11" x2="10" y2="17" />
-                                <line x1="14" y1="11" x2="14" y2="17" />
-                              </svg>
-                            </button>
-                          </div>
-                        </td>
+                  </thead>
+                  <tbody>
+                    {produtosParaEtiquetas.length === 0 ? (
+                      <tr>
+                        <td colSpan={5}>Nenhum produto adicionado. Pesquise e adicione produtos acima.</td>
                       </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
+                    ) : (
+                      produtosParaEtiquetas.map((item, idx) => (
+                        <tr key={`${item.produto.id}-${item.produto.variacao || ''}-${idx}`}>
+                          <td>{item.produto.codigo_barras}</td>
+                          <td>{item.produto.nome}{item.produto.variacao ? ` (${item.produto.variacao})` : ''}</td>
+                          <td>
+                            <div className="modal-etiquetas-qtd">
+                              <button type="button" onClick={() => alterarQuantidadeEtiqueta(idx, -1)}>−</button>
+                              <input
+                                type="number"
+                                min={1}
+                                className="modal-etiquetas-qtd-input"
+                                value={item.quantidade}
+                                onChange={(e) => definirQuantidadeEtiqueta(idx, e.target.value)}
+                              />
+                              <button type="button" onClick={() => alterarQuantidadeEtiqueta(idx, 1)}>+</button>
+                            </div>
+                          </td>
+                          <td>R$ {item.produto.preco_venda?.toFixed(2).replace('.', ',')}</td>
+                          <td>
+                            <div className="modal-etiquetas-acoes">
+                              <button
+                                type="button"
+                                className="artesaos-btn-edit"
+                                title="Remover"
+                                onClick={() => removerProdutoEtiqueta(idx)}
+                              >
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                  <polyline points="3 6 5 6 21 6" />
+                                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                                  <line x1="10" y1="11" x2="10" y2="17" />
+                                  <line x1="14" y1="11" x2="14" y2="17" />
+                                </svg>
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
             <button
               type="button"
@@ -1207,29 +1346,6 @@ ${chunk.join('\n')}
               </form>
             </div>
 
-            <div className="modal-variacoes-section">
-              <h4>Adicionar valor a um tipo</h4>
-              <form onSubmit={handleCriarValorVariacao} className="modal-variacoes-form">
-                <select
-                  value={tipoSelecionadoParaValor}
-                  onChange={(e) => setTipoSelecionadoParaValor(e.target.value)}
-                  required
-                >
-                  <option value="">Selecione o tipo...</option>
-                  {tiposVariacao.map((t) => (
-                    <option key={t.id} value={t.id}>{t.nome}</option>
-                  ))}
-                </select>
-                <input
-                  type="text"
-                  placeholder="Ex: Vermelho, P, M..."
-                  value={novoValorNome}
-                  onChange={(e) => setNovoValorNome(e.target.value)}
-                />
-                <button type="submit" className="modal-variacoes-btn-add">Adicionar valor</button>
-              </form>
-            </div>
-
             <div className="modal-variacoes-lista">
               <h4>Tipos e valores cadastrados</h4>
               {tiposVariacao.length === 0 ? (
@@ -1286,6 +1402,22 @@ ${chunk.join('\n')}
                         )}
                       </div>
                       <ul className="modal-variacoes-valores">
+                        <li className="modal-variacoes-valor-add-item">
+                          <form
+                            onSubmit={(e) => handleCriarValorVariacaoPorTipo(e, tipo.id)}
+                            className="modal-variacoes-form modal-variacoes-form-inline"
+                          >
+                            <input
+                              type="text"
+                              placeholder={`Adicionar valor em ${tipo.nome}`}
+                              value={novoValorPorTipo[tipo.id] || ''}
+                              onChange={(e) =>
+                                setNovoValorPorTipo((prev) => ({ ...prev, [tipo.id]: e.target.value }))
+                              }
+                            />
+                            <button type="submit" className="modal-variacoes-btn-add">Adicionar valor</button>
+                          </form>
+                        </li>
                         {(tipo.valores || []).map((v) => (
                           <li key={v.id} className="modal-variacoes-valor-item">
                             {editandoValorId === v.id ? (
@@ -1310,7 +1442,7 @@ ${chunk.join('\n')}
                                     type="button"
                                     className="artesaos-btn-edit"
                                     title="Editar"
-                                    onClick={() => iniciarEdicaoValor(tipo.id, v.valor, v.id)}
+                                    onClick={() => iniciarEdicaoValor(v.valor, v.id)}
                                   >
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                       <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
@@ -1321,7 +1453,7 @@ ${chunk.join('\n')}
                                     type="button"
                                     className="artesaos-btn-excluir"
                                     title="Excluir"
-                                    onClick={() => handleExcluirValorVariacao(tipo.id, v.id)}
+                                    onClick={() => abrirModalExcluirValorVariacao(tipo.id, v)}
                                   >
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                                       <polyline points="3 6 5 6 21 6" />
@@ -1383,6 +1515,48 @@ ${chunk.join('\n')}
                 Cancelar
               </button>
               <button type="button" className="modal-btn-excluir" onClick={handleExcluirProduto}>
+                Excluir
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {valorVariacaoParaExcluir && (
+        <div className="modal-overlay" onClick={fecharModalExcluirValorVariacao}>
+          <div className="modal-content modal-confirm" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Excluir valor de variação</h3>
+              <button
+                type="button"
+                className="modal-close"
+                onClick={fecharModalExcluirValorVariacao}
+                aria-label="Fechar"
+              >
+                ×
+              </button>
+            </div>
+            <p>
+              Tem certeza que deseja excluir o valor{' '}
+              <strong>
+                {valorVariacaoParaExcluir.valor}
+                {valorVariacaoParaExcluir.tipoNome ? ` (${valorVariacaoParaExcluir.tipoNome})` : ''}
+              </strong>
+              ?
+            </p>
+            <div className="modal-confirm-acoes">
+              <button
+                type="button"
+                className="modal-btn-cancelar"
+                onClick={fecharModalExcluirValorVariacao}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                className="modal-btn-excluir"
+                onClick={confirmarExclusaoValorVariacao}
+              >
                 Excluir
               </button>
             </div>

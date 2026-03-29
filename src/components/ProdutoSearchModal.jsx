@@ -1,10 +1,20 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 
-export default function ProdutoSearchModal({ open, onClose, onSelect }) {
+export default function ProdutoSearchModal({
+  open,
+  onClose,
+  onSelect,
+  apenasComEstoque = true,
+  titulo = 'Pesquisar Produto',
+}) {
   const [produtos, setProdutos] = useState([])
   const [busca, setBusca] = useState('')
   const [loading, setLoading] = useState(false)
   const inputRef = useRef(null)
+
+  useEffect(() => {
+    if (open) setBusca('')
+  }, [open])
 
   useEffect(() => {
     if (!open) return
@@ -14,8 +24,10 @@ export default function ProdutoSearchModal({ open, onClose, onSelect }) {
       try {
         if (!window.electronAPI?.listarProdutos) return
         const lista = await window.electronAPI.listarProdutos()
-        const apenasComEstoque = (lista || []).filter((p) => (p.estoque ?? 0) > 0)
-        setProdutos(apenasComEstoque)
+        const filtrados = apenasComEstoque
+          ? (lista || []).filter((p) => (p.estoque ?? 0) > 0)
+          : lista || []
+        setProdutos(filtrados)
       } catch (err) {
         console.error('Erro ao carregar produtos para pesquisa:', err)
       } finally {
@@ -24,7 +36,7 @@ export default function ProdutoSearchModal({ open, onClose, onSelect }) {
     }
 
     carregarProdutos()
-  }, [open])
+  }, [open, apenasComEstoque])
 
   useEffect(() => {
     if (open && inputRef.current) {
@@ -51,7 +63,7 @@ export default function ProdutoSearchModal({ open, onClose, onSelect }) {
         onClick={(e) => e.stopPropagation()}
       >
         <div className="modal-header">
-          <h3>Pesquisar Produto</h3>
+          <h3>{titulo}</h3>
           <button
             type="button"
             className="modal-close"
@@ -94,7 +106,9 @@ export default function ProdutoSearchModal({ open, onClose, onSelect }) {
                     <td colSpan={5}>
                       {busca
                         ? 'Nenhum produto encontrado.'
-                        : 'Nenhum produto com estoque disponível.'}
+                        : apenasComEstoque
+                          ? 'Nenhum produto com estoque disponível.'
+                          : 'Nenhum produto cadastrado.'}
                     </td>
                   </tr>
                 ) : (
