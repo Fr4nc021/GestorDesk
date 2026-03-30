@@ -243,10 +243,15 @@ ipcMain.handle('imprimir-etiquetas', async (event) => {
 
 ipcMain.handle('salvar-relatorio-pdf', async (event, pdfBase64, filename) => {
   const win = BrowserWindow.fromWebContents(event.sender)
-  const result = await dialog.showSaveDialog(win, {
-    defaultPath: filename,
-    filters: [{ name: 'PDF', extensions: ['pdf'] }],
-  })
+  let result
+  try {
+    result = await dialog.showSaveDialog(win, {
+      defaultPath: filename,
+      filters: [{ name: 'PDF', extensions: ['pdf'] }],
+    })
+  } finally {
+    if (win && !win.isDestroyed()) win.focus()
+  }
   if (result.canceled) return { canceled: true }
   const buffer = Buffer.from(pdfBase64, 'base64')
   fs.writeFileSync(result.filePath, buffer)

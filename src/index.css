@@ -2698,20 +2698,57 @@ button.caixa-btn-filtro-periodo {
   margin-bottom: 20px;
 }
 
-.modal-etiquetas-config {
+.modal-etiquetas-config-wrap {
   margin-bottom: 16px;
-  padding: 10px 12px;
+  border: 1px solid #e5e7eb;
   border-radius: 10px;
   background: #fafafa;
-  border: 1px solid #e5e7eb;
+  overflow: hidden;
 }
 
-.modal-etiquetas-config-title {
-  display: block;
+.modal-etiquetas-config-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  gap: 12px;
+  padding: 10px 12px;
+  border: none;
+  background: transparent;
   font-size: 13px;
   font-weight: 600;
   color: #374151;
-  margin-bottom: 8px;
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+}
+
+.modal-etiquetas-config-toggle:hover {
+  background: rgba(0, 0, 0, 0.03);
+}
+
+.modal-etiquetas-config-wrap--aberta .modal-etiquetas-config-toggle {
+  border-bottom: 1px solid #e8e8e8;
+}
+
+.modal-etiquetas-config-chevron {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  color: #6b7280;
+  transition: transform 0.2s ease;
+}
+
+.modal-etiquetas-config-chevron.aberta {
+  transform: rotate(180deg);
+}
+
+.modal-etiquetas-config {
+  margin-bottom: 0;
+  padding: 10px 12px;
+  border-radius: 0;
+  background: #fafafa;
+  border: none;
 }
 
 .modal-etiquetas-config-grid {
@@ -2733,6 +2770,103 @@ button.caixa-btn-filtro-periodo {
   border-radius: 8px;
   border: 1px solid #d1d5db;
   font-size: 13px;
+}
+
+.modal-etiquetas-filtros-linha {
+  margin-bottom: 12px;
+}
+
+.modal-etiquetas-filtro-artesao {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #374151;
+}
+
+.modal-etiquetas-filtro-artesao span {
+  display: block;
+}
+
+.modal-etiquetas-filtro-artesao select {
+  max-width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #e0e0e0;
+  border-radius: 10px;
+  font-size: 15px;
+  background: #fff;
+  outline: none;
+}
+
+.modal-etiquetas-filtro-artesao select:focus {
+  border-color: #212121;
+}
+
+.modal-etiquetas-sugestoes-acoes {
+  display: flex;
+  justify-content: flex-end;
+  padding: 8px 10px;
+  border-bottom: 1px solid #e8e8e8;
+  background: #fff;
+}
+
+.modal-etiquetas-adicionar-selecionados {
+  padding: 8px 16px;
+  background: #404040;
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.modal-etiquetas-adicionar-selecionados:hover:not(:disabled) {
+  background: #212121;
+}
+
+.modal-etiquetas-adicionar-selecionados:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.modal-etiquetas-col-check {
+  width: 40px;
+  text-align: center;
+  vertical-align: middle;
+}
+
+.modal-etiquetas-col-check input[type='checkbox'] {
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+}
+
+.modal-etiquetas-lista-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 8px;
+}
+
+.modal-etiquetas-remover-selecionados {
+  padding: 8px 14px;
+  background: transparent;
+  color: #b91c1c;
+  border: 1px solid #fecaca;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.modal-etiquetas-remover-selecionados:hover:not(:disabled) {
+  background: #fef2f2;
+}
+
+.modal-etiquetas-remover-selecionados:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .modal-etiquetas-input-wrapper {

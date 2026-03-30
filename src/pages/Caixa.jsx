@@ -417,6 +417,8 @@ export default function Caixa() {
       }
     } catch (err) {
       console.error('[Caixa] Erro ao exportar relatório PDF:', err)
+    } finally {
+      queueMicrotask(() => recoverInputFocus())
     }
   }
 

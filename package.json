@@ -1,7 +1,7 @@
 {
   "name": "gestordesk",
   "private": true,
-  "version": "1.4.0",
+  "version": "1.5.2",
   "main": "electron/main.cjs",
   "type": "module",
   "scripts": {

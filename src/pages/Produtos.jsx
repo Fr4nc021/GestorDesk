@@ -42,7 +42,11 @@ export default function Produtos() {
   const [modalVisualizarEtiquetasAberto, setModalVisualizarEtiquetasAberto] = useState(false)
   const [produtosParaEtiquetas, setProdutosParaEtiquetas] = useState([])
   const [buscaEtiqueta, setBuscaEtiqueta] = useState('')
+  const [filtroArtesaoEtiqueta, setFiltroArtesaoEtiqueta] = useState('')
   const [sugestaoQtdPorChave, setSugestaoQtdPorChave] = useState({})
+  const [etiquetasSugestoesSelecionadas, setEtiquetasSugestoesSelecionadas] = useState([])
+  const [etiquetasListaSelecionadas, setEtiquetasListaSelecionadas] = useState([])
+  const [etiquetasConfigTamanhoAberta, setEtiquetasConfigTamanhoAberta] = useState(false)
 
   const [configEtiquetas, setConfigEtiquetas] = useState({
     larguraEtiqueta: 28,
@@ -522,10 +526,33 @@ export default function Produtos() {
     }
   }
 
+  function chaveProdutoEtiqueta(p) {
+    return `${p.id}-${p.variacao || ''}`
+  }
+
+  /** Quantidade sugerida para etiquetas = estoque atual (0 se sem estoque). */
+  function quantidadeEtiquetaPadraoPorEstoque(produto) {
+    const e = produto?.estoque
+    if (e === null || e === undefined || e === '') return 1
+    const n = Math.floor(Number(e))
+    if (Number.isNaN(n)) return 1
+    return Math.max(0, n)
+  }
+
+  function produtoPassaFiltroArtesaoEtiqueta(p) {
+    const f = filtroArtesaoEtiqueta.trim()
+    if (!f) return true
+    return String(p.artesao_id) === f
+  }
+
   function abrirModalEtiquetas() {
     setProdutosParaEtiquetas([])
     setBuscaEtiqueta('')
+    setFiltroArtesaoEtiqueta('')
     setSugestaoQtdPorChave({})
+    setEtiquetasSugestoesSelecionadas([])
+    setEtiquetasListaSelecionadas([])
+    setEtiquetasConfigTamanhoAberta(false)
     setModalEtiquetasAberto(true)
   }
 
@@ -536,6 +563,10 @@ export default function Produtos() {
     if (window.electronAPI?.buscarProdutoPorCodigo) {
       const porCodigo = await window.electronAPI.buscarProdutoPorCodigo(termo)
       if (porCodigo) {
+        if (!produtoPassaFiltroArtesaoEtiqueta(porCodigo)) {
+          mostrarToast('Este produto não corresponde ao filtro de artesão.', 'error')
+          return
+        }
         adicionarProdutoParaEtiquetas(porCodigo)
         setBuscaEtiqueta('')
         return
@@ -545,8 +576,9 @@ export default function Produtos() {
     const termoLower = termo.toLowerCase()
     const encontrado = produtos.find(
       (p) =>
-        (p.nome && p.nome.toLowerCase().includes(termoLower)) ||
-        (p.codigo_barras && String(p.codigo_barras).includes(termo))
+        produtoPassaFiltroArtesaoEtiqueta(p) &&
+        ((p.nome && p.nome.toLowerCase().includes(termoLower)) ||
+          (p.codigo_barras && String(p.codigo_barras).includes(termo)))
     )
     if (encontrado) {
       adicionarProdutoParaEtiquetas(encontrado)
@@ -556,8 +588,11 @@ export default function Produtos() {
     }
   }
 
-  function adicionarProdutoParaEtiquetas(produto, quantidade = 1) {
-    const qtd = Math.max(1, parseInt(quantidade, 10) || 1)
+  function adicionarProdutoParaEtiquetas(produto, quantidade) {
+    const qtd =
+      quantidade === undefined
+        ? quantidadeEtiquetaPadraoPorEstoque(produto)
+        : Math.max(0, parseInt(String(quantidade), 10) || 0)
     setProdutosParaEtiquetas((prev) => {
       const idx = prev.findIndex((i) => i.produto.id === produto.id && (!produto.variacao || i.produto.variacao === produto.variacao))
       if (idx >= 0) {
@@ -583,7 +618,8 @@ export default function Produtos() {
   function alterarQuantidadeEtiqueta(idx, delta) {
     setProdutosParaEtiquetas((prev) => {
       const nova = [...prev]
-      const q = Math.max(0, (nova[idx].quantidade || 1) + delta)
+      const base = Math.max(0, Math.floor(Number(nova[idx].quantidade)) || 0)
+      const q = Math.max(0, base + delta)
       if (q <= 0) {
         return nova.filter((_, i) => i !== idx)
       }
@@ -593,18 +629,93 @@ export default function Produtos() {
   }
 
   function removerProdutoEtiqueta(idx) {
-    setProdutosParaEtiquetas((prev) => prev.filter((_, i) => i !== idx))
+    setProdutosParaEtiquetas((prev) => {
+      const removido = prev[idx]
+      const next = prev.filter((_, i) => i !== idx)
+      if (removido) {
+        const k = chaveProdutoEtiqueta(removido.produto)
+        setEtiquetasListaSelecionadas((sel) => sel.filter((x) => x !== k))
+      }
+      return next
+    })
+  }
+
+  function adicionarSelecionadosSugestoesEtiquetas() {
+    const chaves = new Set(etiquetasSugestoesSelecionadas)
+    const itens = produtosFiltradosEtiquetas
+      .filter((p) => chaves.has(chaveProdutoEtiqueta(p)))
+      .map((p) => {
+        const chave = chaveProdutoEtiqueta(p)
+        const padrao = quantidadeEtiquetaPadraoPorEstoque(p)
+        const qtdStr = sugestaoQtdPorChave[chave] ?? String(padrao)
+        const parsed = parseInt(qtdStr, 10)
+        const qtd = Number.isNaN(parsed) ? padrao : Math.max(0, parsed)
+        return { produto: p, quantidade: qtd }
+      })
+    if (itens.length === 0) return
+    setProdutosParaEtiquetas((prev) => {
+      const next = [...prev]
+      for (const { produto, quantidade } of itens) {
+        const qtd = Math.max(0, parseInt(String(quantidade), 10) || 0)
+        const idx = next.findIndex(
+          (i) =>
+            i.produto.id === produto.id &&
+            (!produto.variacao || i.produto.variacao === produto.variacao)
+        )
+        if (idx >= 0) {
+          next[idx] = { ...next[idx], quantidade: next[idx].quantidade + qtd }
+        } else {
+          next.push({ produto, quantidade: qtd })
+        }
+      }
+      return next
+    })
+    setBuscaEtiqueta('')
+    setEtiquetasSugestoesSelecionadas([])
+    setSugestaoQtdPorChave((prev) => {
+      const n = { ...prev }
+      itens.forEach(({ produto }) => {
+        delete n[chaveProdutoEtiqueta(produto)]
+      })
+      return n
+    })
+  }
+
+  function removerEtiquetasListaSelecionadas() {
+    const sel = new Set(etiquetasListaSelecionadas)
+    setProdutosParaEtiquetas((prev) => prev.filter((item) => !sel.has(chaveProdutoEtiqueta(item.produto))))
+    setEtiquetasListaSelecionadas([])
   }
 
   const produtosFiltradosEtiquetas = useMemo(() => {
     const termo = buscaEtiqueta.trim().toLowerCase()
-    if (!termo) return []
+    const filtroArt = filtroArtesaoEtiqueta.trim()
     return produtos.filter((p) => {
+      if (filtroArt && String(p.artesao_id) !== filtroArt) return false
+      if (!termo) return true
       const nome = (p.nome || '').toLowerCase()
       const codigo = String(p.codigo_barras || '')
       return nome.includes(termo) || codigo.includes(buscaEtiqueta.trim())
     })
-  }, [buscaEtiqueta, produtos])
+  }, [buscaEtiqueta, filtroArtesaoEtiqueta, produtos])
+
+  const mostrarSugestoesEtiquetas =
+    buscaEtiqueta.trim().length > 0 || filtroArtesaoEtiqueta.trim().length > 0
+
+  const todasChavesSugestoesEtiquetas = useMemo(
+    () => produtosFiltradosEtiquetas.map((p) => chaveProdutoEtiqueta(p)),
+    [produtosFiltradosEtiquetas]
+  )
+
+  const todasSugestoesSelecionadas =
+    todasChavesSugestoesEtiquetas.length > 0 &&
+    todasChavesSugestoesEtiquetas.every((k) => etiquetasSugestoesSelecionadas.includes(k))
+
+  const todasListaEtiquetasSelecionadas =
+    produtosParaEtiquetas.length > 0 &&
+    produtosParaEtiquetas.every((item) =>
+      etiquetasListaSelecionadas.includes(chaveProdutoEtiqueta(item.produto))
+    )
 
   function gerarListaEtiquetasParaImpressao() {
     const lista = []
@@ -626,7 +737,46 @@ export default function Produtos() {
       .replace(/"/g, '&quot;')
   }
 
-  function htmlEtiquetaProdutoParaImpressao(produto, idx) {
+  function calcularLayoutEtiquetaProporcional(labelWidthMm, labelHeightMm) {
+    const mmToPx = 96 / 25.4
+    const base = Math.min(labelWidthMm, labelHeightMm)
+    const clamp = (valor, minimo, maximo) => Math.min(maximo, Math.max(minimo, valor))
+
+    let paddingMm = clamp(labelWidthMm * 0.01, labelWidthMm * 0.015, labelWidthMm * 0.08)
+    let gapVerticalMm = clamp(labelHeightMm * 0.03, labelHeightMm * 0.01, labelHeightMm * 0.06)
+    let nomeFonteMm = clamp(labelHeightMm * 0.11, base * 0.06, labelHeightMm * 0.18)
+    let codigoFonteMm = clamp(labelHeightMm * 0.085, base * 0.05, labelHeightMm * 0.13)
+    let precoFonteMm = clamp(labelHeightMm * 0.11, base * 0.06, labelHeightMm * 0.18)
+    let barcodeHeightMm = clamp(labelHeightMm * 0.55, labelHeightMm * 0.4, labelHeightMm * 0.75)
+    const barcodeModuleMm = clamp(labelWidthMm * 0.015, labelWidthMm * 0.005, labelWidthMm * 0.03)
+
+    const alturaSeguraMm = labelHeightMm * 0.98
+    const alturaBlocoTextoMm = nomeFonteMm * 2.3 + codigoFonteMm * 1.3 + precoFonteMm * 1.3
+    const alturaTotalMm = paddingMm * 2 + gapVerticalMm * 3 + barcodeHeightMm + alturaBlocoTextoMm
+    if (alturaTotalMm > alturaSeguraMm) {
+      const escala = alturaSeguraMm / alturaTotalMm
+      paddingMm *= escala
+      gapVerticalMm *= escala
+      nomeFonteMm *= escala
+      codigoFonteMm *= escala
+      precoFonteMm *= escala
+      barcodeHeightMm *= escala
+    }
+
+    return {
+      paddingMm,
+      gapVerticalMm,
+      nomeFonteMm,
+      codigoFonteMm,
+      precoFonteMm,
+      barcodeHeightMm,
+      barcodeModuleMm,
+      barcodeHeightPx: Math.max(1, barcodeHeightMm * mmToPx),
+      barcodeModulePx: Math.max(0.2, barcodeModuleMm * mmToPx),
+    }
+  }
+
+  function htmlEtiquetaProdutoParaImpressao(produto, idx, layout) {
     const nome =
       escapeHtmlEtiqueta(produto.nome) +
       (produto.variacao ? ` (${escapeHtmlEtiqueta(produto.variacao)})` : '')
@@ -640,11 +790,15 @@ export default function Produtos() {
           digits.length === 12 || digits.length === 13 ? 'EAN13' : 'CODE128'
         JsBarcode(svg, code, {
           format: formato,
-          width: 1.2,
-          height: 30,
+          width: layout.barcodeModulePx,
+          height: layout.barcodeHeightPx,
           margin: 0,
           displayValue: false,
         })
+        svg.style.width = '100%'
+        svg.style.height = `${layout.barcodeHeightMm}mm`
+        svg.style.maxWidth = '100%'
+        svg.style.display = 'block'
         barcodeInner = svg.outerHTML
       } catch {
         barcodeInner = `<span class="etiqueta-codigo-fallback">${escapeHtmlEtiqueta(code)}</span>`
@@ -678,53 +832,103 @@ export default function Produtos() {
     labelHeightMm,
     columns,
     rows,
+    layout,
   }) {
     return `
       * { margin: 0; padding: 0; box-sizing: border-box; }
+      :root {
+        --paper-width-mm: ${paperWidthMm}mm;
+        --paper-height-mm: ${paperHeightMm}mm;
+        --label-width-mm: ${labelWidthMm}mm;
+        --label-height-mm: ${labelHeightMm}mm;
+        --cols: ${columns};
+        --rows: ${rows};
+        --etq-padding-mm: ${layout.paddingMm}mm;
+        --etq-gap-v-mm: ${layout.gapVerticalMm}mm;
+        --etq-nome-size-mm: ${layout.nomeFonteMm}mm;
+        --etq-codigo-size-mm: ${layout.codigoFonteMm}mm;
+        --etq-preco-size-mm: ${layout.precoFonteMm}mm;
+        --etq-barcode-height-mm: ${layout.barcodeHeightMm}mm;
+        --etq-nome-max-height-mm: ${layout.nomeFonteMm * 2.35}mm;
+      }
       @page {
         margin: 0;
-        size: ${paperWidthMm}mm ${paperHeightMm}mm;
+        size: var(--paper-width-mm) var(--paper-height-mm);
       }
       body {
         margin: 0;
         background: #fff;
-        width: ${paperWidthMm}mm;
-        min-height: ${paperHeightMm}mm;
+        width: var(--paper-width-mm);
+        min-height: var(--paper-height-mm);
       }
       .print-page {
-        width: ${paperWidthMm}mm;
-        height: ${paperHeightMm}mm;
+        width: var(--paper-width-mm);
+        min-height: var(--paper-height-mm);
         page-break-after: always;
-        overflow: hidden;
+        overflow: visible;
       }
       .print-page:last-child {
         page-break-after: auto;
       }
       .etiquetas-container {
         display: grid;
-        grid-template-columns: repeat(${columns}, ${labelWidthMm}mm);
-        grid-template-rows: repeat(${rows}, ${labelHeightMm}mm);
-        width: ${paperWidthMm}mm;
-        height: ${paperHeightMm}mm;
+        grid-template-columns: repeat(var(--cols), var(--label-width-mm));
+        grid-template-rows: repeat(var(--rows), var(--label-height-mm));
+        width: var(--paper-width-mm);
+        min-height: var(--paper-height-mm);
         gap: 0;
+        align-content: start;
       }
       .etiqueta-item {
         border: 1px solid #000;
-        padding: 1mm;
+        padding: var(--etq-padding-mm);
         text-align: center;
         background: #fff;
         break-inside: avoid;
         page-break-inside: avoid;
-        width: ${labelWidthMm}mm;
-        height: ${labelHeightMm}mm;
+        width: var(--label-width-mm);
+        height: var(--label-height-mm);
         overflow: hidden;
         box-sizing: border-box;
+        display: grid;
+        grid-template-rows: auto auto auto auto;
+        align-content: start;
+        gap: var(--etq-gap-v-mm);
       }
-      .etiqueta-nome { font-size: 8px; font-weight: 600; margin-bottom: 1mm; word-break: break-word; }
-      .etiqueta-barcode { display: flex; justify-content: center; margin: 1mm 0; }
-      .etiqueta-barcode svg { max-width: 100%; height: auto; }
-      .etiqueta-codigo-numero { font-size: 7px; font-family: monospace; }
-      .etiqueta-preco { font-size: 8px; font-weight: 700; margin-top: 1mm; }
+      .etiqueta-nome {
+        font-size: var(--etq-nome-size-mm);
+        font-weight: 600;
+        line-height: 1.1;
+        word-break: break-word;
+        max-height: var(--etq-nome-max-height-mm);
+        overflow: hidden;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+      }
+      .etiqueta-barcode {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        min-height: var(--etq-barcode-height-mm);
+      }
+      .etiqueta-barcode svg {
+        max-width: 100%;
+        height: var(--etq-barcode-height-mm);
+      }
+      .etiqueta-codigo-numero {
+        font-size: var(--etq-codigo-size-mm);
+        font-family: monospace;
+        line-height: 1.1;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .etiqueta-preco {
+        font-size: var(--etq-preco-size-mm);
+        font-weight: 700;
+        line-height: 1.1;
+      }
       @media print {
         body { margin: 0; }
         .print-page { page-break-after: always; }
@@ -735,10 +939,6 @@ export default function Produtos() {
 
   function imprimirEtiquetasEmJanelaDedicada(listaProdutos) {
     if (!listaProdutos || listaProdutos.length === 0) return false
-
-    const labelHtmls = listaProdutos.map((produto, i) =>
-      htmlEtiquetaProdutoParaImpressao(produto, i)
-    )
 
     const {
       larguraEtiqueta,
@@ -756,6 +956,11 @@ export default function Produtos() {
     const columns = Math.max(1, parseInt(colunas, 10) || 1)
     const rows = Math.max(1, parseInt(linhas, 10) || 1)
     const labelsPerPage = columns * rows
+    const layout = calcularLayoutEtiquetaProporcional(labelWidthMm, labelHeightMm)
+
+    const labelHtmls = listaProdutos.map((produto, i) =>
+      htmlEtiquetaProdutoParaImpressao(produto, i, layout)
+    )
 
     const pageChunks = []
     for (let i = 0; i < labelHtmls.length; i += labelsPerPage) {
@@ -780,6 +985,7 @@ ${chunk.join('\n')}
       labelHeightMm,
       columns,
       rows,
+      layout,
     })
 
     const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Etiquetas</title><style>${printCss}</style></head><body>${pageHtml}</body></html>`
@@ -794,13 +1000,27 @@ ${chunk.join('\n')}
     printWin.focus()
     const imprimirDepois = () => {
       printWin.print()
-      printWin.onafterprint = () => printWin.close()
+      printWin.onafterprint = () => {
+        try {
+          printWin.close()
+        } catch {
+          /* ignore */
+        }
+        queueMicrotask(() => {
+          window.focus()
+          recoverInputFocus()
+        })
+      }
       setTimeout(() => {
         try {
           printWin.close()
         } catch {
           /* ignore */
         }
+        queueMicrotask(() => {
+          window.focus()
+          recoverInputFocus()
+        })
       }, 3000)
     }
     if (printWin.document.readyState === 'complete') {
@@ -1122,66 +1342,112 @@ ${chunk.join('\n')}
             </div>
             <div className="modal-etiquetas-body">
               <div className="modal-etiquetas-busca">
-                <div className="modal-etiquetas-config">
-                  <span className="modal-etiquetas-config-title">Configuração do tamanho (mm)</span>
-                  <div className="modal-etiquetas-config-grid">
-                    <label>
-                      Largura etiqueta
-                      <input
-                        type="number"
-                        min={5}
-                        value={configEtiquetas.larguraEtiqueta}
-                        onChange={(e) => atualizarConfigEtiquetas({ larguraEtiqueta: Number(e.target.value) || 0 })}
-                      />
-                    </label>
-                    <label>
-                      Altura etiqueta
-                      <input
-                        type="number"
-                        min={5}
-                        value={configEtiquetas.alturaEtiqueta}
-                        onChange={(e) => atualizarConfigEtiquetas({ alturaEtiqueta: Number(e.target.value) || 0 })}
-                      />
-                    </label>
-                    <label>
-                      Largura papel
-                      <input
-                        type="number"
-                        min={10}
-                        value={configEtiquetas.larguraPapel}
-                        onChange={(e) => atualizarConfigEtiquetas({ larguraPapel: Number(e.target.value) || 0 })}
-                      />
-                    </label>
-                    <label>
-                      Altura papel
-                      <input
-                        type="number"
-                        min={10}
-                        value={configEtiquetas.alturaPapel}
-                        onChange={(e) => atualizarConfigEtiquetas({ alturaPapel: Number(e.target.value) || 0 })}
-                      />
-                    </label>
-                    <label>
-                      Colunas
-                      <input
-                        type="number"
-                        min={1}
-                        max={12}
-                        value={configEtiquetas.colunas}
-                        onChange={(e) => atualizarConfigEtiquetas({ colunas: Number(e.target.value) || 1 })}
-                      />
-                    </label>
-                    <label>
-                      Linhas (por folha)
-                      <input
-                        type="number"
-                        min={1}
-                        max={12}
-                        value={configEtiquetas.linhas}
-                        onChange={(e) => atualizarConfigEtiquetas({ linhas: Number(e.target.value) || 1 })}
-                      />
-                    </label>
-                  </div>
+                <div
+                  className={
+                    etiquetasConfigTamanhoAberta
+                      ? 'modal-etiquetas-config-wrap modal-etiquetas-config-wrap--aberta'
+                      : 'modal-etiquetas-config-wrap'
+                  }
+                >
+                  <button
+                    type="button"
+                    className="modal-etiquetas-config-toggle"
+                    onClick={() => setEtiquetasConfigTamanhoAberta((v) => !v)}
+                    aria-expanded={etiquetasConfigTamanhoAberta}
+                  >
+                    <span>Tamanho da etiqueta (mm)</span>
+                    <svg
+                      className={etiquetasConfigTamanhoAberta ? 'modal-etiquetas-config-chevron aberta' : 'modal-etiquetas-config-chevron'}
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      aria-hidden="true"
+                    >
+                      <path d="M6 9l6 6 6-6" />
+                    </svg>
+                  </button>
+                  {etiquetasConfigTamanhoAberta && (
+                    <div className="modal-etiquetas-config">
+                      <div className="modal-etiquetas-config-grid">
+                        <label>
+                          Largura etiqueta
+                          <input
+                            type="number"
+                            min={5}
+                            value={configEtiquetas.larguraEtiqueta}
+                            onChange={(e) => atualizarConfigEtiquetas({ larguraEtiqueta: Number(e.target.value) || 0 })}
+                          />
+                        </label>
+                        <label>
+                          Altura etiqueta
+                          <input
+                            type="number"
+                            min={5}
+                            value={configEtiquetas.alturaEtiqueta}
+                            onChange={(e) => atualizarConfigEtiquetas({ alturaEtiqueta: Number(e.target.value) || 0 })}
+                          />
+                        </label>
+                        <label>
+                          Largura papel
+                          <input
+                            type="number"
+                            min={10}
+                            value={configEtiquetas.larguraPapel}
+                            onChange={(e) => atualizarConfigEtiquetas({ larguraPapel: Number(e.target.value) || 0 })}
+                          />
+                        </label>
+                        <label>
+                          Altura papel
+                          <input
+                            type="number"
+                            min={10}
+                            value={configEtiquetas.alturaPapel}
+                            onChange={(e) => atualizarConfigEtiquetas({ alturaPapel: Number(e.target.value) || 0 })}
+                          />
+                        </label>
+                        <label>
+                          Colunas
+                          <input
+                            type="number"
+                            min={1}
+                            max={12}
+                            value={configEtiquetas.colunas}
+                            onChange={(e) => atualizarConfigEtiquetas({ colunas: Number(e.target.value) || 1 })}
+                          />
+                        </label>
+                        <label>
+                          Linhas (por folha)
+                          <input
+                            type="number"
+                            min={1}
+                            max={12}
+                            value={configEtiquetas.linhas}
+                            onChange={(e) => atualizarConfigEtiquetas({ linhas: Number(e.target.value) || 1 })}
+                          />
+                        </label>
+                      </div>
+                    </div>
+                  )}
+                </div>
+                <div className="modal-etiquetas-filtros-linha">
+                  <label className="modal-etiquetas-filtro-artesao">
+                    <span>Artesão</span>
+                    <select
+                      value={filtroArtesaoEtiqueta}
+                      onChange={(e) => {
+                        setFiltroArtesaoEtiqueta(e.target.value)
+                        setEtiquetasSugestoesSelecionadas([])
+                      }}
+                    >
+                      <option value="">Todos</option>
+                      {artesoes.map((a) => (
+                        <option key={a.id} value={String(a.id)}>
+                          {a.nome}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
                 </div>
                 <div className="modal-etiquetas-input-wrapper">
                   <input
@@ -1195,14 +1461,39 @@ ${chunk.join('\n')}
                     Pesquisar
                   </button>
                 </div>
-                {buscaEtiqueta.trim() && (
+                {mostrarSugestoesEtiquetas && (
                   <div className="modal-etiquetas-sugestoes">
+                    <div className="modal-etiquetas-sugestoes-acoes">
+                      <button
+                        type="button"
+                        className="modal-etiquetas-adicionar-selecionados"
+                        onClick={adicionarSelecionadosSugestoesEtiquetas}
+                        disabled={etiquetasSugestoesSelecionadas.length === 0}
+                      >
+                        Adicionar selecionados
+                      </button>
+                    </div>
                     <div className="modal-etiquetas-sugestoes-table-wrapper">
                       <table className="modal-etiquetas-tabela modal-etiquetas-sugestoes-tabela">
                         <thead>
                           <tr>
+                            <th className="modal-etiquetas-col-check">
+                              <input
+                                type="checkbox"
+                                title="Selecionar todos"
+                                checked={todasSugestoesSelecionadas}
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    setEtiquetasSugestoesSelecionadas(todasChavesSugestoesEtiquetas)
+                                  } else {
+                                    setEtiquetasSugestoesSelecionadas([])
+                                  }
+                                }}
+                              />
+                            </th>
                             <th>Código</th>
                             <th>Produto</th>
+                            <th>Artesão</th>
                             <th>Preço</th>
                             <th>Qtd</th>
                             <th></th>
@@ -1211,22 +1502,36 @@ ${chunk.join('\n')}
                         <tbody>
                           {produtosFiltradosEtiquetas.length === 0 ? (
                             <tr>
-                              <td colSpan={5}>Nenhum produto encontrado.</td>
+                              <td colSpan={7}>Nenhum produto encontrado.</td>
                             </tr>
                           ) : (
                             produtosFiltradosEtiquetas.map((p) => {
-                              const chave = `${p.id}-${p.variacao || ''}`
-                              const qtdStr = sugestaoQtdPorChave[chave] ?? '1'
-                              const qtd = Math.max(1, parseInt(qtdStr, 10) || 1)
+                              const chave = chaveProdutoEtiqueta(p)
+                              const padrao = quantidadeEtiquetaPadraoPorEstoque(p)
+                              const qtdStr = sugestaoQtdPorChave[chave] ?? String(padrao)
+                              const parsed = parseInt(qtdStr, 10)
+                              const qtd = Number.isNaN(parsed) ? padrao : Math.max(0, parsed)
                               return (
                                 <tr key={chave}>
+                                  <td className="modal-etiquetas-col-check">
+                                    <input
+                                      type="checkbox"
+                                      checked={etiquetasSugestoesSelecionadas.includes(chave)}
+                                      onChange={() => {
+                                        setEtiquetasSugestoesSelecionadas((prev) =>
+                                          prev.includes(chave) ? prev.filter((x) => x !== chave) : [...prev, chave]
+                                        )
+                                      }}
+                                    />
+                                  </td>
                                   <td>{p.codigo_barras}</td>
                                   <td>{p.nome}{p.variacao ? ` (${p.variacao})` : ''}</td>
+                                  <td>{p.artesao_nome || '—'}</td>
                                   <td>R$ {p.preco_venda?.toFixed(2).replace('.', ',')}</td>
                                   <td>
                                     <input
                                       type="number"
-                                      min={1}
+                                      min={0}
                                       className="modal-etiquetas-qtd-input modal-etiquetas-sugestao-qtd"
                                       value={qtdStr}
                                       onChange={(e) => setSugestaoQtdPorChave((prev) => ({ ...prev, [chave]: e.target.value }))}
@@ -1239,7 +1544,12 @@ ${chunk.join('\n')}
                                       onClick={() => {
                                         adicionarProdutoParaEtiquetas(p, qtd)
                                         setBuscaEtiqueta('')
-                                        setSugestaoQtdPorChave((prev) => { const next = { ...prev }; delete next[chave]; return next })
+                                        setEtiquetasSugestoesSelecionadas((prev) => prev.filter((x) => x !== chave))
+                                        setSugestaoQtdPorChave((prev) => {
+                                          const next = { ...prev }
+                                          delete next[chave]
+                                          return next
+                                        })
                                       }}
                                     >
                                       Adicionar
@@ -1255,10 +1565,36 @@ ${chunk.join('\n')}
                   </div>
                 )}
               </div>
+              <div className="modal-etiquetas-lista-toolbar">
+                <button
+                  type="button"
+                  className="modal-etiquetas-remover-selecionados"
+                  onClick={removerEtiquetasListaSelecionadas}
+                  disabled={etiquetasListaSelecionadas.length === 0}
+                >
+                  Remover selecionados
+                </button>
+              </div>
               <div className="modal-etiquetas-tabela-wrapper">
                 <table className="modal-etiquetas-tabela">
                   <thead>
                     <tr>
+                      <th className="modal-etiquetas-col-check">
+                        <input
+                          type="checkbox"
+                          title="Selecionar todos"
+                          checked={todasListaEtiquetasSelecionadas}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setEtiquetasListaSelecionadas(
+                                produtosParaEtiquetas.map((item) => chaveProdutoEtiqueta(item.produto))
+                              )
+                            } else {
+                              setEtiquetasListaSelecionadas([])
+                            }
+                          }}
+                        />
+                      </th>
                       <th>Código</th>
                       <th>Produto</th>
                       <th>Quantidade</th>
@@ -1269,11 +1605,23 @@ ${chunk.join('\n')}
                   <tbody>
                     {produtosParaEtiquetas.length === 0 ? (
                       <tr>
-                        <td colSpan={5}>Nenhum produto adicionado. Pesquise e adicione produtos acima.</td>
+                        <td colSpan={6}>Nenhum produto adicionado. Pesquise e adicione produtos acima.</td>
                       </tr>
                     ) : (
                       produtosParaEtiquetas.map((item, idx) => (
                         <tr key={`${item.produto.id}-${item.produto.variacao || ''}-${idx}`}>
+                          <td className="modal-etiquetas-col-check">
+                            <input
+                              type="checkbox"
+                              checked={etiquetasListaSelecionadas.includes(chaveProdutoEtiqueta(item.produto))}
+                              onChange={() => {
+                                const k = chaveProdutoEtiqueta(item.produto)
+                                setEtiquetasListaSelecionadas((prev) =>
+                                  prev.includes(k) ? prev.filter((x) => x !== k) : [...prev, k]
+                                )
+                              }}
+                            />
+                          </td>
                           <td>{item.produto.codigo_barras}</td>
                           <td>{item.produto.nome}{item.produto.variacao ? ` (${item.produto.variacao})` : ''}</td>
                           <td>
@@ -1281,7 +1629,7 @@ ${chunk.join('\n')}
                               <button type="button" onClick={() => alterarQuantidadeEtiqueta(idx, -1)}>−</button>
                               <input
                                 type="number"
-                                min={1}
+                                min={0}
                                 className="modal-etiquetas-qtd-input"
                                 value={item.quantidade}
                                 onChange={(e) => definirQuantidadeEtiqueta(idx, e.target.value)}
