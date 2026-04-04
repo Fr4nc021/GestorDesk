@@ -923,6 +923,39 @@
   margin-left: 32px;
 }
 
+.produtos-resumo {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.produtos-resumo-card {
+  flex: 1;
+  min-width: 160px;
+  max-width: 280px;
+  padding: 14px 16px;
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.produtos-resumo-label {
+  font-size: 13px;
+  color: #666;
+  font-weight: 500;
+}
+
+.produtos-resumo-value {
+  font-size: 22px;
+  font-weight: 700;
+  color: #212121;
+  letter-spacing: -0.02em;
+}
+
 .produtos-btn-primary {
   padding: 12px 20px;
   background: #212121;
@@ -3088,7 +3121,7 @@ button.caixa-btn-filtro-periodo {
 }
 
 .etiqueta-item {
-  border: 1px solid #000;
+  border: none;
   padding: 12px;
   text-align: center;
   background: #fff;
@@ -3209,7 +3242,7 @@ button.caixa-btn-filtro-periodo {
     padding: 1mm !important;
     box-sizing: border-box !important;
     background: #fff !important;
-    border: 1px solid #000 !important;
+    border: none !important;
     color: #000 !important;
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
@@ -3328,6 +3361,7 @@ button.caixa-btn-filtro-periodo {
 }
 
 .relatorios-field input[type="date"],
+.relatorios-field input[type="text"],
 .relatorios-field select {
   padding: 10px 12px;
   border: 1px solid #e0e0e0;
@@ -3348,6 +3382,50 @@ button.caixa-btn-filtro-periodo {
 
 .relatorios-field-wide select {
   min-width: 220px;
+}
+
+.relatorios-field-aluguel input {
+  max-width: 200px;
+}
+
+.relatorios-custo-artesao {
+  margin-top: 28px;
+}
+
+.relatorios-custo-artesao h3 {
+  font-size: 1.05rem;
+  font-weight: 600;
+  margin: 0 0 14px;
+  color: #212121;
+}
+
+.relatorios-custo-artesao-empty {
+  padding: 20px 16px;
+  text-align: center;
+}
+
+.relatorios-custo-artesao-empty p {
+  margin: 0 0 6px;
+  font-weight: 500;
+}
+
+.relatorios-custo-artesao-empty span {
+  font-size: 13px;
+  color: #666;
+}
+
+.relatorios-table tfoot tr {
+  border-top: 1px solid #eee;
+}
+
+.relatorios-table tfoot td {
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+
+.relatorios-table-total td {
+  border-top: 1px solid #bdbdbd;
+  padding-top: 12px;
 }
 
 .relatorios-field-export {

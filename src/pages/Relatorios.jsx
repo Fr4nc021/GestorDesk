@@ -18,6 +18,18 @@ function formatBRL(val) {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val ?? 0)
 }
 
+/** Interpreta valor monetário em texto (pt-BR: vírgula decimal, ponto milhar). */
+function parseValorAluguel(str) {
+  if (str == null || typeof str !== 'string') return 0
+  let t = str.trim().replace(/R\$\s?/gi, '').replace(/\s/g, '')
+  if (!t) return 0
+  if (t.includes(',')) {
+    t = t.replace(/\./g, '').replace(',', '.')
+  }
+  const n = parseFloat(t)
+  return Number.isFinite(n) ? n : 0
+}
+
 function hojeISO() {
   return new Date().toLocaleDateString('sv-SE', { timeZone: TZ_BRASILIA })
 }
@@ -168,6 +180,9 @@ export default function Relatorios() {
   const [vendasArtesaoLista, setVendasArtesaoLista] = useState([])
   const [vendasArtesaoCarregando, setVendasArtesaoCarregando] = useState(false)
 
+  const [aluguelInput, setAluguelInput] = useState('')
+  const [relatorioCustoVendasArtesao, setRelatorioCustoVendasArtesao] = useState(null)
+
   const carregarListaVendasModalArtesao = useCallback(async (inicioPeriodo, fimPeriodo, idArtesao) => {
     if (!window.electronAPI?.listarVendasPorPeriodoEArtesao) return
     setVendasArtesaoCarregando(true)
@@ -272,7 +287,10 @@ export default function Relatorios() {
   }, [])
 
   useEffect(() => {
-    if (aba !== TAB_PRODUTOS && dataInicio > dataFim) return
+    if (aba !== TAB_PRODUTOS && dataInicio > dataFim) {
+      if (aba === TAB_ARTESAO) setRelatorioCustoVendasArtesao(null)
+      return
+    }
 
     let cancelled = false
 
@@ -300,6 +318,13 @@ export default function Relatorios() {
         } else {
           setProdutosCadastrados(0)
         }
+        if (aba === TAB_ARTESAO) {
+          promessasCarregamento.push(
+            api.obterRelatorioCustoVendasPeriodo(dataInicio, dataFim, artesaoId ?? null).then(rel => {
+              if (!cancelled) setRelatorioCustoVendasArtesao(rel || null)
+            })
+          )
+        }
       } else if (aba === TAB_LUCRO) {
         promessasCarregamento.push(api.obterLucroPeriodo(dataInicio, dataFim).then(setLucro))
       } else if (aba === TAB_MAIS_VENDIDOS) {
@@ -321,10 +346,15 @@ export default function Relatorios() {
         )
       }
 
+      if (aba !== TAB_ARTESAO) {
+        setRelatorioCustoVendasArtesao(null)
+      }
+
       try {
         await Promise.all(promessasCarregamento)
       } catch (err) {
         console.error('[Relatórios] Erro ao carregar dados da aba:', err)
+        if (aba === TAB_ARTESAO && !cancelled) setRelatorioCustoVendasArtesao(null)
       } finally {
         if (!cancelled) setCarregando(false)
       }
@@ -342,6 +372,12 @@ export default function Relatorios() {
     data: formatarDataCurta(d.data),
     valor: d.valor_total ?? 0,
   }))
+
+  const aluguelPreenchido = aluguelInput.trim() !== ''
+  const valorAluguel = parseValorAluguel(aluguelInput)
+  const produtosCustoRel = relatorioCustoVendasArtesao?.produtos ?? []
+  const totalCustoBaseRel = relatorioCustoVendasArtesao?.totalCusto ?? 0
+  const totalPagarComAluguel = aluguelPreenchido ? totalCustoBaseRel + valorAluguel : totalCustoBaseRel
 
   function buildRelatorioGeralDoc() {
     const doc = new jsPDF()
@@ -591,7 +627,10 @@ export default function Relatorios() {
       dataFim,
       artesaoId ?? null
     )
-    const { totalCusto, produtos } = rel
+    const { totalVendas, totalCusto, produtos } = rel
+    const preenchidoAluguel = aluguelInput.trim() !== ''
+    const valorAluguelPdf = parseValorAluguel(aluguelInput)
+    const totalPagarPdf = preenchidoAluguel ? totalCusto + valorAluguelPdf : totalCusto
     const artesaoNome = artesaoId ? artesoes.find(a => a.id === artesaoId)?.nome : 'Todos os artesãos'
 
     const doc = new jsPDF()
@@ -615,6 +654,9 @@ export default function Relatorios() {
     doc.text('Totais do Período', margin, y)
     y += 10
     doc.text('Total vendido:', margin, y)
+    doc.text(formatBRL(totalVendas), 80, y)
+    y += 7
+    doc.text('Total custo (produtos):', margin, y)
     doc.text(formatBRL(totalCusto), 80, y)
     y += 15
 
@@ -623,13 +665,39 @@ export default function Relatorios() {
     doc.text('Produtos Vendidos', margin, y)
     y += 10
 
+    const colStart = { produto: 20, variacao: 75, artesao: 95, custoUnit: 125, qtd: 148, total: 165 }
+
+    function desenharRodapeTabelaPdf() {
+      y += 4
+      doc.setDrawColor(180, 180, 180)
+      doc.line(margin, y, 190, y)
+      y += 8
+      doc.setFont('helvetica', 'bold')
+      doc.setFontSize(10)
+      if (preenchidoAluguel) {
+        doc.text('Subtotal (custo produtos):', margin, y)
+        doc.text(formatBRL(totalCusto), colStart.total, y)
+        y += 7
+        doc.text('Aluguel:', margin, y)
+        doc.text(formatBRL(valorAluguelPdf), colStart.total, y)
+        y += 7
+        doc.text('Total a pagar ao Artesão:', margin, y)
+        doc.text(formatBRL(totalPagarPdf), colStart.total, y)
+      } else {
+        doc.text('Total a pagar ao Artesão:', margin, y)
+        doc.text(formatBRL(totalCusto), colStart.total, y)
+      }
+    }
+
     if (produtos.length === 0) {
       doc.setFont('helvetica', 'normal')
       doc.setFontSize(10)
       doc.text('Nenhum produto vendido no período.', margin, y)
+      y += 8
+      if (preenchidoAluguel) {
+        desenharRodapeTabelaPdf()
+      }
     } else {
-      const colStart = { produto: 20, variacao: 75, artesao: 95, custoUnit: 125, qtd: 148, total: 165 }
-
       doc.setFont('helvetica', 'bold')
       doc.setFontSize(9)
       doc.text('Produto', colStart.produto, y)
@@ -661,14 +729,7 @@ export default function Relatorios() {
         y += 7
       }
 
-      y += 4
-      doc.setDrawColor(180, 180, 180)
-      doc.line(margin, y, 190, y)
-      y += 8
-      doc.setFont('helvetica', 'bold')
-      doc.setFontSize(10)
-      doc.text('Total a pagar ao Artesão:', margin, y)
-      doc.text(formatBRL(totalCusto), colStart.total, y)
+      desenharRodapeTabelaPdf()
     }
 
     const filename =
@@ -894,6 +955,20 @@ export default function Relatorios() {
                   </option>
                 ))}
               </select>
+            </div>
+          )}
+          {aba === TAB_ARTESAO && (
+            <div className="relatorios-field relatorios-field-aluguel">
+              <label htmlFor="rel-aluguel">Aluguel</label>
+              <input
+                id="rel-aluguel"
+                type="text"
+                inputMode="decimal"
+                placeholder="Ex.: 500 ou 500,00"
+                value={aluguelInput}
+                onChange={e => setAluguelInput(e.target.value)}
+                autoComplete="off"
+              />
             </div>
           )}
           {aba === TAB_GERAL && (
@@ -1124,6 +1199,106 @@ export default function Relatorios() {
               <GraficoVendasPorDiaRelatorio dadosGrafico={dadosGrafico} gradientId="relGradArtesao" />
             )}
           </section>
+          {relatorioCustoVendasArtesao && dataInicio <= dataFim && (
+            <section className="relatorios-custo-artesao">
+              <h3>Custo a pagar ao artesão (produtos vendidos no período)</h3>
+              {produtosCustoRel.length === 0 && !aluguelPreenchido ? (
+                <div className="relatorios-empty relatorios-custo-artesao-empty">
+                  <p>Nenhum produto vendido no período para compor o custo.</p>
+                  <span>Informe aluguel abaixo se quiser registrar só esse valor no total.</span>
+                </div>
+              ) : produtosCustoRel.length === 0 && aluguelPreenchido ? (
+                <div className="relatorios-table-wrapper">
+                  <table className="relatorios-table">
+                    <thead>
+                      <tr>
+                        <th>Descrição</th>
+                        <th>Valor</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td>Aluguel</td>
+                        <td>{formatBRL(valorAluguel)}</td>
+                      </tr>
+                    </tbody>
+                    <tfoot>
+                      <tr className="relatorios-table-total">
+                        <td>
+                          <strong>Total a pagar</strong>
+                        </td>
+                        <td>
+                          <strong>{formatBRL(totalPagarComAluguel)}</strong>
+                        </td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              ) : (
+                <div className="relatorios-table-wrapper">
+                  <table className="relatorios-table">
+                    <thead>
+                      <tr>
+                        <th>Produto</th>
+                        <th>Variação</th>
+                        <th>Artesão</th>
+                        <th>Custo un.</th>
+                        <th>Qtd</th>
+                        <th>Total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {produtosCustoRel.map(p => (
+                        <tr key={p.id}>
+                          <td>{p.nome}</td>
+                          <td>{p.variacao || '—'}</td>
+                          <td>{p.artesao_nome || '—'}</td>
+                          <td>{formatBRL(p.preco_custo)}</td>
+                          <td>{p.total_vendido}</td>
+                          <td>{formatBRL(p.total_custo_produto)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      {aluguelPreenchido ? (
+                        <>
+                          <tr>
+                            <td colSpan={5}>
+                              <strong>Subtotal (custo dos produtos)</strong>
+                            </td>
+                            <td>
+                              <strong>{formatBRL(totalCustoBaseRel)}</strong>
+                            </td>
+                          </tr>
+                          <tr>
+                            <td colSpan={5}>Aluguel</td>
+                            <td>{formatBRL(valorAluguel)}</td>
+                          </tr>
+                          <tr className="relatorios-table-total">
+                            <td colSpan={5}>
+                              <strong>Total a pagar ao artesão</strong>
+                            </td>
+                            <td>
+                              <strong>{formatBRL(totalPagarComAluguel)}</strong>
+                            </td>
+                          </tr>
+                        </>
+                      ) : (
+                        <tr className="relatorios-table-total">
+                          <td colSpan={5}>
+                            <strong>Total a pagar ao artesão</strong>
+                          </td>
+                          <td>
+                            <strong>{formatBRL(totalCustoBaseRel)}</strong>
+                          </td>
+                        </tr>
+                      )}
+                    </tfoot>
+                  </table>
+                </div>
+              )}
+            </section>
+          )}
         </>
       )}
 

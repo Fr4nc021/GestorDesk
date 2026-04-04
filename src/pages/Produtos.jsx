@@ -795,9 +795,9 @@ export default function Produtos() {
           margin: 0,
           displayValue: false,
         })
-        svg.style.width = '100%'
+        svg.style.width = '95%'
         svg.style.height = `${layout.barcodeHeightMm}mm`
-        svg.style.maxWidth = '100%'
+        svg.style.maxWidth = '95%'
         svg.style.display = 'block'
         barcodeInner = svg.outerHTML
       } catch {
@@ -880,7 +880,7 @@ export default function Produtos() {
         align-content: start;
       }
       .etiqueta-item {
-        border: 1px solid #000;
+        border: none;
         padding: var(--etq-padding-mm);
         text-align: center;
         background: #fff;
@@ -913,7 +913,8 @@ export default function Produtos() {
         min-height: var(--etq-barcode-height-mm);
       }
       .etiqueta-barcode svg {
-        max-width: 100%;
+        width: 95%;
+        max-width: 95%;
         height: var(--etq-barcode-height-mm);
       }
       .etiqueta-codigo-numero {
@@ -1057,6 +1058,12 @@ ${chunk.join('\n')}
     })
   }, [produtos, busca])
 
+  const resumoCatalogo = useMemo(() => {
+    const cadastrados = produtos.length
+    const estoqueTotal = produtos.reduce((acc, p) => acc + (Number(p.estoque) || 0), 0)
+    return { cadastrados, estoqueTotal }
+  }, [produtos])
+
   return (
     <div className="produtos">
       {toast.visible && (
@@ -1098,6 +1105,21 @@ ${chunk.join('\n')}
           <button type="button" className="produtos-btn-primary" onClick={abrirModal}>
             <span>+</span> Novo Produto
           </button>
+        </div>
+      </div>
+
+      <div className="produtos-resumo" aria-live="polite">
+        <div className="produtos-resumo-card">
+          <span className="produtos-resumo-label">Produtos cadastrados</span>
+          <strong className="produtos-resumo-value">
+            {loading ? '—' : resumoCatalogo.cadastrados}
+          </strong>
+        </div>
+        <div className="produtos-resumo-card">
+          <span className="produtos-resumo-label">Estoque total</span>
+          <strong className="produtos-resumo-value">
+            {loading ? '—' : resumoCatalogo.estoqueTotal.toLocaleString('pt-BR')}
+          </strong>
         </div>
       </div>
 
