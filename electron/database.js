@@ -441,7 +441,7 @@ function buscarProdutoPorCodigo(codigo_barras) {
     SELECT p.*, a.nome as artesao_nome
     FROM produtos p
     LEFT JOIN artesoes a ON a.id = p.artesao_id
-    WHERE p.codigo_barras = ?
+    WHERE p.codigo_barras = ? AND p.deleted_at IS NULL
   `)
   return stmt.get(codigo_barras.trim()) || null
 }
@@ -570,6 +570,15 @@ function listarTodosValoresVariacao() {
 
 // --- Vendas ---
 
+/** Garante que o UPDATE de estoque afetou exatamente um produto (evita venda gravada sem baixa). */
+function assertUmaLinhaProdutoEstoque(result, produtoId, contexto) {
+  if (result.changes !== 1) {
+    throw new Error(
+      `${contexto}: estoque do produto id=${produtoId} não foi atualizado (changes=${result.changes}).`,
+    )
+  }
+}
+
 function criarVenda({ itens, forma_pagamento, valor_total: valorTotalInformado, pagamentos }) {
   const subtotalItens = itens.reduce((acc, item) => acc + item.quantidade * item.preco_unitario, 0)
   const valor_total = valorTotalInformado != null ? valorTotalInformado : subtotalItens
@@ -582,7 +591,7 @@ function criarVenda({ itens, forma_pagamento, valor_total: valorTotalInformado, 
     VALUES (?, ?, ?, ?)
   `)
   const updateEstoque = db.prepare(`
-    UPDATE produtos SET estoque = estoque - ? WHERE id = ?
+    UPDATE produtos SET estoque = estoque - ?, sync_status = 'pending' WHERE id = ?
   `)
   const insertMovEstoque = db.prepare(`
     INSERT INTO movimentacoes_estoque (produto_id, tipo, quantidade, origem, data)
@@ -599,7 +608,11 @@ function criarVenda({ itens, forma_pagamento, valor_total: valorTotalInformado, 
 
     for (const item of itens) {
       insertItem.run(vendaId, item.produto_id, item.quantidade, item.preco_unitario)
-      updateEstoque.run(item.quantidade, item.produto_id)
+      assertUmaLinhaProdutoEstoque(
+        updateEstoque.run(item.quantidade, item.produto_id),
+        item.produto_id,
+        'Baixa de estoque (nova venda)',
+      )
       insertMovEstoque.run(item.produto_id, item.quantidade)
     }
 
@@ -806,7 +819,7 @@ function listarVendasPorPeriodoEArtesao(dataInicio, dataFim, artesaoId = null) {
 
 function excluirVenda(id) {
   const updateEstoque = db.prepare(`
-    UPDATE produtos SET estoque = estoque + ? WHERE id = ?
+    UPDATE produtos SET estoque = estoque + ?, sync_status = 'pending' WHERE id = ?
   `)
   const insertMovEstoque = db.prepare(`
     INSERT INTO movimentacoes_estoque (produto_id, tipo, quantidade, origem, data)
@@ -828,7 +841,11 @@ function excluirVenda(id) {
   db.transaction(() => {
     const itens = getItens.all(id)
     for (const item of itens) {
-      updateEstoque.run(item.quantidade, item.produto_id)
+      assertUmaLinhaProdutoEstoque(
+        updateEstoque.run(item.quantidade, item.produto_id),
+        item.produto_id,
+        'Devolução de estoque (exclusão de venda)',
+      )
       insertMovEstoque.run(item.produto_id, item.quantidade)
     }
     softDeletePagamentos.run(id)
@@ -881,8 +898,12 @@ function atualizarVenda(vendaId, { itens, forma_pagamento, valor_total: valorTot
   const subtotalItens = itens.reduce((acc, item) => acc + item.quantidade * item.preco_unitario, 0)
   const valor_total = valorTotalInformado != null ? valorTotalInformado : subtotalItens
 
-  const updateEstoqueMais = db.prepare(`UPDATE produtos SET estoque = estoque + ? WHERE id = ?`)
-  const updateEstoqueMenos = db.prepare(`UPDATE produtos SET estoque = estoque - ? WHERE id = ?`)
+  const updateEstoqueMais = db.prepare(
+    `UPDATE produtos SET estoque = estoque + ?, sync_status = 'pending' WHERE id = ?`,
+  )
+  const updateEstoqueMenos = db.prepare(
+    `UPDATE produtos SET estoque = estoque - ?, sync_status = 'pending' WHERE id = ?`,
+  )
   const insertMovEntrada = db.prepare(`
     INSERT INTO movimentacoes_estoque (produto_id, tipo, quantidade, origem, data)
     VALUES (?, 'entrada', ?, 'estorno', datetime('now', 'localtime'))
@@ -915,7 +936,11 @@ function atualizarVenda(vendaId, { itens, forma_pagamento, valor_total: valorTot
   const tx = db.transaction(() => {
     const antigos = getItensAtivos.all(vendaId)
     for (const item of antigos) {
-      updateEstoqueMais.run(item.quantidade, item.produto_id)
+      assertUmaLinhaProdutoEstoque(
+        updateEstoqueMais.run(item.quantidade, item.produto_id),
+        item.produto_id,
+        'Devolução de estoque (edição de venda)',
+      )
       insertMovEntrada.run(item.produto_id, item.quantidade)
     }
     softDeleteItens.run(vendaId)
@@ -923,7 +948,11 @@ function atualizarVenda(vendaId, { itens, forma_pagamento, valor_total: valorTot
 
     for (const item of itens) {
       insertItem.run(vendaId, item.produto_id, item.quantidade, item.preco_unitario)
-      updateEstoqueMenos.run(item.quantidade, item.produto_id)
+      assertUmaLinhaProdutoEstoque(
+        updateEstoqueMenos.run(item.quantidade, item.produto_id),
+        item.produto_id,
+        'Baixa de estoque (edição de venda)',
+      )
       insertMovSaida.run(item.produto_id, item.quantidade)
     }
 
@@ -961,11 +990,15 @@ function adicionarEstoque(produto_id, quantidade, origem = 'admin') {
     VALUES (?, 'entrada', ?, ?, datetime('now', 'localtime'))
   `)
   const updateProd = db.prepare(`
-    UPDATE produtos SET estoque = estoque + ? WHERE id = ?
+    UPDATE produtos SET estoque = estoque + ?, sync_status = 'pending' WHERE id = ?
   `)
   db.transaction(() => {
     insertMov.run(produto_id, quantidade, origem)
-    updateProd.run(quantidade, produto_id)
+    assertUmaLinhaProdutoEstoque(
+      updateProd.run(quantidade, produto_id),
+      produto_id,
+      'Entrada de estoque',
+    )
   })()
   return { produto_id, quantidade, tipo: 'entrada' }
 }

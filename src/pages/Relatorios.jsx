@@ -377,7 +377,9 @@ export default function Relatorios() {
   const valorAluguel = parseValorAluguel(aluguelInput)
   const produtosCustoRel = relatorioCustoVendasArtesao?.produtos ?? []
   const totalCustoBaseRel = relatorioCustoVendasArtesao?.totalCusto ?? 0
-  const totalPagarComAluguel = aluguelPreenchido ? totalCustoBaseRel + valorAluguel : totalCustoBaseRel
+  const totalPagarComAluguel = aluguelPreenchido
+    ? Math.max(0, totalCustoBaseRel - valorAluguel)
+    : totalCustoBaseRel
 
   function buildRelatorioGeralDoc() {
     const doc = new jsPDF()
@@ -630,7 +632,7 @@ export default function Relatorios() {
     const { totalVendas, totalCusto, produtos } = rel
     const preenchidoAluguel = aluguelInput.trim() !== ''
     const valorAluguelPdf = parseValorAluguel(aluguelInput)
-    const totalPagarPdf = preenchidoAluguel ? totalCusto + valorAluguelPdf : totalCusto
+    const totalPagarPdf = preenchidoAluguel ? Math.max(0, totalCusto - valorAluguelPdf) : totalCusto
     const artesaoNome = artesaoId ? artesoes.find(a => a.id === artesaoId)?.nome : 'Todos os artesãos'
 
     const doc = new jsPDF()
@@ -648,17 +650,7 @@ export default function Relatorios() {
     doc.text(`Filtro: ${artesaoNome}`, margin, y)
     y += 15
 
-    doc.setFontSize(12)
     doc.setTextColor(0, 0, 0)
-    doc.setFont('helvetica', 'bold')
-    doc.text('Totais do Período', margin, y)
-    y += 10
-    doc.text('Total vendido:', margin, y)
-    doc.text(formatBRL(totalVendas), 80, y)
-    y += 7
-    doc.text('Total custo (produtos):', margin, y)
-    doc.text(formatBRL(totalCusto), 80, y)
-    y += 15
 
     doc.setFontSize(12)
     doc.setFont('helvetica', 'bold')
@@ -678,8 +670,8 @@ export default function Relatorios() {
         doc.text('Subtotal (custo produtos):', margin, y)
         doc.text(formatBRL(totalCusto), colStart.total, y)
         y += 7
-        doc.text('Aluguel:', margin, y)
-        doc.text(formatBRL(valorAluguelPdf), colStart.total, y)
+        doc.text('Aluguel (dedução):', margin, y)
+        doc.text(formatBRL(-valorAluguelPdf), colStart.total, y)
         y += 7
         doc.text('Total a pagar ao Artesão:', margin, y)
         doc.text(formatBRL(totalPagarPdf), colStart.total, y)
@@ -1205,7 +1197,7 @@ export default function Relatorios() {
               {produtosCustoRel.length === 0 && !aluguelPreenchido ? (
                 <div className="relatorios-empty relatorios-custo-artesao-empty">
                   <p>Nenhum produto vendido no período para compor o custo.</p>
-                  <span>Informe aluguel abaixo se quiser registrar só esse valor no total.</span>
+                  <span>Informe o aluguel abaixo para deduzir do custo dos produtos vendidos.</span>
                 </div>
               ) : produtosCustoRel.length === 0 && aluguelPreenchido ? (
                 <div className="relatorios-table-wrapper">
@@ -1218,8 +1210,8 @@ export default function Relatorios() {
                     </thead>
                     <tbody>
                       <tr>
-                        <td>Aluguel</td>
-                        <td>{formatBRL(valorAluguel)}</td>
+                        <td>Aluguel (dedução)</td>
+                        <td>{formatBRL(-valorAluguel)}</td>
                       </tr>
                     </tbody>
                     <tfoot>
@@ -1271,8 +1263,8 @@ export default function Relatorios() {
                             </td>
                           </tr>
                           <tr>
-                            <td colSpan={5}>Aluguel</td>
-                            <td>{formatBRL(valorAluguel)}</td>
+                            <td colSpan={5}>Aluguel (dedução)</td>
+                            <td>{formatBRL(-valorAluguel)}</td>
                           </tr>
                           <tr className="relatorios-table-total">
                             <td colSpan={5}>
