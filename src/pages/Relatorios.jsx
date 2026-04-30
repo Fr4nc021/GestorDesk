@@ -182,6 +182,11 @@ export default function Relatorios() {
 
   const [aluguelInput, setAluguelInput] = useState('')
   const [relatorioCustoVendasArtesao, setRelatorioCustoVendasArtesao] = useState(null)
+  const [custoOverrides, setCustoOverrides] = useState({})
+  const [quantidadeOverrides, setQuantidadeOverrides] = useState({})
+  const [editandoCustoLinha, setEditandoCustoLinha] = useState(null)
+  const [custoLinhaInput, setCustoLinhaInput] = useState('')
+  const [quantidadeLinhaInput, setQuantidadeLinhaInput] = useState('')
 
   const carregarListaVendasModalArtesao = useCallback(async (inicioPeriodo, fimPeriodo, idArtesao) => {
     if (!window.electronAPI?.listarVendasPorPeriodoEArtesao) return
@@ -368,6 +373,22 @@ export default function Relatorios() {
     }
   }, [aba, dataInicio, dataFim, artesaoId, hoje])
 
+  useEffect(() => {
+    if (aba !== TAB_ARTESAO) {
+      setCustoOverrides({})
+      setQuantidadeOverrides({})
+      setEditandoCustoLinha(null)
+      setCustoLinhaInput('')
+      setQuantidadeLinhaInput('')
+      return
+    }
+    setCustoOverrides({})
+    setQuantidadeOverrides({})
+    setEditandoCustoLinha(null)
+    setCustoLinhaInput('')
+    setQuantidadeLinhaInput('')
+  }, [aba, dataInicio, dataFim, artesaoId])
+
   const dadosGrafico = vendasPorDia.map(d => ({
     data: formatarDataCurta(d.data),
     valor: d.valor_total ?? 0,
@@ -375,11 +396,89 @@ export default function Relatorios() {
 
   const aluguelPreenchido = aluguelInput.trim() !== ''
   const valorAluguel = parseValorAluguel(aluguelInput)
-  const produtosCustoRel = relatorioCustoVendasArtesao?.produtos ?? []
-  const totalCustoBaseRel = relatorioCustoVendasArtesao?.totalCusto ?? 0
+  const produtosCustoRelOriginal = relatorioCustoVendasArtesao?.produtos ?? []
+
+  function chaveCustoProdutoRelatorio(produtoRelatorio) {
+    const custoBase = Number(produtoRelatorio?.preco_custo ?? 0).toFixed(2)
+    return `${produtoRelatorio?.id ?? 'sem-id'}::${custoBase}`
+  }
+
+  const produtosCustoRel = produtosCustoRelOriginal.map(produto => {
+    const chave = chaveCustoProdutoRelatorio(produto)
+    const custoOriginal = Number(produto.preco_custo ?? 0)
+    const qtdOriginal = Number(produto.total_vendido ?? 0)
+    const custoOverride = custoOverrides[chave]
+    const quantidadeOverride = quantidadeOverrides[chave]
+    const custoAplicado =
+      typeof custoOverride === 'number' && Number.isFinite(custoOverride) ? custoOverride : custoOriginal
+    const quantidadeAplicada =
+      typeof quantidadeOverride === 'number' && Number.isFinite(quantidadeOverride)
+        ? quantidadeOverride
+        : qtdOriginal
+    return {
+      ...produto,
+      custo_ajustado: custoAplicado,
+      custo_ajustado_manual: typeof custoOverride === 'number' && Number.isFinite(custoOverride),
+      quantidade_ajustada: quantidadeAplicada,
+      quantidade_ajustada_manual:
+        typeof quantidadeOverride === 'number' && Number.isFinite(quantidadeOverride),
+      total_custo_produto: custoAplicado * quantidadeAplicada,
+      chave_custo_relatorio: chave,
+    }
+  })
+
+  const totalCustoBaseRel = produtosCustoRel.reduce((acc, item) => acc + Number(item.total_custo_produto ?? 0), 0)
   const totalPagarComAluguel = aluguelPreenchido
     ? Math.max(0, totalCustoBaseRel - valorAluguel)
     : totalCustoBaseRel
+
+  function iniciarEdicaoCustoLinha(produtoRelatorio) {
+    const chave = chaveCustoProdutoRelatorio(produtoRelatorio)
+    const custoAtual = custoOverrides[chave] ?? Number(produtoRelatorio.preco_custo ?? 0)
+    const qtdAtual = quantidadeOverrides[chave] ?? Number(produtoRelatorio.total_vendido ?? 0)
+    setEditandoCustoLinha(chave)
+    setCustoLinhaInput(String(custoAtual).replace('.', ','))
+    setQuantidadeLinhaInput(String(qtdAtual))
+  }
+
+  function cancelarEdicaoCustoLinha() {
+    setEditandoCustoLinha(null)
+    setCustoLinhaInput('')
+    setQuantidadeLinhaInput('')
+  }
+
+  function salvarEdicaoCustoLinha(chave) {
+    const custo = parseValorAluguel(custoLinhaInput)
+    const qtd = Number.parseInt(String(quantidadeLinhaInput).replace(/\D/g, ''), 10) || 0
+    if (custo < 0) {
+      alert('O custo precisa ser maior ou igual a zero.')
+      return
+    }
+    if (qtd < 0) {
+      alert('A quantidade precisa ser maior ou igual a zero.')
+      return
+    }
+    setCustoOverrides(prev => ({ ...prev, [chave]: custo }))
+    setQuantidadeOverrides(prev => ({ ...prev, [chave]: qtd }))
+    cancelarEdicaoCustoLinha()
+  }
+
+  function resetarCustoLinha(chave) {
+    if (!confirm('Deseja remover os ajustes manuais desta linha?')) return
+    setCustoOverrides(prev => {
+      if (!(chave in prev)) return prev
+      const next = { ...prev }
+      delete next[chave]
+      return next
+    })
+    setQuantidadeOverrides(prev => {
+      if (!(chave in prev)) return prev
+      const next = { ...prev }
+      delete next[chave]
+      return next
+    })
+    if (editandoCustoLinha === chave) cancelarEdicaoCustoLinha()
+  }
 
   function buildRelatorioGeralDoc() {
     const doc = new jsPDF()
@@ -629,7 +728,7 @@ export default function Relatorios() {
       dataFim,
       artesaoId ?? null
     )
-    const { totalVendas, totalCusto, produtos } = rel
+    const { totalCusto, produtos } = rel
     const preenchidoAluguel = aluguelInput.trim() !== ''
     const valorAluguelPdf = parseValorAluguel(aluguelInput)
     const totalPagarPdf = preenchidoAluguel ? Math.max(0, totalCusto - valorAluguelPdf) : totalCusto
@@ -1237,17 +1336,99 @@ export default function Relatorios() {
                         <th>Custo un.</th>
                         <th>Qtd</th>
                         <th>Total</th>
+                        <th>Ação</th>
                       </tr>
                     </thead>
                     <tbody>
                       {produtosCustoRel.map(p => (
-                        <tr key={p.id}>
+                        <tr key={p.chave_custo_relatorio}>
                           <td>{p.nome}</td>
                           <td>{p.variacao || '—'}</td>
                           <td>{p.artesao_nome || '—'}</td>
-                          <td>{formatBRL(p.preco_custo)}</td>
-                          <td>{p.total_vendido}</td>
+                          <td>
+                            {formatBRL(p.custo_ajustado)}
+                            {p.custo_ajustado_manual && (
+                              <span className="relatorios-custo-ajustado-tag">ajustado</span>
+                            )}
+                          </td>
+                          <td>
+                            {p.quantidade_ajustada}
+                            {p.quantidade_ajustada_manual && (
+                              <span className="relatorios-custo-ajustado-tag">ajustada</span>
+                            )}
+                          </td>
                           <td>{formatBRL(p.total_custo_produto)}</td>
+                          <td className="relatorios-custo-acoes-col">
+                            {editandoCustoLinha === p.chave_custo_relatorio ? (
+                              <div className="relatorios-custo-acoes-editor">
+                                <div className="relatorios-custo-campos">
+                                  <label>
+                                    Custo
+                                    <input
+                                      type="text"
+                                      inputMode="decimal"
+                                      value={custoLinhaInput}
+                                      onChange={e => setCustoLinhaInput(e.target.value)}
+                                      placeholder="0,00"
+                                    />
+                                  </label>
+                                  <label>
+                                    Qtd
+                                    <input
+                                      type="number"
+                                      min={0}
+                                      step={1}
+                                      value={quantidadeLinhaInput}
+                                      onChange={e => setQuantidadeLinhaInput(e.target.value)}
+                                      placeholder="0"
+                                    />
+                                  </label>
+                                </div>
+                                <button
+                                  type="button"
+                                  className="relatorios-custo-btn"
+                                  onClick={() => salvarEdicaoCustoLinha(p.chave_custo_relatorio)}
+                                >
+                                  Salvar
+                                </button>
+                                <button
+                                  type="button"
+                                  className="relatorios-custo-btn relatorios-custo-btn-cancelar"
+                                  onClick={cancelarEdicaoCustoLinha}
+                                >
+                                  Cancelar
+                                </button>
+                                {p.custo_ajustado_manual && (
+                                  <button
+                                    type="button"
+                                    className="relatorios-custo-btn relatorios-custo-btn-reset"
+                                    onClick={() => resetarCustoLinha(p.chave_custo_relatorio)}
+                                  >
+                                    Resetar
+                                  </button>
+                                )}
+                              </div>
+                            ) : (
+                              <div className="relatorios-custo-acoes">
+                                <button
+                                  type="button"
+                                  className="relatorios-custo-btn"
+                                  onClick={() => iniciarEdicaoCustoLinha(p)}
+                                >
+                                  Ajustar custo/qtd
+                                </button>
+                                {(p.custo_ajustado_manual || p.quantidade_ajustada_manual) && (
+                                  <button
+                                    type="button"
+                                    className="relatorios-custo-btn relatorios-custo-btn-reset"
+                                    onClick={() => resetarCustoLinha(p.chave_custo_relatorio)}
+                                  >
+                                    Resetar
+                                  </button>
+                                )}
+                              </div>
+                            )}
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -1255,7 +1436,7 @@ export default function Relatorios() {
                       {aluguelPreenchido ? (
                         <>
                           <tr>
-                            <td colSpan={5}>
+                            <td colSpan={6}>
                               <strong>Subtotal (custo dos produtos)</strong>
                             </td>
                             <td>
@@ -1263,11 +1444,11 @@ export default function Relatorios() {
                             </td>
                           </tr>
                           <tr>
-                            <td colSpan={5}>Aluguel (dedução)</td>
+                            <td colSpan={6}>Aluguel (dedução)</td>
                             <td>{formatBRL(-valorAluguel)}</td>
                           </tr>
                           <tr className="relatorios-table-total">
-                            <td colSpan={5}>
+                            <td colSpan={6}>
                               <strong>Total a pagar ao artesão</strong>
                             </td>
                             <td>
@@ -1277,7 +1458,7 @@ export default function Relatorios() {
                         </>
                       ) : (
                         <tr className="relatorios-table-total">
-                          <td colSpan={5}>
+                          <td colSpan={6}>
                             <strong>Total a pagar ao artesão</strong>
                           </td>
                           <td>

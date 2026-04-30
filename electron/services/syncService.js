@@ -3,7 +3,13 @@
  * Chamar periodicamente (ex.: 5 min) e ao fechar o app.
  */
 
-const { db, getPendingRecordsForSync, markAsSynced, ORDEM_SYNC } = require('../database')
+const {
+  db,
+  getPendingRecordsForSync,
+  markAsSynced,
+  ORDEM_SYNC,
+  backfillPrecoCustoUnitarioVendasItens,
+} = require('../database')
 const { hasInternetConnection } = require('../utils/internetCheck')
 const { getAuthedSupabaseClient } = require('./supabaseClient')
 
@@ -173,6 +179,12 @@ async function pullTabelaDoSupabase(supabase, tabela) {
   let total = 0
 
   const { stmt, colunas } = createUpsertFromRemoteStmt(tabela)
+  const getLocalPrecosItem =
+    tabela === 'vendas_itens'
+      ? db.prepare(
+          'SELECT preco_custo_unitario, preco_unitario FROM vendas_itens WHERE id = ?',
+        )
+      : null
 
   while (true) {
     const { data, error } = await supabase
@@ -188,7 +200,18 @@ async function pullTabelaDoSupabase(supabase, tabela) {
       for (const row of data) {
         const values = []
         for (const c of colunas) {
-          values.push(Object.prototype.hasOwnProperty.call(row, c) ? row[c] : null)
+          let v = Object.prototype.hasOwnProperty.call(row, c) ? row[c] : null
+          if (
+            getLocalPrecosItem &&
+            (c === 'preco_custo_unitario' || c === 'preco_unitario') &&
+            (v === null || v === undefined)
+          ) {
+            const localRow = getLocalPrecosItem.get(row.id)
+            if (localRow && localRow[c] != null) {
+              v = localRow[c]
+            }
+          }
+          values.push(v)
         }
         values.push('synced')
         stmt.run(...values)
@@ -264,6 +287,12 @@ async function syncWithSupabase() {
         logError(`Erro ao puxar tabela "${tabela}" do Supabase.`, err)
         throw err
       }
+    }
+
+    try {
+      backfillPrecoCustoUnitarioVendasItens()
+    } catch (err) {
+      logError('Erro ao preencher preco_custo_unitario em vendas_itens após pull.', err)
     }
 
     log(`Sincronização concluída. Enviados: ${totalSincronizados} | Baixados: ${totalPulled}.`)

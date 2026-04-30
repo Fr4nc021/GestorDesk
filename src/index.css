@@ -3714,6 +3714,86 @@ button.caixa-btn-filtro-periodo {
   background: #fafafa;
 }
 
+.relatorios-custo-ajustado-tag {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 8px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: #212121;
+  background: #f0f0f0;
+}
+
+.relatorios-custo-acoes-col {
+  min-width: 240px;
+}
+
+.relatorios-custo-acoes,
+.relatorios-custo-acoes-editor {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.relatorios-custo-campos {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+.relatorios-custo-campos label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  color: #666;
+  font-weight: 600;
+}
+
+.relatorios-custo-acoes-editor input {
+  width: 100px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 13px;
+}
+
+.relatorios-custo-acoes-editor input:focus {
+  border-color: #212121;
+  outline: none;
+}
+
+.relatorios-custo-btn {
+  border: 1px solid #d7d7d7;
+  background: #fff;
+  color: #333;
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.relatorios-custo-btn:hover {
+  border-color: #212121;
+  color: #111;
+}
+
+.relatorios-custo-btn-cancelar {
+  color: #666;
+}
+
+.relatorios-custo-btn-reset {
+  color: #8a2f2f;
+  border-color: #e4c8c8;
+  background: #fff8f8;
+}
+
 .modal-content.modal-relatorio-pdf-preview {
   width: 98vw;
   max-width: none;

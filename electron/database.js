@@ -315,6 +315,18 @@ function tabelaTemColuna(dbConn, nomeTabela, coluna) {
   return cols.some((c) => c.name === coluna)
 }
 
+/** Preenche snapshot de custo a partir do cadastro só onde ainda está NULL (idempotente). */
+function backfillPrecoCustoUnitarioVendasItens() {
+  if (!tabelaTemColuna(db, 'vendas_itens', 'preco_custo_unitario')) return
+  db.exec(`
+    UPDATE vendas_itens
+    SET preco_custo_unitario = (
+      SELECT preco_custo FROM produtos WHERE produtos.id = vendas_itens.produto_id
+    )
+    WHERE preco_custo_unitario IS NULL
+  `)
+}
+
 for (const tabela of ORDEM_SYNC) {
   try {
     if (!tabelaTemColuna(db, tabela, 'sync_status')) {
@@ -328,6 +340,14 @@ for (const tabela of ORDEM_SYNC) {
     }
   } catch (_) {}
 }
+
+// Snapshot de custo unitário no momento da venda (idempotente + backfill).
+try {
+  if (!tabelaTemColuna(db, 'vendas_itens', 'preco_custo_unitario')) {
+    db.exec(`ALTER TABLE vendas_itens ADD COLUMN preco_custo_unitario REAL`)
+  }
+  backfillPrecoCustoUnitarioVendasItens()
+} catch (_) {}
 
 function getPendingRecordsForSync(tabela) {
   if (!tabelaTemColuna(db, tabela, 'sync_status')) {
@@ -587,8 +607,8 @@ function criarVenda({ itens, forma_pagamento, valor_total: valorTotalInformado, 
     INSERT INTO vendas (data, valor_total, forma_pagamento) VALUES (datetime('now', 'localtime'), ?, ?)
   `)
   const insertItem = db.prepare(`
-    INSERT INTO vendas_itens (venda_id, produto_id, quantidade, preco_unitario)
-    VALUES (?, ?, ?, ?)
+    INSERT INTO vendas_itens (venda_id, produto_id, quantidade, preco_unitario, preco_custo_unitario)
+    VALUES (?, ?, ?, ?, (SELECT preco_custo FROM produtos WHERE id = ?))
   `)
   const updateEstoque = db.prepare(`
     UPDATE produtos SET estoque = estoque - ?, sync_status = 'pending' WHERE id = ?
@@ -607,7 +627,13 @@ function criarVenda({ itens, forma_pagamento, valor_total: valorTotalInformado, 
     const vendaId = result.lastInsertRowid
 
     for (const item of itens) {
-      insertItem.run(vendaId, item.produto_id, item.quantidade, item.preco_unitario)
+      insertItem.run(
+        vendaId,
+        item.produto_id,
+        item.quantidade,
+        item.preco_unitario,
+        item.produto_id,
+      )
       assertUmaLinhaProdutoEstoque(
         updateEstoque.run(item.quantidade, item.produto_id),
         item.produto_id,
@@ -919,8 +945,8 @@ function atualizarVenda(vendaId, { itens, forma_pagamento, valor_total: valorTot
     "UPDATE vendas_itens SET deleted_at = datetime('now', 'localtime'), sync_status = 'pending' WHERE venda_id = ? AND deleted_at IS NULL",
   )
   const insertItem = db.prepare(`
-    INSERT INTO vendas_itens (venda_id, produto_id, quantidade, preco_unitario)
-    VALUES (?, ?, ?, ?)
+    INSERT INTO vendas_itens (venda_id, produto_id, quantidade, preco_unitario, preco_custo_unitario)
+    VALUES (?, ?, ?, ?, (SELECT preco_custo FROM produtos WHERE id = ?))
   `)
   const insertPagamento = db.prepare(`
     INSERT INTO vendas_pagamentos (venda_id, forma_pagamento, valor)
@@ -947,7 +973,13 @@ function atualizarVenda(vendaId, { itens, forma_pagamento, valor_total: valorTot
     softDeletePagamentos.run(vendaId)
 
     for (const item of itens) {
-      insertItem.run(vendaId, item.produto_id, item.quantidade, item.preco_unitario)
+      insertItem.run(
+        vendaId,
+        item.produto_id,
+        item.quantidade,
+        item.preco_unitario,
+        item.produto_id,
+      )
       assertUmaLinhaProdutoEstoque(
         updateEstoqueMenos.run(item.quantidade, item.produto_id),
         item.produto_id,
@@ -1173,9 +1205,9 @@ function obterTotalVendasHoje() {
 function obterLucroPeriodo(dataInicio, dataFim) {
   const row = db.prepare(`
     SELECT
-      COALESCE(SUM((COALESCE(vi.preco_unitario, p.preco_venda) - p.preco_custo) * vi.quantidade), 0) as lucro,
+      COALESCE(SUM((COALESCE(vi.preco_unitario, p.preco_venda) - COALESCE(vi.preco_custo_unitario, p.preco_custo)) * vi.quantidade), 0) as lucro,
       COALESCE(SUM(COALESCE(vi.preco_unitario, p.preco_venda) * vi.quantidade), 0) as total_vendas,
-      COALESCE(SUM(p.preco_custo * vi.quantidade), 0) as total_custo,
+      COALESCE(SUM(COALESCE(vi.preco_custo_unitario, p.preco_custo) * vi.quantidade), 0) as total_custo,
       COALESCE(SUM(vi.quantidade), 0) as qtd_itens
     FROM vendas_itens vi
     JOIN vendas v ON v.id = vi.venda_id AND v.deleted_at IS NULL
@@ -1225,17 +1257,20 @@ function contarProdutosPorArtesao(artesaoId) {
 
 /**
  * Relatório de custo e vendas por período: total de vendas, total de custo e tabela de produtos vendidos.
+ * A tabela pode ter mais de uma linha por produto quando o custo congelado na venda mudou no período.
  * @param {string} dataInicio - YYYY-MM-DD
  * @param {string} dataFim - YYYY-MM-DD
  * @param {number|null} artesaoId - ID do artesão ou null para todos
  * @returns {{ totalVendas: number, totalCusto: number, produtos: Array }}
  */
 function obterRelatorioCustoVendasPeriodo(dataInicio, dataFim, artesaoId = null) {
+  const custoSnapshotExpr = 'ROUND(COALESCE(vi.preco_custo_unitario, p.preco_custo), 2)'
+
   if (artesaoId == null) {
     const row = db.prepare(`
       SELECT
         COALESCE(SUM(COALESCE(vi.preco_unitario, p.preco_venda) * vi.quantidade), 0) as total_vendas,
-        COALESCE(SUM(p.preco_custo * vi.quantidade), 0) as total_custo
+        COALESCE(SUM(COALESCE(vi.preco_custo_unitario, p.preco_custo) * vi.quantidade), 0) as total_custo
       FROM vendas_itens vi
       JOIN vendas v ON v.id = vi.venda_id AND v.deleted_at IS NULL
       JOIN produtos p ON p.id = vi.produto_id AND p.deleted_at IS NULL
@@ -1248,9 +1283,9 @@ function obterRelatorioCustoVendasPeriodo(dataInicio, dataFim, artesaoId = null)
         p.nome,
         p.variacao,
         a.nome as artesao_nome,
-        p.preco_custo,
+        ${custoSnapshotExpr} as preco_custo,
         SUM(vi.quantidade) as total_vendido,
-        SUM(p.preco_custo * vi.quantidade) as total_custo_produto,
+        SUM(COALESCE(vi.preco_custo_unitario, p.preco_custo) * vi.quantidade) as total_custo_produto,
         SUM(COALESCE(vi.preco_unitario, p.preco_venda) * vi.quantidade) as total_venda_produto
       FROM vendas_itens vi
       JOIN vendas v ON v.id = vi.venda_id AND v.deleted_at IS NULL
@@ -1258,8 +1293,8 @@ function obterRelatorioCustoVendasPeriodo(dataInicio, dataFim, artesaoId = null)
       LEFT JOIN artesoes a ON a.id = p.artesao_id
       WHERE vi.deleted_at IS NULL
         AND date(v.data) >= date(?) AND date(v.data) <= date(?)
-      GROUP BY vi.produto_id
-      ORDER BY p.nome
+      GROUP BY vi.produto_id, ${custoSnapshotExpr}
+      ORDER BY p.nome, preco_custo
     `).all(dataInicio, dataFim)
     return {
       totalVendas: row.total_vendas ?? 0,
@@ -1271,7 +1306,7 @@ function obterRelatorioCustoVendasPeriodo(dataInicio, dataFim, artesaoId = null)
   const row = db.prepare(`
     SELECT
       COALESCE(SUM(COALESCE(vi.preco_unitario, p.preco_venda) * vi.quantidade), 0) as total_vendas,
-      COALESCE(SUM(p.preco_custo * vi.quantidade), 0) as total_custo
+      COALESCE(SUM(COALESCE(vi.preco_custo_unitario, p.preco_custo) * vi.quantidade), 0) as total_custo
     FROM vendas_itens vi
     JOIN vendas v ON v.id = vi.venda_id AND v.deleted_at IS NULL
     JOIN produtos p ON p.id = vi.produto_id AND p.deleted_at IS NULL
@@ -1285,9 +1320,9 @@ function obterRelatorioCustoVendasPeriodo(dataInicio, dataFim, artesaoId = null)
       p.nome,
       p.variacao,
       a.nome as artesao_nome,
-      p.preco_custo,
+      ${custoSnapshotExpr} as preco_custo,
       SUM(vi.quantidade) as total_vendido,
-      SUM(p.preco_custo * vi.quantidade) as total_custo_produto,
+      SUM(COALESCE(vi.preco_custo_unitario, p.preco_custo) * vi.quantidade) as total_custo_produto,
       SUM(COALESCE(vi.preco_unitario, p.preco_venda) * vi.quantidade) as total_venda_produto
     FROM vendas_itens vi
     JOIN vendas v ON v.id = vi.venda_id AND v.deleted_at IS NULL
@@ -1296,8 +1331,8 @@ function obterRelatorioCustoVendasPeriodo(dataInicio, dataFim, artesaoId = null)
     WHERE vi.deleted_at IS NULL
       AND date(v.data) >= date(?) AND date(v.data) <= date(?)
       AND p.artesao_id = ?
-    GROUP BY vi.produto_id
-    ORDER BY p.nome
+    GROUP BY vi.produto_id, ${custoSnapshotExpr}
+    ORDER BY p.nome, preco_custo
   `).all(dataInicio, dataFim, artesaoId)
   return {
     totalVendas: row.total_vendas ?? 0,
@@ -1348,6 +1383,7 @@ module.exports = {
   getPendingRecordsForSync,
   markAsSynced,
   ORDEM_SYNC,
+  backfillPrecoCustoUnitarioVendasItens,
   criarArtesao,
   listarArtesoes,
   atualizarArtesao,

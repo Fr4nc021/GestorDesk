@@ -7,6 +7,13 @@
 -- - Estas políticas liberam acesso a QUALQUER usuário autenticado do projeto.
 -- - Para multi-empresa / multi-usuário com separação de dados, é melhor adicionar tenant_id e políticas por tenant.
 
+-- Schema (sincronização): custo unitário congelado por linha de venda (espelha vendas_itens local).
+-- O sync genérico envia todas as colunas locais via upsert. Rode no SQL Editor do Supabase ANTES do
+-- próximo push após o app gravar preco_custo_unitario; caso contrário o upsert falha com
+-- "Could not find the 'preco_custo_unitario' column".
+ALTER TABLE public.vendas_itens
+  ADD COLUMN IF NOT EXISTS preco_custo_unitario NUMERIC;
+
 -- Ativar RLS e criar políticas para tabelas sincronizadas
 do $$
 declare
