@@ -722,13 +722,9 @@ export default function Relatorios() {
     return { doc, filename }
   }
 
-  async function buildRelatorioArtesaoDoc() {
-    const rel = await window.electronAPI.obterRelatorioCustoVendasPeriodo(
-      dataInicio,
-      dataFim,
-      artesaoId ?? null
-    )
-    const { totalCusto, produtos } = rel
+  function buildRelatorioArtesaoDoc() {
+    const produtos = produtosCustoRel
+    const totalCusto = totalCustoBaseRel
     const preenchidoAluguel = aluguelInput.trim() !== ''
     const valorAluguelPdf = parseValorAluguel(aluguelInput)
     const totalPagarPdf = preenchidoAluguel ? Math.max(0, totalCusto - valorAluguelPdf) : totalCusto
@@ -815,7 +811,7 @@ export default function Relatorios() {
         doc.text(p.variacao || '—', colStart.variacao, y)
         doc.text((p.artesao_nome || '').substring(0, 10), colStart.artesao, y)
         doc.text(formatBRL(p.preco_custo), colStart.custoUnit, y)
-        doc.text(String(p.total_vendido), colStart.qtd, y)
+        doc.text(String(p.quantidade_ajustada ?? p.total_vendido ?? 0), colStart.qtd, y)
         doc.text(formatBRL(p.total_custo_produto), colStart.total, y)
         y += 7
       }
@@ -925,7 +921,7 @@ export default function Relatorios() {
           break
         }
         case 'artesao': {
-          ;({ doc, filename } = await buildRelatorioArtesaoDoc())
+          ;({ doc, filename } = buildRelatorioArtesaoDoc())
           break
         }
         case 'produtos': {
