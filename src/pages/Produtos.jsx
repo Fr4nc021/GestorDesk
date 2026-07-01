@@ -20,6 +20,8 @@ export default function Produtos() {
   const [nome, setNome] = useState('')
   const [adicionarVariacao, setAdicionarVariacao] = useState(false)
   const [variacoesComQuantidade, setVariacoesComQuantidade] = useState({ P: 0, M: 0, G: 0, GG: 0 })
+  /** Variações ativas do produto (independe do estoque; permite estoque 0). */
+  const [variacoesIncluidas, setVariacoesIncluidas] = useState({})
   const [precoCusto, setPrecoCusto] = useState('')
   const [precoVenda, setPrecoVenda] = useState('')
   const [estoque, setEstoque] = useState('')
@@ -304,8 +306,13 @@ export default function Produtos() {
     setNome('')
     setAdicionarVariacao(false)
     const quantidadesIniciais = {}
-    valoresVariacao.forEach((v) => { quantidadesIniciais[v] = 0 })
+    const incluidasIniciais = {}
+    valoresVariacao.forEach((v) => {
+      quantidadesIniciais[v] = 0
+      incluidasIniciais[v] = false
+    })
     setVariacoesComQuantidade(quantidadesIniciais)
+    setVariacoesIncluidas(incluidasIniciais)
     setPrecoCusto('')
     setPrecoVenda('')
     setEstoque('')
@@ -322,14 +329,40 @@ export default function Produtos() {
     const tipoDoProduto = produto.variacao
       ? tiposVariacao.find((tipo) => (tipo.valores || []).some((valor) => valor.valor === produto.variacao))
       : null
+    const irmaos =
+      produto.variacao
+        ? produtos.filter(
+            (p) =>
+              p.nome.trim() === produto.nome.trim() &&
+              p.artesao_id === produto.artesao_id &&
+              p.variacao,
+          )
+        : []
     const variacoes = {}
+    const incluidas = {}
     if (tipoDoProduto) {
-      ;(tipoDoProduto.valores || []).forEach((valor) => { variacoes[valor.valor] = 0 })
+      ;(tipoDoProduto.valores || []).forEach((valor) => {
+        variacoes[valor.valor] = 0
+        incluidas[valor.valor] = false
+      })
+      for (const p of irmaos) {
+        if (Object.prototype.hasOwnProperty.call(variacoes, p.variacao)) {
+          variacoes[p.variacao] = Number(p.estoque) || 0
+          incluidas[p.variacao] = true
+        }
+      }
     } else {
-      valoresVariacao.forEach((v) => { variacoes[v] = 0 })
+      valoresVariacao.forEach((v) => {
+        variacoes[v] = 0
+        incluidas[v] = false
+      })
+      if (produto.variacao) {
+        variacoes[produto.variacao] = Number(produto.estoque) || 0
+        incluidas[produto.variacao] = true
+      }
     }
-    if (produto.variacao) variacoes[produto.variacao] = produto.estoque || 0
     setVariacoesComQuantidade(variacoes)
+    setVariacoesIncluidas(incluidas)
     setPrecoCusto(String(produto.preco_custo ?? ''))
     setPrecoVenda(String(produto.preco_venda ?? ''))
     setEstoque(String(produto.estoque ?? ''))
@@ -347,6 +380,26 @@ export default function Produtos() {
   function handleVariacaoQuantidade(variacao, valor) {
     const qtd = parseInt(String(valor).replace(/\D/g, ''), 10) || 0
     setVariacoesComQuantidade((prev) => ({ ...prev, [variacao]: qtd }))
+    if (qtd > 0) {
+      setVariacoesIncluidas((prev) => ({ ...prev, [variacao]: true }))
+    }
+  }
+
+  function handleVariacaoIncluidaToggle(valorVariacao, marcado) {
+    setVariacoesIncluidas((prev) => ({ ...prev, [valorVariacao]: marcado }))
+    if (marcado) {
+      setVariacoesComQuantidade((prev) => ({
+        ...prev,
+        [valorVariacao]: prev[valorVariacao] ?? 0,
+      }))
+    } else {
+      setVariacoesComQuantidade((prev) => ({ ...prev, [valorVariacao]: 0 }))
+    }
+  }
+
+  function fecharModalProduto() {
+    if (salvando) return
+    setModalAberto(false)
   }
 
   function handleSelecionarTipoVariacaoProduto(tipoId) {
@@ -355,8 +408,17 @@ export default function Produtos() {
     const tipo = tiposVariacao.find((t) => String(t.id) === String(tipoId))
     const valores = (tipo?.valores || []).map((v) => v.valor)
     const quantidadesPorValor = {}
-    valores.forEach((v) => { quantidadesPorValor[v] = 0 })
+    const incluidasPorValor = {}
+    valores.forEach((v) => {
+      quantidadesPorValor[v] = 0
+      incluidasPorValor[v] = false
+    })
     setVariacoesComQuantidade(quantidadesPorValor)
+    setVariacoesIncluidas(incluidasPorValor)
+  }
+
+  function obterVariacoesSelecionadas(valoresDoTipo) {
+    return valoresDoTipo.filter((v) => variacoesIncluidas[v])
   }
 
   function parsePrecoInput(valor) {
@@ -375,9 +437,9 @@ export default function Produtos() {
       return false
     }
     const valoresDoTipo = (tipoSelecionado.valores || []).map((v) => v.valor)
-    const variacoesSelecionadas = valoresDoTipo.filter((v) => variacoesComQuantidade[v] > 0)
+    const variacoesSelecionadas = obterVariacoesSelecionadas(valoresDoTipo)
     if (variacoesSelecionadas.length === 0) {
-      alert('Selecione pelo menos uma variação e informe a quantidade.')
+      alert('Marque pelo menos uma variação e informe o estoque de cada uma.')
       setSalvando(false)
       return false
     }
@@ -385,9 +447,10 @@ export default function Produtos() {
       produtoEmEdicao.variacao && variacoesSelecionadas.includes(produtoEmEdicao.variacao)
         ? produtoEmEdicao.variacao
         : variacoesSelecionadas[0]
+    const nomeTrim = nome.trim()
     const qtdPrincipal = variacoesComQuantidade[variacaoPrincipal] ?? 0
     await window.electronAPI.atualizarProduto(produtoEmEdicao.id, {
-      nome: nome.trim(),
+      nome: nomeTrim,
       variacao: variacaoPrincipal,
       preco_custo: custo,
       preco_venda: venda,
@@ -396,15 +459,32 @@ export default function Produtos() {
     })
     for (const variacao of variacoesSelecionadas) {
       if (variacao === variacaoPrincipal) continue
-      const qtd = variacoesComQuantidade[variacao]
-      await window.electronAPI.criarProduto({
-        nome: nome.trim(),
-        variacao,
-        preco_custo: custo,
-        preco_venda: venda,
-        estoque: qtd,
-        artesao_id: artesaoVal,
-      })
+      const qtd = variacoesComQuantidade[variacao] ?? 0
+      const existente = produtos.find(
+        (p) =>
+          p.nome.trim() === nomeTrim &&
+          p.artesao_id === artesaoVal &&
+          p.variacao === variacao,
+      )
+      if (existente) {
+        await window.electronAPI.atualizarProduto(existente.id, {
+          nome: nomeTrim,
+          variacao,
+          preco_custo: custo,
+          preco_venda: venda,
+          estoque: qtd,
+          artesao_id: artesaoVal,
+        })
+      } else {
+        await window.electronAPI.criarProduto({
+          nome: nomeTrim,
+          variacao,
+          preco_custo: custo,
+          preco_venda: venda,
+          estoque: qtd,
+          artesao_id: artesaoVal,
+        })
+      }
     }
     return true
   }
@@ -429,14 +509,14 @@ export default function Produtos() {
       return false
     }
     const valoresDoTipo = (tipoSelecionado.valores || []).map((v) => v.valor)
-    const variacoesSelecionadas = valoresDoTipo.filter((v) => variacoesComQuantidade[v] > 0)
+    const variacoesSelecionadas = obterVariacoesSelecionadas(valoresDoTipo)
     if (variacoesSelecionadas.length === 0) {
-      alert('Selecione pelo menos uma variação e informe a quantidade.')
+      alert('Marque pelo menos uma variação e informe o estoque de cada uma.')
       setSalvando(false)
       return false
     }
     for (const variacao of variacoesSelecionadas) {
-      const qtd = variacoesComQuantidade[variacao]
+      const qtd = variacoesComQuantidade[variacao] ?? 0
       await window.electronAPI.criarProduto({
         nome: nome.trim(),
         variacao,
@@ -1064,6 +1144,80 @@ ${chunk.join('\n')}
     return { cadastrados, estoqueTotal }
   }, [produtos])
 
+  const valoresTipoProduto = useMemo(() => {
+    if (!tipoVariacaoProdutoId) return []
+    const tipo = tiposVariacao.find((t) => String(t.id) === String(tipoVariacaoProdutoId))
+    return tipo?.valores || []
+  }, [tiposVariacao, tipoVariacaoProdutoId])
+
+  const variacoesAtivasCount = useMemo(
+    () => valoresTipoProduto.filter((vo) => variacoesIncluidas[vo.valor]).length,
+    [valoresTipoProduto, variacoesIncluidas],
+  )
+
+  const variacoesAtivasLista = useMemo(
+    () => valoresTipoProduto.filter((vo) => variacoesIncluidas[vo.valor]),
+    [valoresTipoProduto, variacoesIncluidas],
+  )
+
+  const variacoesDisponiveisLista = useMemo(
+    () => valoresTipoProduto.filter((vo) => !variacoesIncluidas[vo.valor]),
+    [valoresTipoProduto, variacoesIncluidas],
+  )
+
+  function renderLinhaVariacaoEstoque(valorObj) {
+    const v = valorObj.valor
+    const incluida = Boolean(variacoesIncluidas[v])
+    return (
+      <tr
+        key={`${tipoVariacaoProdutoId}-${valorObj.id}`}
+        className={incluida ? 'modal-variacoes-estoque-row--ativa' : ''}
+      >
+        <td className="modal-variacoes-estoque-col-check">
+          <input
+            type="checkbox"
+            checked={incluida}
+            onChange={(e) => handleVariacaoIncluidaToggle(v, e.target.checked)}
+            aria-label={`Incluir variação ${v}`}
+          />
+        </td>
+        <td className="modal-variacoes-estoque-col-nome">{v}</td>
+        <td className="modal-variacoes-estoque-col-qtd">
+          <input
+            id={`qtd-var-${valorObj.id}`}
+            type="number"
+            min={0}
+            placeholder="0"
+            value={incluida ? (variacoesComQuantidade[v] ?? 0) : ''}
+            onChange={(e) => {
+              if (!incluida) handleVariacaoIncluidaToggle(v, true)
+              handleVariacaoQuantidade(v, e.target.value)
+            }}
+            className="modal-variacao-qtd"
+          />
+        </td>
+      </tr>
+    )
+  }
+
+  function renderTabelaVariacoesEstoque(linhas, classeWrapper = '') {
+    if (linhas.length === 0) return null
+    return (
+      <div className={`modal-variacoes-estoque-tabela-wrapper ${classeWrapper}`.trim()}>
+        <table className="modal-variacoes-estoque-tabela">
+          <thead>
+            <tr>
+              <th className="modal-variacoes-estoque-col-check" aria-label="Incluir" />
+              <th>Variação</th>
+              <th>Estoque</th>
+            </tr>
+          </thead>
+          <tbody>{linhas.map(renderLinhaVariacaoEstoque)}</tbody>
+        </table>
+      </div>
+    )
+  }
+
   return (
     <div className="produtos">
       {toast.visible && (
@@ -1190,14 +1344,14 @@ ${chunk.join('\n')}
       </div>
 
       {modalAberto && (
-        <div className="modal-overlay" onClick={() => !salvando && setModalAberto(false)}>
+        <div className="modal-overlay" onClick={() => !salvando && fecharModalProduto()}>
           <div className="modal-content modal-produto" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <h3>{produtoEmEdicao ? 'Editar Produto' : 'Cadastrar Novo Produto'}</h3>
               <button
                 type="button"
                 className="modal-close"
-                onClick={() => !salvando && setModalAberto(false)}
+                onClick={() => !salvando && fecharModalProduto()}
                 aria-label="Fechar"
                 disabled={salvando}
               >
@@ -1253,30 +1407,47 @@ ${chunk.join('\n')}
                       )}
                     </div>
                     {tipoVariacaoProdutoId ? (
-                      <div className="modal-variacoes-grid">
-                        {(tiposVariacao.find((t) => String(t.id) === String(tipoVariacaoProdutoId))?.valores || []).map((valorObj) => {
-                          const v = valorObj.valor
-                          return (
-                            <div key={`${tipoVariacaoProdutoId}-${valorObj.id}`} className="modal-variacao-item">
-                              <label className="modal-variacao-check">
-                                <input
-                                  type="checkbox"
-                                  checked={variacoesComQuantidade[v] > 0}
-                                  onChange={(e) => handleVariacaoQuantidade(v, e.target.checked ? 1 : 0)}
-                                />
-                                {v}
-                              </label>
-                              <input
-                                type="number"
-                                min={0}
-                                placeholder="Qtd"
-                                value={variacoesComQuantidade[v] || ''}
-                                onChange={(e) => handleVariacaoQuantidade(v, e.target.value)}
-                                className="modal-variacao-qtd"
-                              />
+                      <div className="modal-variacoes-estoque">
+                        {valoresTipoProduto.length === 0 ? (
+                          <p className="modal-variacoes-empty">
+                            Nenhum valor neste tipo. Cadastre em &quot;Adicionar Variação&quot; no menu de produtos.
+                          </p>
+                        ) : (
+                          <>
+                            <div className="modal-variacoes-estoque-secao modal-variacoes-estoque-secao--ativas">
+                              <div className="modal-variacoes-estoque-secao-head">
+                                <h4 className="modal-variacoes-estoque-secao-titulo">Variações do produto</h4>
+                                {variacoesAtivasCount > 0 && (
+                                  <span className="modal-variacoes-estoque-badge">{variacoesAtivasCount}</span>
+                                )}
+                              </div>
+                              {variacoesAtivasLista.length === 0 ? (
+                                <p className="modal-variacoes-estoque-empty">
+                                  Nenhuma variação selecionada. Clique abaixo para adicionar.
+                                </p>
+                              ) : (
+                                renderTabelaVariacoesEstoque(
+                                  variacoesAtivasLista,
+                                  'modal-variacoes-estoque-tabela-wrapper--ativas',
+                                )
+                              )}
                             </div>
-                          )
-                        })}
+
+                            {variacoesDisponiveisLista.length > 0 && (
+                              <details className="modal-variacoes-estoque-disponiveis">
+                                <summary className="modal-variacoes-estoque-disponiveis-summary">
+                                  Adicionar variações
+                                  <span className="modal-variacoes-estoque-disponiveis-count">
+                                    ({variacoesDisponiveisLista.length} disponíveis)
+                                  </span>
+                                </summary>
+                                <div className="modal-variacoes-estoque-disponiveis-body">
+                                  {renderTabelaVariacoesEstoque(variacoesDisponiveisLista)}
+                                </div>
+                              </details>
+                            )}
+                          </>
+                        )}
                       </div>
                     ) : (
                       <p className="modal-variacoes-empty">Selecione um tipo de variação para exibir os valores.</p>
