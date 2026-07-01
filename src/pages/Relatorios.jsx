@@ -429,7 +429,7 @@ export default function Relatorios() {
 
   const totalCustoBaseRel = produtosCustoRel.reduce((acc, item) => acc + Number(item.total_custo_produto ?? 0), 0)
   const totalPagarComAluguel = aluguelPreenchido
-    ? Math.max(0, totalCustoBaseRel - valorAluguel)
+    ? totalCustoBaseRel - valorAluguel
     : totalCustoBaseRel
 
   function iniciarEdicaoCustoLinha(produtoRelatorio) {
@@ -727,7 +727,7 @@ export default function Relatorios() {
     const totalCusto = totalCustoBaseRel
     const preenchidoAluguel = aluguelInput.trim() !== ''
     const valorAluguelPdf = parseValorAluguel(aluguelInput)
-    const totalPagarPdf = preenchidoAluguel ? Math.max(0, totalCusto - valorAluguelPdf) : totalCusto
+    const totalPagarPdf = preenchidoAluguel ? totalCusto - valorAluguelPdf : totalCusto
     const artesaoNome = artesaoId ? artesoes.find(a => a.id === artesaoId)?.nome : 'Todos os artesãos'
 
     const doc = new jsPDF()
