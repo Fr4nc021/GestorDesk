@@ -71,7 +71,12 @@ export default function PDV() {
   const [valorRecebido, setValorRecebido] = useState('')
   const [vendaEdicaoId, setVendaEdicaoId] = useState(null)
   const inputRef = useRef(null)
+  const filaCodigosRef = useRef([])
+  const processandoFilaRef = useRef(false)
+  const ultimoEnfileiradoRef = useRef({ codigo: '', em: 0 })
   const finalizarRef = useRef(null)
+  const DEDUPE_MS = 300
+  const MAX_FILA = 20
   const [toast, setToast] = useState(null)
   const [voltarRelatorios, setVoltarRelatorios] = useState(false)
 
@@ -148,15 +153,33 @@ export default function PDV() {
     }
   }, [location.state, navigate])
 
+  function normalizarCodigo(codigo) {
+    return String(codigo ?? '').replace(/\D/g, '').trim()
+  }
+
+  function limparInputLeitura() {
+    setCodigoInput('')
+    if (inputRef.current) inputRef.current.value = ''
+  }
+
+  function limparFilaLeitura() {
+    filaCodigosRef.current = []
+  }
+
   function adicionarItemNaVenda(produto) {
     if (!produto) return
+
+    let toastParaExibir = null
+
     setItens((prev) => {
-      const existe = prev.find((i) => i.id === produto.id)
-      const quantidadeAtual = existe ? existe.quantidade : 0
-      const maxQ = (produto.estoque ?? 0) + (vendaEdicaoId ? quantidadeAtual : 0)
-      if (quantidadeAtual + 1 > maxQ) {
+      const aval = avaliarEstoqueParaAdicionar(produto, prev, vendaEdicaoId)
+      if (!aval.permitido) {
+        toastParaExibir = aval.toastErro
         return prev
       }
+      if (aval.toastAlerta) toastParaExibir = aval.toastAlerta
+
+      const existe = prev.find((i) => i.id === produto.id)
       if (existe) {
         return prev.map((i) =>
           i.id === produto.id ? { ...i, quantidade: i.quantidade + 1 } : i
@@ -164,26 +187,59 @@ export default function PDV() {
       }
       return [...prev, { ...produto, quantidade: 1 }]
     })
+
+    if (toastParaExibir) setToast(toastParaExibir)
   }
 
-  async function buscarProdutoPorCodigo(codigo) {
-    const codigoTrim = String(codigo || '').trim()
+  function enfileirarLeitura(codigo) {
+    const codigoTrim = normalizarCodigo(codigo)
     if (!codigoTrim) return
+
+    const agora = Date.now()
+    const ultimo = ultimoEnfileiradoRef.current
+    if (ultimo.codigo === codigoTrim && agora - ultimo.em < DEDUPE_MS) {
+      limparInputLeitura()
+      return
+    }
+    ultimoEnfileiradoRef.current = { codigo: codigoTrim, em: agora }
+
+    if (filaCodigosRef.current.at(-1) === codigoTrim) {
+      limparInputLeitura()
+      return
+    }
+    if (filaCodigosRef.current.length >= MAX_FILA) {
+      setToast({ tipo: 'erro', mensagem: 'Muitas leituras em fila. Aguarde.' })
+      return
+    }
+
+    filaCodigosRef.current.push(codigoTrim)
+    limparInputLeitura()
+    void processarFilaCodigos()
+  }
+
+  async function processarFilaCodigos() {
+    if (processandoFilaRef.current) return
+    processandoFilaRef.current = true
+
+    try {
+      while (filaCodigosRef.current.length > 0) {
+        const codigo = filaCodigosRef.current.shift()
+        await processarUmCodigo(codigo)
+      }
+    } finally {
+      processandoFilaRef.current = false
+      inputRef.current?.focus()
+    }
+  }
+
+  async function processarUmCodigo(codigoTrim) {
     try {
       const produto = await window.electronAPI.buscarProdutoPorCodigo(codigoTrim)
       if (!produto) {
         alert('Produto não encontrado')
         return
       }
-      const aval = avaliarEstoqueParaAdicionar(produto, itens, vendaEdicaoId)
-      if (!aval.permitido) {
-        setToast(aval.toastErro)
-        return
-      }
-      if (aval.toastAlerta) setToast(aval.toastAlerta)
       adicionarItemNaVenda(produto)
-      setCodigoInput('')
-      inputRef.current?.focus()
     } catch (err) {
       console.error(err)
       alert('Erro ao buscar produto')
@@ -192,30 +248,28 @@ export default function PDV() {
 
   function selecionarProduto(produto) {
     if (!produto) return
-    const aval = avaliarEstoqueParaAdicionar(produto, itens, vendaEdicaoId)
-    if (!aval.permitido) {
-      setToast(aval.toastErro)
-      return
-    }
-    if (aval.toastAlerta) setToast(aval.toastAlerta)
     adicionarItemNaVenda(produto)
     setShowModalPesquisa(false)
     inputRef.current?.focus()
   }
 
-  async function handleBuscarProduto() {
-    const codigo = codigoInput.trim()
+  function lerCodigoBarrasInput() {
+    return normalizarCodigo(inputRef.current?.value ?? codigoInput)
+  }
+
+  function handleBuscarProduto() {
+    const codigo = lerCodigoBarrasInput()
     if (codigo) {
-      await buscarProdutoPorCodigo(codigo)
+      enfileirarLeitura(codigo)
     } else {
       setShowModalPesquisa(true)
     }
   }
 
   function handleBuscarProdutoPorEnter() {
-    const codigo = codigoInput.trim()
+    const codigo = lerCodigoBarrasInput()
     if (!codigo) return
-    buscarProdutoPorCodigo(codigo)
+    enfileirarLeitura(codigo)
   }
 
   function handleRemoverItem(id) {
@@ -345,6 +399,7 @@ export default function PDV() {
         await window.electronAPI.criarVenda(payload)
       }
       setShowModalPagamento(false)
+      limparFilaLeitura()
       setItens([])
       setDescontoInput('')
       setFormasSelecionadas([])
@@ -363,6 +418,7 @@ export default function PDV() {
   }
 
   function handleCancelar() {
+    limparFilaLeitura()
     setItens([])
     setDescontoInput('')
     setFormasSelecionadas([])
