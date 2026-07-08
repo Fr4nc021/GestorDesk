@@ -17,6 +17,8 @@ export default function Produtos() {
   const [modalExcluirAberto, setModalExcluirAberto] = useState(false)
   const [produtoEmEdicao, setProdutoEmEdicao] = useState(null)
   const [produtoParaExcluir, setProdutoParaExcluir] = useState(null)
+  const [modalRefazerCodigoAberto, setModalRefazerCodigoAberto] = useState(false)
+  const [refazendoCodigo, setRefazendoCodigo] = useState(false)
   const [nome, setNome] = useState('')
   const [adicionarVariacao, setAdicionarVariacao] = useState(false)
   const [variacoesComQuantidade, setVariacoesComQuantidade] = useState({ P: 0, M: 0, G: 0, GG: 0 })
@@ -74,6 +76,7 @@ export default function Produtos() {
     modalAberto ||
     modalVariacoesAberto ||
     modalExcluirAberto ||
+    modalRefazerCodigoAberto ||
     modalEtiquetasAberto ||
     modalVisualizarEtiquetasAberto ||
     Boolean(valorVariacaoParaExcluir)
@@ -375,6 +378,25 @@ export default function Produtos() {
   function abrirModalExcluir(produto) {
     setProdutoParaExcluir(produto)
     setModalExcluirAberto(true)
+  }
+
+  async function handleRefazerCodigoBarras() {
+    if (!produtoEmEdicao || refazendoCodigo) return
+    setRefazendoCodigo(true)
+    try {
+      const resultado = await window.electronAPI.refazerCodigoBarras(produtoEmEdicao.id)
+      setProdutoEmEdicao((prev) =>
+        prev ? { ...prev, codigo_barras: resultado.codigo_barras } : prev,
+      )
+      await carregarProdutos()
+      setModalRefazerCodigoAberto(false)
+      mostrarToast('Novo código de barras gerado com sucesso!', 'success')
+    } catch (err) {
+      console.error('[Produtos] Erro ao refazer código de barras:', err)
+      mostrarToast(err?.message || 'Erro ao refazer código de barras.', 'error')
+    } finally {
+      setRefazendoCodigo(false)
+    }
   }
 
   function handleVariacaoQuantidade(variacao, valor) {
@@ -1372,6 +1394,25 @@ ${chunk.join('\n')}
                   />
                 </div>
 
+                {produtoEmEdicao && (
+                  <div className="modal-field">
+                    <label>Código de barras</label>
+                    <div className="modal-codigo-barras-row">
+                      <span className="modal-codigo-barras-valor">
+                        {produtoEmEdicao.codigo_barras || '—'}
+                      </span>
+                      <button
+                        type="button"
+                        className="produtos-btn-secondary"
+                        onClick={() => setModalRefazerCodigoAberto(true)}
+                        disabled={salvando || refazendoCodigo}
+                      >
+                        Gerar novo código
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 <div className="modal-produto-variacao">
                   <label className="modal-checkbox-label">
                     <input
@@ -2117,6 +2158,55 @@ ${chunk.join('\n')}
               </button>
               <button type="button" className="modal-btn-excluir" onClick={handleExcluirProduto}>
                 Excluir
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {modalRefazerCodigoAberto && produtoEmEdicao && (
+        <div
+          className="modal-overlay"
+          onClick={() => !refazendoCodigo && setModalRefazerCodigoAberto(false)}
+        >
+          <div className="modal-content modal-confirm" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Gerar novo código de barras</h3>
+              <button
+                type="button"
+                className="modal-close"
+                onClick={() => setModalRefazerCodigoAberto(false)}
+                aria-label="Fechar"
+                disabled={refazendoCodigo}
+              >
+                ×
+              </button>
+            </div>
+            <p>
+              Será gerado um novo código de barras para{' '}
+              <strong>
+                {produtoEmEdicao.nome}
+                {produtoEmEdicao.variacao ? ` (${produtoEmEdicao.variacao})` : ''}
+              </strong>
+              . O código atual (<strong>{produtoEmEdicao.codigo_barras}</strong>) deixará de
+              funcionar e as etiquetas já impressas precisarão ser refeitas.
+            </p>
+            <div className="modal-confirm-acoes">
+              <button
+                type="button"
+                className="modal-btn-cancelar"
+                onClick={() => setModalRefazerCodigoAberto(false)}
+                disabled={refazendoCodigo}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                className="produtos-btn-primary"
+                onClick={handleRefazerCodigoBarras}
+                disabled={refazendoCodigo}
+              >
+                {refazendoCodigo ? 'Gerando...' : 'Gerar novo código'}
               </button>
             </div>
           </div>

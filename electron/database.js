@@ -466,6 +466,34 @@ function buscarProdutoPorCodigo(codigo_barras) {
   return stmt.get(codigo_barras.trim()) || null
 }
 
+/**
+ * Gera um novo código de barras EAN-13 único para um produto existente.
+ * O código anterior deixa de funcionar (etiquetas antigas precisam ser refeitas).
+ */
+function refazerCodigoBarras(id) {
+  const produto = db
+    .prepare('SELECT id, codigo_barras FROM produtos WHERE id = ? AND deleted_at IS NULL')
+    .get(id)
+
+  if (!produto) {
+    throw new Error('Produto não encontrado.')
+  }
+
+  let codigo_barras = gerarCodigoBarras()
+  const checkStmt = db.prepare('SELECT id FROM produtos WHERE codigo_barras = ?')
+
+  while (checkStmt.get(codigo_barras)) {
+    codigo_barras = gerarCodigoBarras()
+  }
+
+  db.prepare(`
+    UPDATE produtos SET codigo_barras = ?, sync_status = 'pending'
+    WHERE id = ?
+  `).run(codigo_barras, id)
+
+  return { id, codigo_barras, codigo_anterior: produto.codigo_barras }
+}
+
 // --- Tipos de Variação e Valores ---
 
 function listarTiposVariacao() {
@@ -1393,6 +1421,7 @@ module.exports = {
   atualizarProduto,
   excluirProduto,
   buscarProdutoPorCodigo,
+  refazerCodigoBarras,
   criarVenda,
   listarVendas,
   listarVendasDoDia,

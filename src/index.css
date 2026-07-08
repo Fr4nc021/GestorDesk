@@ -2297,6 +2297,22 @@ button.caixa-btn-filtro-periodo {
   font-weight: 500;
 }
 
+.modal-codigo-barras-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.modal-codigo-barras-valor {
+  font-family: 'Courier New', monospace;
+  font-size: 16px;
+  font-weight: 600;
+  color: #212121;
+  letter-spacing: 1px;
+}
+
 .modal-field input {
   width: 100%;
   padding: 12px 16px;

@@ -80,6 +80,7 @@ const {
   atualizarProduto,
   excluirProduto,
   buscarProdutoPorCodigo,
+  refazerCodigoBarras,
   criarVenda,
   listarVendas,
   listarVendasDoDia,
@@ -199,6 +200,7 @@ ipcMain.handle('listar-produtos', () => listarProdutos())
 ipcMain.handle('atualizar-produto', (_, id, data) => atualizarProduto(id, data))
 ipcMain.handle('excluir-produto', (_, id) => excluirProduto(id))
 ipcMain.handle('buscar-produto-por-codigo', (_, codigo) => buscarProdutoPorCodigo(codigo))
+ipcMain.handle('refazer-codigo-barras', (_, id) => refazerCodigoBarras(id))
 
 ipcMain.handle('listar-tipos-variacao', () => listarTiposVariacao())
 ipcMain.handle('criar-tipo-variacao', (_, data) => criarTipoVariacao(data))
