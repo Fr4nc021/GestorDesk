@@ -3199,6 +3199,36 @@ button.caixa-btn-filtro-periodo {
   overflow: hidden;
 }
 
+.modal-etiquetas-opcao-barras {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+  padding: 10px 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  background: #fafafa;
+  font-size: 13px;
+  font-weight: 600;
+  color: #374151;
+  cursor: pointer;
+  user-select: none;
+}
+
+.modal-etiquetas-opcao-barras input[type='checkbox'] {
+  width: 16px;
+  height: 16px;
+  accent-color: #212121;
+  cursor: pointer;
+}
+
+.modal-etiquetas-aviso-sem-barras {
+  margin: -8px 0 16px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: #6b7280;
+}
+
 .modal-etiquetas-config-toggle {
   display: flex;
   align-items: center;
@@ -3566,6 +3596,83 @@ button.caixa-btn-filtro-periodo {
   margin-top: 4px;
 }
 
+.etiqueta-item--sem-barras .etiqueta-nome {
+  margin-bottom: 6px;
+}
+
+.etiqueta-item--sem-barras .etiqueta-codigo-numero {
+  margin-top: 0;
+  margin-bottom: 6px;
+}
+
+.etiqueta-item--sem-barras .etiqueta-preco {
+  font-size: 1.75rem;
+  font-weight: 800;
+  margin-top: 2px;
+  letter-spacing: -0.02em;
+}
+
+.etiquetas-folhas-sem-barras {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 0 8px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.etiqueta-papel-40 {
+  width: 240px;
+  height: 240px;
+  display: grid;
+  grid-template-columns: 120px;
+  grid-template-rows: 120px 120px;
+  justify-content: center;
+  align-content: center;
+  background: #fff;
+  border: 1px dashed #d1d5db;
+  box-sizing: border-box;
+  flex-shrink: 0;
+}
+
+.etiqueta-papel-40 .etiqueta-item--sem-barras {
+  width: 120px;
+  height: 120px;
+  max-width: 120px;
+  max-height: 120px;
+  padding: 6px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 3px;
+  overflow: hidden;
+  text-align: center;
+}
+
+.etiqueta-papel-40 .etiqueta-nome {
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.15;
+  max-height: 2.4em;
+  margin: 0;
+  overflow: hidden;
+}
+
+.etiqueta-papel-40 .etiqueta-codigo-numero {
+  font-size: 10px;
+  margin: 0;
+  max-width: 100%;
+}
+
+.etiqueta-papel-40 .etiqueta-preco {
+  font-size: 15px;
+  font-weight: 800;
+  margin: 0;
+}
+
 /* Visualização em tela das etiquetas (no modal) */
 .etiquetas-container {
   display: grid;
@@ -3725,6 +3832,47 @@ button.caixa-btn-filtro-periodo {
     overflow: visible !important;
     padding: 0 !important;
     box-shadow: none !important;
+  }
+
+  .etiquetas-folhas-sem-barras,
+  .etiquetas-folhas-sem-barras * {
+    visibility: visible !important;
+  }
+
+  .etiquetas-folhas-sem-barras {
+    display: block !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    gap: 0 !important;
+  }
+
+  .etiqueta-papel-40 {
+    width: 40mm !important;
+    height: 40mm !important;
+    display: grid !important;
+    grid-template-columns: 20mm !important;
+    grid-template-rows: 20mm 20mm !important;
+    justify-content: center !important;
+    align-content: center !important;
+    border: none !important;
+    page-break-after: always;
+    break-after: page;
+    background: #fff !important;
+  }
+
+  .etiqueta-papel-40:last-child {
+    page-break-after: auto;
+    break-after: auto;
+  }
+
+  .etiqueta-papel-40 .etiqueta-item--sem-barras {
+    display: flex !important;
+    width: 20mm !important;
+    height: 20mm !important;
+    max-width: 20mm !important;
+    max-height: 20mm !important;
+    padding: 0.6mm !important;
+    overflow: hidden !important;
   }
 }
 

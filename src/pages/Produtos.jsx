@@ -59,6 +59,7 @@ export default function Produtos() {
     alturaPapel: 40,
     colunas: 2,
     linhas: 2,
+    exibirCodigoBarras: true,
   })
 
   function mostrarToast(message, type = 'success') {
@@ -839,7 +840,7 @@ export default function Produtos() {
       .replace(/"/g, '&quot;')
   }
 
-  function calcularLayoutEtiquetaProporcional(labelWidthMm, labelHeightMm) {
+  function calcularLayoutEtiquetaProporcional(labelWidthMm, labelHeightMm, exibirCodigoBarras = true) {
     const mmToPx = 96 / 25.4
     const base = Math.min(labelWidthMm, labelHeightMm)
     const clamp = (valor, minimo, maximo) => Math.min(maximo, Math.max(minimo, valor))
@@ -852,16 +853,25 @@ export default function Produtos() {
     let barcodeHeightMm = clamp(labelHeightMm * 0.55, labelHeightMm * 0.4, labelHeightMm * 0.75)
     const barcodeModuleMm = clamp(labelWidthMm * 0.015, labelWidthMm * 0.005, labelWidthMm * 0.03)
 
+    if (!exibirCodigoBarras) {
+      barcodeHeightMm = 0
+      nomeFonteMm = clamp(labelHeightMm * 0.14, base * 0.07, labelHeightMm * 0.22)
+      codigoFonteMm = clamp(labelHeightMm * 0.1, base * 0.055, labelHeightMm * 0.16)
+      precoFonteMm = 4
+      gapVerticalMm = clamp(labelHeightMm * 0.04, labelHeightMm * 0.015, labelHeightMm * 0.08)
+    }
+
     const alturaSeguraMm = labelHeightMm * 0.98
+    const gaps = exibirCodigoBarras ? 3 : 2
     const alturaBlocoTextoMm = nomeFonteMm * 2.3 + codigoFonteMm * 1.3 + precoFonteMm * 1.3
-    const alturaTotalMm = paddingMm * 2 + gapVerticalMm * 3 + barcodeHeightMm + alturaBlocoTextoMm
+    const alturaTotalMm = paddingMm * 2 + gapVerticalMm * gaps + barcodeHeightMm + alturaBlocoTextoMm
     if (alturaTotalMm > alturaSeguraMm) {
       const escala = alturaSeguraMm / alturaTotalMm
       paddingMm *= escala
       gapVerticalMm *= escala
       nomeFonteMm *= escala
       codigoFonteMm *= escala
-      precoFonteMm *= escala
+      if (exibirCodigoBarras) precoFonteMm *= escala
       barcodeHeightMm *= escala
     }
 
@@ -875,6 +885,7 @@ export default function Produtos() {
       barcodeModuleMm,
       barcodeHeightPx: Math.max(1, barcodeHeightMm * mmToPx),
       barcodeModulePx: Math.max(0.2, barcodeModuleMm * mmToPx),
+      exibirCodigoBarras,
     }
   }
 
@@ -883,36 +894,42 @@ export default function Produtos() {
       escapeHtmlEtiqueta(produto.nome) +
       (produto.variacao ? ` (${escapeHtmlEtiqueta(produto.variacao)})` : '')
     const code = String(produto.codigo_barras || '').trim()
-    let barcodeInner = ''
-    if (code) {
-      try {
-        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
-        const digits = code.replace(/\D/g, '')
-        const formato =
-          digits.length === 12 || digits.length === 13 ? 'EAN13' : 'CODE128'
-        JsBarcode(svg, code, {
-          format: formato,
-          width: layout.barcodeModulePx,
-          height: layout.barcodeHeightPx,
-          margin: 0,
-          displayValue: false,
-        })
-        svg.style.width = '95%'
-        svg.style.height = `${layout.barcodeHeightMm}mm`
-        svg.style.maxWidth = '95%'
-        svg.style.display = 'block'
-        barcodeInner = svg.outerHTML
-      } catch {
-        barcodeInner = `<span class="etiqueta-codigo-fallback">${escapeHtmlEtiqueta(code)}</span>`
+    const comBarras = layout.exibirCodigoBarras !== false
+    let barcodeHtml = ''
+    if (comBarras) {
+      let barcodeInner = ''
+      if (code) {
+        try {
+          const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg')
+          const digits = code.replace(/\D/g, '')
+          const formato =
+            digits.length === 12 || digits.length === 13 ? 'EAN13' : 'CODE128'
+          JsBarcode(svg, code, {
+            format: formato,
+            width: layout.barcodeModulePx,
+            height: layout.barcodeHeightPx,
+            margin: 0,
+            displayValue: false,
+          })
+          svg.style.width = '95%'
+          svg.style.height = `${layout.barcodeHeightMm}mm`
+          svg.style.maxWidth = '95%'
+          svg.style.display = 'block'
+          barcodeInner = svg.outerHTML
+        } catch {
+          barcodeInner = `<span class="etiqueta-codigo-fallback">${escapeHtmlEtiqueta(code)}</span>`
+        }
       }
+      barcodeHtml = `<div class="etiqueta-barcode">${barcodeInner}</div>`
     }
     const preco =
       produto.preco_venda != null
         ? `R$ ${Number(produto.preco_venda).toFixed(2).replace('.', ',')}`
         : '-'
-    return `<div class="etiqueta-item" data-idx="${idx}">
+    const classeItem = comBarras ? 'etiqueta-item' : 'etiqueta-item etiqueta-item--sem-barras'
+    return `<div class="${classeItem}" data-idx="${idx}">
   <div class="etiqueta-nome">${nome}</div>
-  <div class="etiqueta-barcode">${barcodeInner}</div>
+  ${barcodeHtml}
   <div class="etiqueta-codigo-numero">${escapeHtmlEtiqueta(code)}</div>
   <div class="etiqueta-preco">${preco}</div>
 </div>`
@@ -981,6 +998,19 @@ export default function Produtos() {
         gap: 0;
         align-content: start;
       }
+      .etiquetas-container--dupla-20 {
+        width: 40mm;
+        height: 40mm;
+        min-height: 40mm;
+        justify-content: center;
+        align-content: center;
+        align-items: center;
+      }
+      .print-page--dupla-20 {
+        width: 40mm;
+        height: 40mm;
+        overflow: hidden;
+      }
       .etiqueta-item {
         border: none;
         padding: var(--etq-padding-mm);
@@ -996,6 +1026,14 @@ export default function Produtos() {
         grid-template-rows: auto auto auto auto;
         align-content: start;
         gap: var(--etq-gap-v-mm);
+      }
+      .etiqueta-item--sem-barras {
+        grid-template-rows: auto auto auto;
+        align-content: center;
+        width: 20mm;
+        height: 20mm;
+        max-width: 20mm;
+        max-height: 20mm;
       }
       .etiqueta-nome {
         font-size: var(--etq-nome-size-mm);
@@ -1032,6 +1070,10 @@ export default function Produtos() {
         font-weight: 700;
         line-height: 1.1;
       }
+      .etiqueta-item--sem-barras .etiqueta-preco {
+        font-weight: 800;
+        letter-spacing: -0.02em;
+      }
       @media print {
         body { margin: 0; }
         .print-page { page-break-after: always; }
@@ -1040,26 +1082,45 @@ export default function Produtos() {
     `
   }
 
+  function geometriaImpressaoEtiquetas(exibirCodigoBarras) {
+    if (!exibirCodigoBarras) {
+      return {
+        labelWidthMm: 20,
+        labelHeightMm: 20,
+        paperWidthMm: 40,
+        paperHeightMm: 40,
+        columns: 1,
+        rows: 2,
+      }
+    }
+    return {
+      labelWidthMm: Number(configEtiquetas.larguraEtiqueta) || 28,
+      labelHeightMm: Number(configEtiquetas.alturaEtiqueta) || 18,
+      paperWidthMm: Number(configEtiquetas.larguraPapel) || 60,
+      paperHeightMm: Number(configEtiquetas.alturaPapel) || 40,
+      columns: Math.max(1, parseInt(configEtiquetas.colunas, 10) || 1),
+      rows: Math.max(1, parseInt(configEtiquetas.linhas, 10) || 1),
+    }
+  }
+
   function imprimirEtiquetasEmJanelaDedicada(listaProdutos) {
     if (!listaProdutos || listaProdutos.length === 0) return false
 
+    const exibirCodigoBarras = configEtiquetas.exibirCodigoBarras !== false
     const {
-      larguraEtiqueta,
-      alturaEtiqueta,
-      larguraPapel,
-      alturaPapel,
-      colunas,
-      linhas,
-    } = configEtiquetas
-
-    const labelWidthMm = Number(larguraEtiqueta) || 28
-    const labelHeightMm = Number(alturaEtiqueta) || 18
-    const paperWidthMm = Number(larguraPapel) || 60
-    const paperHeightMm = Number(alturaPapel) || 40
-    const columns = Math.max(1, parseInt(colunas, 10) || 1)
-    const rows = Math.max(1, parseInt(linhas, 10) || 1)
+      labelWidthMm,
+      labelHeightMm,
+      paperWidthMm,
+      paperHeightMm,
+      columns,
+      rows,
+    } = geometriaImpressaoEtiquetas(exibirCodigoBarras)
     const labelsPerPage = columns * rows
-    const layout = calcularLayoutEtiquetaProporcional(labelWidthMm, labelHeightMm)
+    const layout = calcularLayoutEtiquetaProporcional(
+      labelWidthMm,
+      labelHeightMm,
+      exibirCodigoBarras
+    )
 
     const labelHtmls = listaProdutos.map((produto, i) =>
       htmlEtiquetaProdutoParaImpressao(produto, i, layout)
@@ -1070,11 +1131,15 @@ export default function Produtos() {
       pageChunks.push(labelHtmls.slice(i, i + labelsPerPage))
     }
 
+    const classePagina = exibirCodigoBarras ? 'print-page' : 'print-page print-page--dupla-20'
+    const classeContainer = exibirCodigoBarras
+      ? 'etiquetas-container'
+      : 'etiquetas-container etiquetas-container--dupla-20'
     const pageHtml = pageChunks
       .map(
         (chunk) =>
-          `<div class="print-page">
-  <div class="etiquetas-container">
+          `<div class="${classePagina}">
+  <div class="${classeContainer}">
 ${chunk.join('\n')}
   </div>
 </div>`
@@ -1664,6 +1729,19 @@ ${chunk.join('\n')}
                     </div>
                   )}
                 </div>
+                <label className="modal-etiquetas-opcao-barras">
+                  <input
+                    type="checkbox"
+                    checked={configEtiquetas.exibirCodigoBarras !== false}
+                    onChange={(e) => atualizarConfigEtiquetas({ exibirCodigoBarras: e.target.checked })}
+                  />
+                  <span>Incluir código de barras</span>
+                </label>
+                {configEtiquetas.exibirCodigoBarras === false && (
+                  <p className="modal-etiquetas-aviso-sem-barras">
+                    Sem código de barras: papel 40×40 mm, 2 produtos um acima do outro (20×20 mm cada).
+                  </p>
+                )}
                 <div className="modal-etiquetas-filtros-linha">
                   <label className="modal-etiquetas-filtro-artesao">
                     <span>Artesão</span>
@@ -1922,6 +2000,33 @@ ${chunk.join('\n')}
                 ×
               </button>
             </div>
+            {configEtiquetas.exibirCodigoBarras === false ? (
+              <div className="etiquetas-folhas-sem-barras">
+                {(() => {
+                  const lista = gerarListaEtiquetasParaImpressao()
+                  const paginas = []
+                  for (let i = 0; i < lista.length; i += 2) paginas.push(lista.slice(i, i + 2))
+                  return paginas.map((pagina, pi) => (
+                    <div key={`folha-${pi}`} className="etiqueta-papel-40">
+                      {pagina.map((produto, i) => (
+                        <div
+                          key={`${produto.id}-${produto.variacao || ''}-${pi}-${i}`}
+                          className="etiqueta-item etiqueta-item--sem-barras"
+                        >
+                          <div className="etiqueta-nome">{produto.nome}{produto.variacao ? ` (${produto.variacao})` : ''}</div>
+                          <div className="etiqueta-codigo-numero">{produto.codigo_barras}</div>
+                          <div className="etiqueta-preco">
+                            {produto.preco_venda != null
+                              ? `R$ ${Number(produto.preco_venda).toFixed(2).replace('.', ',')}`
+                              : '-'}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ))
+                })()}
+              </div>
+            ) : (
             <div
               className="etiquetas-container"
               style={{
@@ -1929,7 +2034,10 @@ ${chunk.join('\n')}
               }}
             >
               {gerarListaEtiquetasParaImpressao().map((produto, i) => (
-                <div key={`${produto.id}-${produto.variacao || ''}-${i}`} className="etiqueta-item">
+                <div
+                  key={`${produto.id}-${produto.variacao || ''}-${i}`}
+                  className="etiqueta-item"
+                >
                   <div className="etiqueta-nome">{produto.nome}{produto.variacao ? ` (${produto.variacao})` : ''}</div>
                   <div className="etiqueta-barcode">
                     <Barcode
@@ -1950,6 +2058,7 @@ ${chunk.join('\n')}
                 </div>
               ))}
             </div>
+            )}
             <button type="button" className="modal-etiquetas-confirmar" onClick={handleConfirmarImpressao}>
               Confirmar
             </button>
