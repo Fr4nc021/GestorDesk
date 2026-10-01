@@ -578,7 +578,12 @@ export default function Relatorios() {
   const totalCustoBaseRel = produtosCustoRel.reduce((acc, item) => acc + Number(item.total_custo_produto ?? 0), 0)
   const totalVendaRel = produtosCustoRel.reduce((acc, item) => acc + Number(item.total_venda_produto ?? 0), 0)
   const mostrarColunaFornecedor = !artesaoId
-  const colSpanRotuloCusto = 5 + (mostrarColunaFornecedor ? 1 : 0) + (incluirValorVenda ? 1 : 0)
+  const mostrarColunaVariacao = produtosCustoRel.some((p) => String(p.variacao || '').trim())
+  const colSpanRotuloCusto =
+    4 +
+    (mostrarColunaVariacao ? 1 : 0) +
+    (mostrarColunaFornecedor ? 1 : 0) +
+    (incluirValorVenda ? 1 : 0)
   const totalPagarComAluguel = aluguelPreenchido
     ? totalCustoBaseRel - valorAluguel
     : totalCustoBaseRel
@@ -909,16 +914,27 @@ export default function Relatorios() {
     doc.setFontSize(12)
     doc.setFont('helvetica', 'bold')
     doc.text('Produtos Vendidos', margin, y)
+    const custoLogoAposVendidos = margin + doc.getTextWidth('Produtos Vendidos') + 4
     y += 10
 
-    const colStart = incluirValorVenda
-      ? artesaoId
-        ? { produto: 12, variacao: 78, custoUnit: 108, qtd: 136, total: 152, venda: 174 }
-        : { produto: 12, variacao: 50, artesao: 68, custoUnit: 100, qtd: 124, total: 138, venda: 168 }
-      : artesaoId
-        ? { produto: 20, variacao: 95, custoUnit: 125, qtd: 155, total: 172 }
-        : { produto: 20, variacao: 75, artesao: 95, custoUnit: 125, qtd: 148, total: 165 }
-    const fimLinha = incluirValorVenda ? 200 : 190
+    const mostrarVariacao = produtos.some((p) => String(p.variacao || '').trim())
+    const colStart = mostrarVariacao
+      ? incluirValorVenda
+        ? artesaoId
+          ? { produto: margin, variacao: 78, custoUnit: 108, qtd: 136, total: 152, venda: 174 }
+          : { produto: margin, variacao: 50, artesao: 68, custoUnit: 100, qtd: 124, total: 138, venda: 168 }
+        : artesaoId
+          ? { produto: margin, variacao: 95, custoUnit: 125, qtd: 155, total: 172 }
+          : { produto: margin, variacao: 75, artesao: 95, custoUnit: 125, qtd: 148, total: 165 }
+      : (() => {
+          const custoUnit = artesaoId ? custoLogoAposVendidos : custoLogoAposVendidos + 28
+          const artesao = artesaoId ? undefined : custoLogoAposVendidos
+          const qtd = custoUnit + 28
+          const total = qtd + 16
+          const venda = total + 26
+          return { produto: margin, artesao, custoUnit, qtd, total, venda }
+        })()
+    const fimLinha = (incluirValorVenda ? colStart.venda : colStart.total) + 24
     const colunaRodape = incluirValorVenda ? colStart.venda : colStart.total
 
     function desenharRodapeTabelaPdf() {
@@ -960,7 +976,7 @@ export default function Relatorios() {
       doc.setFont('helvetica', 'bold')
       doc.setFontSize(incluirValorVenda ? 8 : 9)
       doc.text('Produto', colStart.produto, y)
-      doc.text('Var.', colStart.variacao, y)
+      if (mostrarVariacao) doc.text('Var.', colStart.variacao, y)
       if (!artesaoId) doc.text('Fornecedor', colStart.artesao, y)
       doc.text('Custo un.', colStart.custoUnit, y)
       doc.text('Qtd', colStart.qtd, y)
@@ -979,9 +995,12 @@ export default function Relatorios() {
           y = 20
         }
         doc.setFontSize(incluirValorVenda ? 8 : 9)
-        const nome = (p.nome || '').substring(0, incluirValorVenda ? (artesaoId ? 28 : 16) : (artesaoId ? 32 : 22))
+        const limiteNome = (mostrarVariacao ? colStart.variacao : (!artesaoId ? colStart.artesao : colStart.custoUnit)) - colStart.produto - 2
+        const nome = limitarTextoPdf(doc, p.nome || '', Math.max(limiteNome, 20))
         doc.text(nome, colStart.produto, y)
-        doc.text((p.variacao || '—').substring(0, incluirValorVenda ? (artesaoId ? 12 : 8) : (artesaoId ? 14 : 12)), colStart.variacao, y)
+        if (mostrarVariacao) {
+          doc.text((p.variacao || '—').substring(0, incluirValorVenda ? (artesaoId ? 12 : 8) : (artesaoId ? 14 : 12)), colStart.variacao, y)
+        }
         if (!artesaoId) {
           doc.text(
             limitarTextoPdf(doc, rotuloArtesao(p.artesao_nome, p.artesao_nome_fantasia), incluirValorVenda ? 28 : 26),
@@ -1765,11 +1784,11 @@ export default function Relatorios() {
                 </div>
               ) : (
                 <div className="relatorios-table-wrapper">
-                  <table className="relatorios-table">
+                  <table className="relatorios-table relatorios-table-custo-fornecedor">
                     <thead>
                       <tr>
                         <th>Produto</th>
-                        <th>Variação</th>
+                        {mostrarColunaVariacao && <th>Variação</th>}
                         {mostrarColunaFornecedor && <th>Fornecedor</th>}
                         <th>Custo un.</th>
                         <th>Qtd</th>
@@ -1782,7 +1801,7 @@ export default function Relatorios() {
                       {produtosCustoRel.map(p => (
                         <tr key={p.chave_custo_relatorio}>
                           <td>{p.nome}</td>
-                          <td>{p.variacao || '—'}</td>
+                          {mostrarColunaVariacao && <td>{p.variacao || '—'}</td>}
                           {mostrarColunaFornecedor && (
                             <td>{rotuloArtesao(p.artesao_nome, p.artesao_nome_fantasia, '—')}</td>
                           )}
