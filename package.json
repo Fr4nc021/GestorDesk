@@ -14,17 +14,20 @@
     "seed:clear": "electron scripts/clear-seeds.cjs",
     "build": "vite build",
     "lint": "eslint .",
+    "test": "node --test tests/atualizacao.test.cjs",
     "preview": "vite preview",
     "electron": "electron .",
     "start": "concurrently \"npm run dev\" \"npm run electron\"",
     "postinstall": "electron-rebuild",
     "dist": "npm run build && node scripts/build-installer.cjs",
+    "dist:publish": "node scripts/validar-release.cjs && npm run build && electron-builder --win nsis --publish always",
     "dist:clean": "npm run clean:db && npm run build && node scripts/build-installer.cjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.97.0",
     "better-sqlite3": "^12.8.0",
     "dotenv": "^16.6.1",
+    "electron-updater": "^6.8.9",
     "jsbarcode": "^3.12.3",
     "jspdf": "^4.2.0",
     "react": "^19.2.0",
@@ -76,6 +79,12 @@
       "shortcutName": "GestorDesk",
       "installerIcon": "build/icon.ico",
       "uninstallerIcon": "build/icon.ico"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "Fr4nc021",
+      "repo": "GestorDesk",
+      "releaseType": "release"
     }
   }
 }

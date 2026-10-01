@@ -137,6 +137,14 @@ if (process.argv[2] === 'criar-usuario' && process.argv[3] && process.argv[4]) {
   process.exit(0)
 }
 
+const { criarFluxoEncerramento, TIMEOUT_ENCERRAMENTO_MS } = require('./atualizacaoPolitica.cjs')
+const {
+  verificarAtualizacoes,
+  obterEstadoAtualizacao,
+  atualizacaoBaixada,
+  executarInstalacao,
+} = require('./updater.cjs')
+
 function createWindow() {
   const iconPath = path.join(__dirname, '..', 'build', 'icon.ico')
   const win = new BrowserWindow({
@@ -163,6 +171,7 @@ function createWindow() {
 
   win.once('ready-to-show', () => {
     win.show()
+    verificarAtualizacoes()
   })
 }
 
@@ -313,13 +322,26 @@ ipcMain.handle('sync-agora', async () => {
   }
 })
 
-// Sincronização ao fechar: tenta enviar pendentes antes de encerrar
-let syncOnQuitDone = false
+const fluxoEncerramento = criarFluxoEncerramento({
+  sincronizar: () => syncWithSupabase(),
+  instalar: () => executarInstalacao(),
+  sair: () => app.quit(),
+  timeoutMs: TIMEOUT_ENCERRAMENTO_MS,
+})
+
+ipcMain.handle('atualizacao:estado', () => obterEstadoAtualizacao())
+ipcMain.handle('atualizacao:verificar', () => verificarAtualizacoes())
+ipcMain.handle('atualizacao:instalar', () => {
+  const pedido = fluxoEncerramento.pedirInstalacao(atualizacaoBaixada())
+  if (pedido.ok) app.quit()
+  return { ok: Boolean(pedido.ok), reason: pedido.reason || null }
+})
+
+// Sincronização ao fechar: tenta enviar pendentes antes de encerrar.
+// A instalação de atualização usa o mesmo gancho e só chama quitAndInstall depois do sync ou do timeout.
 app.on('before-quit', (event) => {
-  if (syncOnQuitDone) return
-  event.preventDefault()
-  syncOnQuitDone = true
-  syncWithSupabase().finally(() => app.quit())
+  const resultado = fluxoEncerramento.beforeQuit()
+  if (resultado.preventDefault) event.preventDefault()
 })
 
 app.whenReady().then(() => {

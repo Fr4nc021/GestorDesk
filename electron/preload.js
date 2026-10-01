@@ -80,4 +80,23 @@ contextBridge.exposeInMainWorld('electronAPI', {
     invoke('obter-totais-pagamentos-por-periodo', dataInicio, dataFim),
 
   sincronizarAgora: () => invoke('sync-agora'),
+
+  atualizacaoEstado: () => invoke('atualizacao:estado'),
+  atualizacaoVerificar: () => invoke('atualizacao:verificar'),
+  atualizacaoInstalar: () => invoke('atualizacao:instalar'),
+  onAtualizacao: (callback) => {
+    if (typeof callback !== 'function') return () => {}
+    const listener = (_event, payload) => {
+      if (!payload || typeof payload.status !== 'string') return
+      callback({
+        status: payload.status,
+        versaoAtual: typeof payload.versaoAtual === 'string' ? payload.versaoAtual : '',
+        versaoNova: typeof payload.versaoNova === 'string' ? payload.versaoNova : null,
+        progresso: typeof payload.progresso === 'number' ? payload.progresso : null,
+        mensagem: typeof payload.mensagem === 'string' ? payload.mensagem : '',
+      })
+    }
+    ipcRenderer.on('atualizacao:evento', listener)
+    return () => ipcRenderer.removeListener('atualizacao:evento', listener)
+  },
 })

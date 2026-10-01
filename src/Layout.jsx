@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { Outlet, Navigate } from 'react-router-dom'
 import Sidebar from './components/Sidebar'
+import AtualizacaoBanner from './components/AtualizacaoBanner'
 import { isFocusLost, recoverInputFocus, runInputRecovery } from './utils/focusRecovery'
 
 function getUsuarioLogado() {
@@ -41,6 +42,7 @@ export default function Layout() {
     <div className="layout-root">
       <Sidebar />
       <main className="layout-main">
+        <AtualizacaoBanner />
         <Outlet />
       </main>
     </div>

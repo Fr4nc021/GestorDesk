@@ -19,7 +19,7 @@ function timestamp() {
 function runBuilder(outputDir) {
   return new Promise((resolve) => {
     const builderBin = path.join(process.cwd(), 'node_modules', '.bin', 'electron-builder.cmd')
-    const args = [`--config.directories.output=${outputDir}`]
+    const args = ['--publish', 'never', `--config.directories.output=${outputDir}`]
     const child = spawn(builderBin, args, {
       shell: true,
       stdio: 'inherit',
