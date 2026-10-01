@@ -3996,6 +3996,35 @@ button.caixa-btn-filtro-periodo {
   max-width: 200px;
 }
 
+.relatorios-field-check {
+  justify-content: flex-end;
+}
+
+.relatorios-check-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 42px;
+  font-size: 14px;
+  font-weight: 500;
+  color: #333;
+  cursor: pointer;
+  user-select: none;
+}
+
+.relatorios-check-label input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: #212121;
+  cursor: pointer;
+}
+
+.relatorios-fornecedor-cabecalho {
+  margin: 0 0 16px;
+  font-size: 15px;
+  color: #333;
+}
 .relatorios-custo-artesao {
   margin-top: 28px;
 }
@@ -4305,6 +4334,15 @@ button.caixa-btn-filtro-periodo {
   font-size: 14px;
 }
 
+.relatorios-table-produtos-custo {
+  width: max-content;
+  max-width: 100%;
+}
+
+.relatorios-table-produtos-custo th,
+.relatorios-table-produtos-custo td {
+  padding: 8px 10px;
+}
 .relatorios-table th,
 .relatorios-table td {
   padding: 12px 16px;

@@ -1,7 +1,8 @@
-import { useState, useEffect, useLayoutEffect, useCallback } from 'react'
+import { useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { jsPDF } from 'jspdf'
 import { recoverInputFocus } from '../utils/focusRecovery'
+import { rotuloArtesao, rotuloNomeFantasia, textoInclui } from '../utils/artesao'
 import {
   XAxis,
   YAxis,
@@ -28,6 +29,44 @@ function parseValorAluguel(str) {
   }
   const n = parseFloat(t)
   return Number.isFinite(n) ? n : 0
+}
+
+/** Limite da faixa de custo. Vazio ignora o lado; texto inválido invalida a faixa. */
+function interpretarLimitePreco(str) {
+  if (str == null || typeof str !== 'string') return { status: 'vazio' }
+  let t = str.trim().replace(/R\$\s?/gi, '').replace(/\s/g, '')
+  if (!t) return { status: 'vazio' }
+  if (t.includes(',')) {
+    t = t.replace(/\./g, '').replace(',', '.')
+  }
+  if (!/^\d+(\.\d+)?$/.test(t)) return { status: 'invalido' }
+  const n = parseFloat(t)
+  if (!Number.isFinite(n)) return { status: 'invalido' }
+  return { status: 'ok', valor: n }
+}
+
+function centavosPreco(valor) {
+  return Math.round(Number(valor ?? 0) * 100)
+}
+
+function interpretarFaixaPrecoCusto(minStr, maxStr) {
+  const min = interpretarLimitePreco(minStr)
+  const max = interpretarLimitePreco(maxStr)
+  if (min.status === 'invalido' || max.status === 'invalido') return { status: 'invalido' }
+  const minimo = min.status === 'ok' ? min.valor : null
+  const maximo = max.status === 'ok' ? max.valor : null
+  if (minimo == null && maximo == null) return { status: 'vazio' }
+  if (minimo != null && maximo != null && centavosPreco(minimo) > centavosPreco(maximo)) {
+    return { status: 'invertida' }
+  }
+  return { status: 'ok', minimo, maximo }
+}
+
+function precoCustoNaFaixa(preco, minimo, maximo) {
+  const cents = centavosPreco(preco)
+  if (minimo != null && cents < centavosPreco(minimo)) return false
+  if (maximo != null && cents > centavosPreco(maximo)) return false
+  return true
 }
 
 function hojeISO() {
@@ -82,18 +121,95 @@ function nomeProdutoRelatorio(p) {
   return v ? `${n} (${v})` : n
 }
 
+function limitarTextoPdf(doc, texto, larguraMax) {
+  const original = String(texto || '')
+  if (!original) return ''
+  if (doc.getTextWidth(original) <= larguraMax) return original
+  const sufixo = '...'
+  let corte = original
+  while (corte.length > 1 && doc.getTextWidth(corte + sufixo) > larguraMax) {
+    corte = corte.slice(0, -1)
+  }
+  return corte + sufixo
+}
+
+function montarTextoProdutosWhatsApp(produtos, artesaoNome, dataGeracao, incluirArtesaoNaLinha, incluirValorVenda) {
+  const linhas = [
+    `*Estoque e custo — ${artesaoNome}*`,
+    dataGeracao,
+    '',
+  ]
+  if (!produtos.length) {
+    linhas.push('Nenhum produto encontrado.')
+    return linhas.join('\n')
+  }
+  for (const p of produtos) {
+    const nome = nomeProdutoRelatorio(p) || 'Sem nome'
+    const rotulo = rotuloNomeFantasia(
+      p.artesao_nome_fantasia,
+      p.artesao_razao_social,
+      p.artesao_nome
+    )
+    const artesao = incluirArtesaoNaLinha && rotulo ? ` — ${rotulo}` : ''
+    const venda = incluirValorVenda ? ` · venda ${formatBRL(p.preco_venda)}` : ''
+    linhas.push(`${nome}${artesao}`)
+    linhas.push(`estoque ${p.estoque ?? 0} · custo ${formatBRL(p.preco_custo)}${venda}`)
+    linhas.push('')
+  }
+  return linhas.join('\n').trimEnd()
+}
+
+async function copiarTextoAreaTransferencia(texto) {
+  if (window.electronAPI?.copiarTexto) {
+    try {
+      const ok = await window.electronAPI.copiarTexto(texto)
+      if (ok) return true
+    } catch {
+      /* segue para a área de transferência da página */
+    }
+  }
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(texto)
+      return true
+    } catch {
+      /* segue o fallback com seleção de texto */
+    }
+  }
+  const area = document.createElement('textarea')
+  area.value = texto
+  area.setAttribute('readonly', '')
+  area.style.position = 'fixed'
+  area.style.top = '0'
+  area.style.left = '0'
+  area.style.opacity = '0'
+  document.body.appendChild(area)
+  area.focus()
+  area.select()
+  area.setSelectionRange(0, area.value.length)
+  let ok = false
+  try {
+    ok = document.execCommand('copy')
+  } finally {
+    document.body.removeChild(area)
+  }
+  return ok
+}
+
 const TAB_GERAL = 'geral'
 const TAB_ARTESAO = 'artesao'
 const TAB_LUCRO = 'lucro'
 const TAB_MAIS_VENDIDOS = 'mais_vendidos'
 const TAB_PRODUTOS = 'produtos'
+const TAB_VALOR = 'valor'
 
 const PREVIEW_TITULOS_PDF = {
   geral: 'Relatório de Vendas — Visão geral',
   lucro: 'Relatório de Lucro',
   mais_vendidos: 'Produtos mais vendidos',
-  artesao: 'Vendas e custos por artesão',
+  artesao: 'Vendas e custos por fornecedor',
   produtos: 'Produtos — estoque e custo',
+  valor: 'Produtos — valor de custo',
 }
 
 const SESSION_RELATORIOS_RESTORE = 'gestordesk_relatorios_restore'
@@ -163,6 +279,7 @@ export default function Relatorios() {
   })
   const [dataFim, setDataFim] = useState(hoje)
   const [artesaoId, setArtesaoId] = useState(null)
+  const [buscaArtesao, setBuscaArtesao] = useState('')
 
   const [artesoes, setArtesoes] = useState([])
   const [resumo, setResumo] = useState(null)
@@ -172,21 +289,39 @@ export default function Relatorios() {
   const [maisVendidos, setMaisVendidos] = useState([])
   const [produtosCadastrados, setProdutosCadastrados] = useState(0)
   const [produtosRelatorio, setProdutosRelatorio] = useState([])
+  const [filtroCustoMin, setFiltroCustoMin] = useState('')
+  const [filtroCustoMax, setFiltroCustoMax] = useState('')
   const [carregando, setCarregando] = useState(false)
   const [previewPdf, setPreviewPdf] = useState(null)
   const [previewGerando, setPreviewGerando] = useState(false)
+  const [textoProdutosCopiado, setTextoProdutosCopiado] = useState(false)
+  const copiaTextoTimerRef = useRef(null)
 
   const [modalVendasArtesaoAberto, setModalVendasArtesaoAberto] = useState(false)
   const [vendasArtesaoLista, setVendasArtesaoLista] = useState([])
   const [vendasArtesaoCarregando, setVendasArtesaoCarregando] = useState(false)
 
   const [aluguelInput, setAluguelInput] = useState('')
+  const [incluirValorVenda, setIncluirValorVenda] = useState(false)
+  const [incluirValorVendaProdutos, setIncluirValorVendaProdutos] = useState(false)
   const [relatorioCustoVendasArtesao, setRelatorioCustoVendasArtesao] = useState(null)
   const [custoOverrides, setCustoOverrides] = useState({})
   const [quantidadeOverrides, setQuantidadeOverrides] = useState({})
   const [editandoCustoLinha, setEditandoCustoLinha] = useState(null)
   const [custoLinhaInput, setCustoLinhaInput] = useState('')
   const [quantidadeLinhaInput, setQuantidadeLinhaInput] = useState('')
+
+  function rotuloArtesaoSelecionado() {
+    if (!artesaoId) return 'Todos os fornecedores'
+    const artesao = artesoes.find((item) => item.id === artesaoId)
+    return rotuloArtesao(artesao?.nome, artesao?.nome_fantasia, 'Fornecedor')
+  }
+
+  function artesaoPassaBusca(artesao) {
+    const termo = buscaArtesao.trim().toLowerCase()
+    if (!termo || artesao.id === artesaoId) return true
+    return textoInclui(termo, artesao.nome, artesao.nome_fantasia)
+  }
 
   const carregarListaVendasModalArtesao = useCallback(async (inicioPeriodo, fimPeriodo, idArtesao) => {
     if (!window.electronAPI?.listarVendasPorPeriodoEArtesao) return
@@ -200,7 +335,7 @@ export default function Relatorios() {
       )
       setVendasArtesaoLista(lista || [])
     } catch (err) {
-      console.error('[Relatórios] Erro ao carregar vendas (modal artesão):', err)
+      console.error('[Relatórios] Erro ao carregar vendas (modal fornecedor):', err)
       alert('Erro ao carregar vendas.')
     } finally {
       setVendasArtesaoCarregando(false)
@@ -279,20 +414,24 @@ export default function Relatorios() {
     })
   }
 
+  useEffect(() => () => {
+    if (copiaTextoTimerRef.current) clearTimeout(copiaTextoTimerRef.current)
+  }, [])
+
   useEffect(() => {
     async function carregarArtesoes() {
       try {
         const lista = await window.electronAPI.listarArtesoes()
         setArtesoes(lista || [])
       } catch (err) {
-        console.error('[Relatórios] Erro ao carregar artesãos:', err)
+        console.error('[Relatórios] Erro ao carregar fornecedores:', err)
       }
     }
     carregarArtesoes()
   }, [])
 
   useEffect(() => {
-    if (aba !== TAB_PRODUTOS && dataInicio > dataFim) {
+    if (aba !== TAB_PRODUTOS && aba !== TAB_VALOR && dataInicio > dataFim) {
       if (aba === TAB_ARTESAO) setRelatorioCustoVendasArtesao(null)
       return
     }
@@ -347,6 +486,12 @@ export default function Relatorios() {
             setProdutosRelatorio(
               artesaoId ? todos.filter(p => p.artesao_id === artesaoId) : todos
             )
+          })
+        )
+      } else if (aba === TAB_VALOR) {
+        promessasCarregamento.push(
+          api.listarProdutos().then(lista => {
+            setProdutosRelatorio(lista || [])
           })
         )
       }
@@ -415,6 +560,8 @@ export default function Relatorios() {
       typeof quantidadeOverride === 'number' && Number.isFinite(quantidadeOverride)
         ? quantidadeOverride
         : qtdOriginal
+    const vendaOriginal = Number(produto.total_venda_produto ?? 0)
+    const vendaUnitaria = qtdOriginal > 0 ? vendaOriginal / qtdOriginal : 0
     return {
       ...produto,
       custo_ajustado: custoAplicado,
@@ -423,11 +570,15 @@ export default function Relatorios() {
       quantidade_ajustada_manual:
         typeof quantidadeOverride === 'number' && Number.isFinite(quantidadeOverride),
       total_custo_produto: custoAplicado * quantidadeAplicada,
+      total_venda_produto: vendaUnitaria * quantidadeAplicada,
       chave_custo_relatorio: chave,
     }
   })
 
   const totalCustoBaseRel = produtosCustoRel.reduce((acc, item) => acc + Number(item.total_custo_produto ?? 0), 0)
+  const totalVendaRel = produtosCustoRel.reduce((acc, item) => acc + Number(item.total_venda_produto ?? 0), 0)
+  const mostrarColunaFornecedor = !artesaoId
+  const colSpanRotuloCusto = 5 + (mostrarColunaFornecedor ? 1 : 0) + (incluirValorVenda ? 1 : 0)
   const totalPagarComAluguel = aluguelPreenchido
     ? totalCustoBaseRel - valorAluguel
     : totalCustoBaseRel
@@ -661,7 +812,7 @@ export default function Relatorios() {
     const margin = 20
     let y = 20
 
-    const artesaoNome = artesaoId ? artesoes.find(a => a.id === artesaoId)?.nome : 'Todos os artesãos'
+    const artesaoNome = rotuloArtesaoSelecionado()
 
     doc.setFontSize(18)
     doc.text('Relatório de Produtos Mais Vendidos', margin, y)
@@ -671,7 +822,7 @@ export default function Relatorios() {
     doc.setTextColor(80, 80, 80)
     doc.text(textoPeriodoRelatorioPdf(dataInicio, dataFim), margin, y)
     y += 6
-    doc.text(`Filtro de artesão: ${artesaoNome}`, margin, y)
+    doc.text(`Filtro de fornecedor: ${artesaoNome}`, margin, y)
     y += 15
 
     doc.setTextColor(0, 0, 0)
@@ -691,7 +842,7 @@ export default function Relatorios() {
       doc.text('#', colStart.pos, y)
       doc.text('Produto', colStart.produto, y)
       doc.text('Var.', colStart.variacao, y)
-      doc.text('Artesão', colStart.artesao, y)
+      doc.text('Fornecedor', colStart.artesao, y)
       doc.text('Qtd', colStart.qtd, y)
       y += 6
 
@@ -709,7 +860,11 @@ export default function Relatorios() {
         doc.text(String(idx + 1), colStart.pos, y)
         doc.text((item.nome || '').substring(0, 35), colStart.produto, y)
         doc.text(item.variacao || '—', colStart.variacao, y)
-        doc.text((item.artesao_nome || '—').substring(0, 12), colStart.artesao, y)
+        doc.text(
+          limitarTextoPdf(doc, rotuloArtesao(item.artesao_nome, item.artesao_nome_fantasia, '—'), 46),
+          colStart.artesao,
+          y
+        )
         doc.text(String(item.total_vendido), colStart.qtd, y)
         y += 6
       }
@@ -728,10 +883,10 @@ export default function Relatorios() {
     const preenchidoAluguel = aluguelInput.trim() !== ''
     const valorAluguelPdf = parseValorAluguel(aluguelInput)
     const totalPagarPdf = preenchidoAluguel ? totalCusto - valorAluguelPdf : totalCusto
-    const artesaoNome = artesaoId ? artesoes.find(a => a.id === artesaoId)?.nome : 'Todos os artesãos'
+    const artesaoNome = rotuloArtesaoSelecionado()
 
     const doc = new jsPDF()
-    const margin = 20
+    const margin = incluirValorVenda ? 12 : 20
     let y = 20
 
     doc.setFontSize(18)
@@ -742,7 +897,11 @@ export default function Relatorios() {
     doc.setTextColor(80, 80, 80)
     doc.text(textoPeriodoRelatorioPdf(dataInicio, dataFim), margin, y)
     y += 6
-    doc.text(`Filtro: ${artesaoNome}`, margin, y)
+    doc.text(
+      artesaoId ? `Fornecedor: ${artesaoNome}` : `Filtro: ${artesaoNome}`,
+      margin,
+      y
+    )
     y += 15
 
     doc.setTextColor(0, 0, 0)
@@ -752,27 +911,40 @@ export default function Relatorios() {
     doc.text('Produtos Vendidos', margin, y)
     y += 10
 
-    const colStart = { produto: 20, variacao: 75, artesao: 95, custoUnit: 125, qtd: 148, total: 165 }
+    const colStart = incluirValorVenda
+      ? artesaoId
+        ? { produto: 12, variacao: 78, custoUnit: 108, qtd: 136, total: 152, venda: 174 }
+        : { produto: 12, variacao: 50, artesao: 68, custoUnit: 100, qtd: 124, total: 138, venda: 168 }
+      : artesaoId
+        ? { produto: 20, variacao: 95, custoUnit: 125, qtd: 155, total: 172 }
+        : { produto: 20, variacao: 75, artesao: 95, custoUnit: 125, qtd: 148, total: 165 }
+    const fimLinha = incluirValorVenda ? 200 : 190
+    const colunaRodape = incluirValorVenda ? colStart.venda : colStart.total
 
     function desenharRodapeTabelaPdf() {
       y += 4
       doc.setDrawColor(180, 180, 180)
-      doc.line(margin, y, 190, y)
+      doc.line(margin, y, fimLinha, y)
       y += 8
       doc.setFont('helvetica', 'bold')
       doc.setFontSize(10)
+      if (incluirValorVenda) {
+        doc.text('Total em vendas:', margin, y)
+        doc.text(formatBRL(totalVendaRel), colunaRodape, y)
+        y += 7
+      }
       if (preenchidoAluguel) {
         doc.text('Subtotal (custo produtos):', margin, y)
-        doc.text(formatBRL(totalCusto), colStart.total, y)
+        doc.text(formatBRL(totalCusto), colunaRodape, y)
         y += 7
         doc.text('Aluguel (dedução):', margin, y)
-        doc.text(formatBRL(-valorAluguelPdf), colStart.total, y)
+        doc.text(formatBRL(-valorAluguelPdf), colunaRodape, y)
         y += 7
-        doc.text('Total a pagar ao Artesão:', margin, y)
-        doc.text(formatBRL(totalPagarPdf), colStart.total, y)
+        doc.text('Total a pagar ao Fornecedor:', margin, y)
+        doc.text(formatBRL(totalPagarPdf), colunaRodape, y)
       } else {
-        doc.text('Total a pagar ao Artesão:', margin, y)
-        doc.text(formatBRL(totalCusto), colStart.total, y)
+        doc.text('Total a pagar ao Fornecedor:', margin, y)
+        doc.text(formatBRL(totalCusto), colunaRodape, y)
       }
     }
 
@@ -786,18 +958,19 @@ export default function Relatorios() {
       }
     } else {
       doc.setFont('helvetica', 'bold')
-      doc.setFontSize(9)
+      doc.setFontSize(incluirValorVenda ? 8 : 9)
       doc.text('Produto', colStart.produto, y)
       doc.text('Var.', colStart.variacao, y)
-      doc.text('Artesão', colStart.artesao, y)
+      if (!artesaoId) doc.text('Fornecedor', colStart.artesao, y)
       doc.text('Custo un.', colStart.custoUnit, y)
       doc.text('Qtd', colStart.qtd, y)
       doc.text('Total', colStart.total, y)
+      if (incluirValorVenda) doc.text('Valor venda', colStart.venda, y)
       y += 7
 
       doc.setFont('helvetica', 'normal')
       doc.setDrawColor(220, 220, 220)
-      doc.line(margin, y - 2, 190, y - 2)
+      doc.line(margin, y - 2, fimLinha, y - 2)
       y += 2
 
       for (const p of produtos) {
@@ -805,14 +978,21 @@ export default function Relatorios() {
           doc.addPage()
           y = 20
         }
-        doc.setFontSize(9)
-        const nome = (p.nome || '').substring(0, 22)
+        doc.setFontSize(incluirValorVenda ? 8 : 9)
+        const nome = (p.nome || '').substring(0, incluirValorVenda ? (artesaoId ? 28 : 16) : (artesaoId ? 32 : 22))
         doc.text(nome, colStart.produto, y)
-        doc.text(p.variacao || '—', colStart.variacao, y)
-        doc.text((p.artesao_nome || '').substring(0, 10), colStart.artesao, y)
+        doc.text((p.variacao || '—').substring(0, incluirValorVenda ? (artesaoId ? 12 : 8) : (artesaoId ? 14 : 12)), colStart.variacao, y)
+        if (!artesaoId) {
+          doc.text(
+            limitarTextoPdf(doc, rotuloArtesao(p.artesao_nome, p.artesao_nome_fantasia), incluirValorVenda ? 28 : 26),
+            colStart.artesao,
+            y
+          )
+        }
         doc.text(formatBRL(p.preco_custo), colStart.custoUnit, y)
         doc.text(String(p.quantidade_ajustada ?? p.total_vendido ?? 0), colStart.qtd, y)
         doc.text(formatBRL(p.total_custo_produto), colStart.total, y)
+        if (incluirValorVenda) doc.text(formatBRL(p.total_venda_produto), colStart.venda, y)
         y += 7
       }
 
@@ -831,8 +1011,9 @@ export default function Relatorios() {
     const margin = 20
     let y = 20
 
-    const artesaoNome = artesaoId ? artesoes.find(a => a.id === artesaoId)?.nome : 'Todos os artesãos'
+    const artesaoNome = rotuloArtesaoSelecionado()
 
+    doc.setFont('helvetica', 'normal')
     doc.setFontSize(18)
     doc.text('Relatório de Produtos — Estoque e custo', margin, y)
     y += 10
@@ -841,7 +1022,7 @@ export default function Relatorios() {
     doc.setTextColor(80, 80, 80)
     doc.text(`Gerado em: ${formatarDataParaExibir(hoje)}`, margin, y)
     y += 6
-    doc.text(`Filtro: ${artesaoNome}`, margin, y)
+    doc.text(artesaoId ? `Fornecedor: ${artesaoNome}` : `Filtro: ${artesaoNome}`, margin, y)
     y += 15
 
     doc.setTextColor(0, 0, 0)
@@ -855,36 +1036,197 @@ export default function Relatorios() {
       doc.setFontSize(10)
       doc.text('Nenhum produto encontrado.', margin, y)
     } else {
-      const col = { produto: 20, estoque: 140, custo: 165 }
-
       doc.setFont('helvetica', 'bold')
       doc.setFontSize(9)
+      const folgaEntreColunas = 3
+      const col = incluirValorVendaProdutos
+        ? { produto: margin, estoque: 100, custo: 128, venda: 168 }
+        : {
+            produto: margin,
+            estoque: 64,
+            custo: 64 + doc.getTextWidth('Estoque') + folgaEntreColunas,
+          }
+      const larguraNome = col.estoque - col.produto - 4
+      const fimTabela = incluirValorVendaProdutos
+        ? col.venda + doc.getTextWidth('Valor venda')
+        : col.custo + doc.getTextWidth('Preço custo')
+
       doc.text('Produto', col.produto, y)
       doc.text('Estoque', col.estoque, y)
       doc.text('Preço custo', col.custo, y)
+      if (incluirValorVendaProdutos) doc.text('Valor venda', col.venda, y)
       y += 6
 
       doc.setFont('helvetica', 'normal')
       doc.setDrawColor(220, 220, 220)
-      doc.line(margin, y - 2, 190, y - 2)
+      doc.line(margin, y - 2, fimTabela, y - 2)
       y += 2
 
       for (const p of produtosRelatorio) {
-        if (y > 270) {
+        doc.setFont('helvetica', 'normal')
+        doc.setFontSize(9)
+        doc.setTextColor(0, 0, 0)
+        const nome = nomeProdutoRelatorio(p) || ''
+        const fantasia = artesaoId
+          ? ''
+          : rotuloNomeFantasia(
+              p.artesao_nome_fantasia,
+              p.artesao_razao_social,
+              p.artesao_nome,
+              ''
+            )
+        const linhasNome = doc.splitTextToSize(nome, Math.max(larguraNome, 20))
+        const linhasFantasia = fantasia
+          ? doc.splitTextToSize(fantasia, Math.max(larguraNome, 20))
+          : []
+        const alturaNome = Math.max(5, linhasNome.length * 4.2)
+        const alturaFantasia = linhasFantasia.length * 3.8
+        const alturaBloco = Math.max(6, alturaNome + alturaFantasia + 1.5)
+        if (y + alturaBloco > 280) {
           doc.addPage()
           y = 20
         }
-        doc.setFontSize(9)
-        doc.text(nomeProdutoRelatorio(p).substring(0, 85), col.produto, y)
+        doc.text(linhasNome, col.produto, y)
         doc.text(String(p.estoque ?? 0), col.estoque, y)
         doc.text(formatBRL(p.preco_custo), col.custo, y)
-        y += 6
+        if (incluirValorVendaProdutos) doc.text(formatBRL(p.preco_venda), col.venda, y)
+        if (linhasFantasia.length > 0) {
+          doc.setFontSize(8)
+          doc.setTextColor(90, 90, 90)
+          doc.text(linhasFantasia, col.produto, y + alturaNome)
+          doc.setTextColor(0, 0, 0)
+        }
+        y += alturaBloco
       }
     }
 
     const sufixo = artesaoId ? `-artesao-${artesaoId}` : ''
     const filename = `relatorio-produtos${sufixo}-${hoje}.pdf`
     return { doc, filename }
+  }
+
+  const filtroCusto = interpretarFaixaPrecoCusto(filtroCustoMin, filtroCustoMax)
+  const produtosValor =
+    filtroCusto.status === 'ok'
+      ? produtosRelatorio.filter(p => precoCustoNaFaixa(p.preco_custo, filtroCusto.minimo, filtroCusto.maximo))
+      : filtroCusto.status === 'vazio'
+        ? produtosRelatorio
+        : []
+
+  function textoFiltroCustoValor() {
+    if (filtroCusto.status === 'invalido') return 'Preço de custo: valor inválido'
+    if (filtroCusto.status === 'invertida') return 'Preço de custo: faixa inválida'
+    if (filtroCusto.status !== 'ok') return 'Preço de custo: todos'
+    const { minimo, maximo } = filtroCusto
+    if (minimo != null && maximo != null) return `Preço de custo: ${formatBRL(minimo)} a ${formatBRL(maximo)}`
+    if (minimo != null) return `Preço de custo: a partir de ${formatBRL(minimo)}`
+    return `Preço de custo: até ${formatBRL(maximo)}`
+  }
+
+  function buildRelatorioValorDoc() {
+    const doc = new jsPDF()
+    const margin = 14
+    let y = 20
+
+    doc.setFont('helvetica', 'normal')
+    doc.setFontSize(18)
+    doc.text('Relatório de Valor — Preço de custo', margin, y)
+    y += 10
+
+    doc.setFontSize(11)
+    doc.setTextColor(80, 80, 80)
+    doc.text(`Gerado em: ${formatarDataParaExibir(hoje)}`, margin, y)
+    y += 6
+    doc.text(`Filtro: ${textoFiltroCustoValor()}`, margin, y)
+    y += 15
+
+    doc.setTextColor(0, 0, 0)
+    doc.setFont('helvetica', 'bold')
+    doc.setFontSize(12)
+    doc.text('Produtos por preço de custo', margin, y)
+    y += 8
+
+    if (produtosValor.length === 0) {
+      doc.setFont('helvetica', 'normal')
+      doc.setFontSize(10)
+      doc.text(
+        filtroCusto.status === 'invalido'
+          ? 'Informe um preço de custo válido.'
+          : filtroCusto.status === 'invertida'
+            ? 'O valor mínimo precisa ser menor ou igual ao máximo.'
+            : 'Nenhum produto encontrado.',
+        margin,
+        y
+      )
+    } else {
+      const col = { produto: margin, artesao: 78, estoque: 128, custo: 148, venda: 176 }
+      doc.setFont('helvetica', 'bold')
+      doc.setFontSize(9)
+      doc.text('Produto', col.produto, y)
+      doc.text('Fornecedor', col.artesao, y)
+      doc.text('Estoque', col.estoque, y)
+      doc.text('Custo', col.custo, y)
+      doc.text('Venda', col.venda, y)
+      y += 6
+
+      doc.setFont('helvetica', 'normal')
+      doc.setDrawColor(220, 220, 220)
+      doc.line(margin, y - 2, 200, y - 2)
+      y += 2
+
+      for (const p of produtosValor) {
+        if (y > 280) {
+          doc.addPage()
+          y = 20
+        }
+        doc.setFontSize(8)
+        doc.text(limitarTextoPdf(doc, nomeProdutoRelatorio(p) || 'Sem nome', 60), col.produto, y)
+        doc.text(
+          limitarTextoPdf(
+            doc,
+            rotuloNomeFantasia(p.artesao_nome_fantasia, p.artesao_razao_social, p.artesao_nome, '—'),
+            46
+          ),
+          col.artesao,
+          y
+        )
+        doc.text(String(p.estoque ?? 0), col.estoque, y)
+        doc.text(formatBRL(p.preco_custo), col.custo, y)
+        doc.text(formatBRL(p.preco_venda), col.venda, y)
+        y += 6
+      }
+    }
+
+    const parteArquivo = (n) => Number(n).toFixed(2).replace('.', '-')
+    let sufixo = ''
+    if (filtroCusto.status === 'ok' && filtroCusto.minimo != null && filtroCusto.maximo != null) {
+      sufixo = `-custo-${parteArquivo(filtroCusto.minimo)}-a-${parteArquivo(filtroCusto.maximo)}`
+    } else if (filtroCusto.status === 'ok' && filtroCusto.minimo != null) {
+      sufixo = `-custo-de-${parteArquivo(filtroCusto.minimo)}`
+    } else if (filtroCusto.status === 'ok' && filtroCusto.maximo != null) {
+      sufixo = `-custo-ate-${parteArquivo(filtroCusto.maximo)}`
+    }
+    const filename = `relatorio-valor${sufixo}-${hoje}.pdf`
+    return { doc, filename }
+  }
+
+  async function copiarTextoProdutosWhatsApp() {
+    const artesaoNome = rotuloArtesaoSelecionado()
+    const texto = montarTextoProdutosWhatsApp(
+      produtosRelatorio,
+      artesaoNome,
+      formatarDataParaExibir(hoje),
+      !artesaoId,
+      incluirValorVendaProdutos
+    )
+    const ok = await copiarTextoAreaTransferencia(texto)
+    if (!ok) {
+      alert('Não foi possível copiar o texto.')
+      return
+    }
+    setTextoProdutosCopiado(true)
+    if (copiaTextoTimerRef.current) clearTimeout(copiaTextoTimerRef.current)
+    copiaTextoTimerRef.current = setTimeout(() => setTextoProdutosCopiado(false), 2000)
   }
 
   const fecharPreviewPdf = useCallback(() => {
@@ -896,7 +1238,7 @@ export default function Relatorios() {
   }, [])
 
   async function gerarEAbrirPreview(tipo) {
-    if (tipo !== 'produtos' && dataInicio > dataFim) {
+    if (tipo !== 'produtos' && tipo !== 'valor' && dataInicio > dataFim) {
       alert('A data início deve ser anterior ou igual à data fim.')
       return
     }
@@ -926,6 +1268,10 @@ export default function Relatorios() {
         }
         case 'produtos': {
           ;({ doc, filename } = buildRelatorioProdutosDoc())
+          break
+        }
+        case 'valor': {
+          ;({ doc, filename } = buildRelatorioValorDoc())
           break
         }
         default:
@@ -973,10 +1319,11 @@ export default function Relatorios() {
 
   const tabs = [
     { id: TAB_GERAL, label: 'Vendas Geral' },
-    { id: TAB_ARTESAO, label: 'Por Artesão' },
+    { id: TAB_ARTESAO, label: 'Por Fornecedor' },
     { id: TAB_LUCRO, label: 'Lucro' },
     { id: TAB_MAIS_VENDIDOS, label: 'Mais Vendidos' },
     { id: TAB_PRODUTOS, label: 'Produtos' },
+    { id: TAB_VALOR, label: 'Valor' },
   ]
 
   return (
@@ -1003,7 +1350,7 @@ export default function Relatorios() {
 
       <div className="relatorios-filtros">
         <div className="relatorios-filtros-row">
-          {aba !== TAB_PRODUTOS && (
+          {aba !== TAB_PRODUTOS && aba !== TAB_VALOR && (
             <>
               <div className="relatorios-field">
                 <label htmlFor="rel-data-inicio">Data Início</label>
@@ -1029,16 +1376,23 @@ export default function Relatorios() {
           )}
           {(aba === TAB_ARTESAO || aba === TAB_MAIS_VENDIDOS || aba === TAB_PRODUTOS) && (
             <div className="relatorios-field relatorios-field-wide">
-              <label htmlFor="rel-artesao">Artesão</label>
+              <label htmlFor="rel-busca-artesao">Fornecedor</label>
+              <input
+                id="rel-busca-artesao"
+                type="text"
+                placeholder="Buscar por nome ou nome fantasia..."
+                value={buscaArtesao}
+                onChange={e => setBuscaArtesao(e.target.value)}
+              />
               <select
                 id="rel-artesao"
                 value={artesaoId ?? ''}
                 onChange={e => setArtesaoId(e.target.value ? Number(e.target.value) : null)}
               >
-                <option value="">Todos os artesãos</option>
-                {artesoes.map(a => (
+                <option value="">Todos os fornecedores</option>
+                {artesoes.filter(artesaoPassaBusca).map(a => (
                   <option key={a.id} value={a.id}>
-                    {a.nome}
+                    {rotuloArtesao(a.nome, a.nome_fantasia)}
                   </option>
                 ))}
               </select>
@@ -1056,6 +1410,19 @@ export default function Relatorios() {
                 onChange={e => setAluguelInput(e.target.value)}
                 autoComplete="off"
               />
+            </div>
+          )}
+          {aba === TAB_ARTESAO && (
+            <div className="relatorios-field relatorios-field-check">
+              <label className="relatorios-check-label" htmlFor="rel-incluir-valor-venda">
+                <input
+                  id="rel-incluir-valor-venda"
+                  type="checkbox"
+                  checked={incluirValorVenda}
+                  onChange={e => setIncluirValorVenda(e.target.checked)}
+                />
+                Incluir valor de venda
+              </label>
             </div>
           )}
           {aba === TAB_GERAL && (
@@ -1141,21 +1508,91 @@ export default function Relatorios() {
             </div>
           )}
           {aba === TAB_PRODUTOS && (
+            <div className="relatorios-field relatorios-field-check">
+              <label className="relatorios-check-label" htmlFor="rel-incluir-valor-venda-produtos">
+                <input
+                  id="rel-incluir-valor-venda-produtos"
+                  type="checkbox"
+                  checked={incluirValorVendaProdutos}
+                  onChange={e => setIncluirValorVendaProdutos(e.target.checked)}
+                />
+                Incluir valor de venda
+              </label>
+            </div>
+          )}
+          {aba === TAB_PRODUTOS && (
             <div className="relatorios-field relatorios-field-export">
               <label>&nbsp;</label>
-              <button
-                type="button"
-                className="relatorios-btn-exportar"
-                onClick={() => gerarEAbrirPreview('produtos')}
-                disabled={carregando || previewGerando}
-              >
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-                  <circle cx="12" cy="12" r="3" />
-                </svg>
-                Visualizar PDF
-              </button>
+              <div className="relatorios-field-export-actions">
+                <button
+                  type="button"
+                  className="relatorios-btn-exportar relatorios-btn-exportar-secundario"
+                  onClick={copiarTextoProdutosWhatsApp}
+                  disabled={carregando || previewGerando}
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                  </svg>
+                  {textoProdutosCopiado ? 'Texto copiado' : 'Copiar para WhatsApp'}
+                </button>
+                <button
+                  type="button"
+                  className="relatorios-btn-exportar"
+                  onClick={() => gerarEAbrirPreview('produtos')}
+                  disabled={carregando || previewGerando}
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                    <circle cx="12" cy="12" r="3" />
+                  </svg>
+                  Visualizar PDF
+                </button>
+              </div>
             </div>
+          )}
+          {aba === TAB_VALOR && (
+            <>
+              <div className="relatorios-field relatorios-field-aluguel">
+                <label htmlFor="rel-preco-custo-min">Custo mínimo</label>
+                <input
+                  id="rel-preco-custo-min"
+                  type="text"
+                  inputMode="decimal"
+                  placeholder="Ex.: 10 ou 10,50"
+                  value={filtroCustoMin}
+                  onChange={e => setFiltroCustoMin(e.target.value)}
+                  autoComplete="off"
+                />
+              </div>
+              <div className="relatorios-field relatorios-field-aluguel">
+                <label htmlFor="rel-preco-custo-max">Custo máximo</label>
+                <input
+                  id="rel-preco-custo-max"
+                  type="text"
+                  inputMode="decimal"
+                  placeholder="Ex.: 30 ou 30,00"
+                  value={filtroCustoMax}
+                  onChange={e => setFiltroCustoMax(e.target.value)}
+                  autoComplete="off"
+                />
+              </div>
+              <div className="relatorios-field relatorios-field-export">
+                <label>&nbsp;</label>
+                <button
+                  type="button"
+                  className="relatorios-btn-exportar"
+                  onClick={() => gerarEAbrirPreview('valor')}
+                  disabled={carregando || previewGerando}
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                    <circle cx="12" cy="12" r="3" />
+                  </svg>
+                  Visualizar PDF
+                </button>
+              </div>
+            </>
           )}
         </div>
       </div>
@@ -1232,11 +1669,16 @@ export default function Relatorios() {
 
       {!carregando && aba === TAB_ARTESAO && (
         <>
+          {artesaoId && (
+            <p className="relatorios-fornecedor-cabecalho">
+              Fornecedor: <strong>{rotuloArtesaoSelecionado()}</strong>
+            </p>
+          )}
           <div className="relatorios-cards">
             <CardMetrica
               label="Total em Vendas"
               value={formatBRL(resumo?.totalVendas)}
-              subtext={artesaoId ? artesoes.find(a => a.id === artesaoId)?.nome : 'Todos os artesãos'}
+              subtext={rotuloArtesaoSelecionado()}
               icon={
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <line x1="12" y1="1" x2="12" y2="23" />
@@ -1258,7 +1700,7 @@ export default function Relatorios() {
               <CardMetrica
                 label="Produtos Cadastrados"
                 value={produtosCadastrados}
-                subtext="deste artesão"
+                subtext="deste fornecedor"
               />
             )}
             <CardMetrica
@@ -1288,7 +1730,7 @@ export default function Relatorios() {
           </section>
           {relatorioCustoVendasArtesao && dataInicio <= dataFim && (
             <section className="relatorios-custo-artesao">
-              <h3>Custo a pagar ao artesão (produtos vendidos no período)</h3>
+              <h3>Custo a pagar ao fornecedor (produtos vendidos no período)</h3>
               {produtosCustoRel.length === 0 && !aluguelPreenchido ? (
                 <div className="relatorios-empty relatorios-custo-artesao-empty">
                   <p>Nenhum produto vendido no período para compor o custo.</p>
@@ -1328,10 +1770,11 @@ export default function Relatorios() {
                       <tr>
                         <th>Produto</th>
                         <th>Variação</th>
-                        <th>Artesão</th>
+                        {mostrarColunaFornecedor && <th>Fornecedor</th>}
                         <th>Custo un.</th>
                         <th>Qtd</th>
                         <th>Total</th>
+                        {incluirValorVenda && <th>Valor venda</th>}
                         <th>Ação</th>
                       </tr>
                     </thead>
@@ -1340,7 +1783,9 @@ export default function Relatorios() {
                         <tr key={p.chave_custo_relatorio}>
                           <td>{p.nome}</td>
                           <td>{p.variacao || '—'}</td>
-                          <td>{p.artesao_nome || '—'}</td>
+                          {mostrarColunaFornecedor && (
+                            <td>{rotuloArtesao(p.artesao_nome, p.artesao_nome_fantasia, '—')}</td>
+                          )}
                           <td>
                             {formatBRL(p.custo_ajustado)}
                             {p.custo_ajustado_manual && (
@@ -1354,6 +1799,7 @@ export default function Relatorios() {
                             )}
                           </td>
                           <td>{formatBRL(p.total_custo_produto)}</td>
+                          {incluirValorVenda && <td>{formatBRL(p.total_venda_produto)}</td>}
                           <td className="relatorios-custo-acoes-col">
                             {editandoCustoLinha === p.chave_custo_relatorio ? (
                               <div className="relatorios-custo-acoes-editor">
@@ -1429,10 +1875,20 @@ export default function Relatorios() {
                       ))}
                     </tbody>
                     <tfoot>
+                      {incluirValorVenda && (
+                        <tr>
+                          <td colSpan={colSpanRotuloCusto}>
+                            <strong>Total em vendas</strong>
+                          </td>
+                          <td>
+                            <strong>{formatBRL(totalVendaRel)}</strong>
+                          </td>
+                        </tr>
+                      )}
                       {aluguelPreenchido ? (
                         <>
                           <tr>
-                            <td colSpan={6}>
+                            <td colSpan={colSpanRotuloCusto}>
                               <strong>Subtotal (custo dos produtos)</strong>
                             </td>
                             <td>
@@ -1440,12 +1896,12 @@ export default function Relatorios() {
                             </td>
                           </tr>
                           <tr>
-                            <td colSpan={6}>Aluguel (dedução)</td>
+                            <td colSpan={colSpanRotuloCusto}>Aluguel (dedução)</td>
                             <td>{formatBRL(-valorAluguel)}</td>
                           </tr>
                           <tr className="relatorios-table-total">
-                            <td colSpan={6}>
-                              <strong>Total a pagar ao artesão</strong>
+                            <td colSpan={colSpanRotuloCusto}>
+                              <strong>Total a pagar ao fornecedor</strong>
                             </td>
                             <td>
                               <strong>{formatBRL(totalPagarComAluguel)}</strong>
@@ -1454,8 +1910,8 @@ export default function Relatorios() {
                         </>
                       ) : (
                         <tr className="relatorios-table-total">
-                          <td colSpan={6}>
-                            <strong>Total a pagar ao artesão</strong>
+                          <td colSpan={colSpanRotuloCusto}>
+                            <strong>Total a pagar ao fornecedor</strong>
                           </td>
                           <td>
                             <strong>{formatBRL(totalCustoBaseRel)}</strong>
@@ -1530,7 +1986,7 @@ export default function Relatorios() {
                     <th>#</th>
                     <th>Produto</th>
                     <th>Variação</th>
-                    <th>Artesão</th>
+                    <th>Fornecedor</th>
                     <th>Qtd. Vendida</th>
                   </tr>
                 </thead>
@@ -1540,7 +1996,7 @@ export default function Relatorios() {
                       <td>{idx + 1}</td>
                       <td>{item.nome}</td>
                       <td>{item.variacao || '—'}</td>
-                      <td>{item.artesao_nome || '—'}</td>
+                      <td>{rotuloArtesao(item.artesao_nome, item.artesao_nome_fantasia, '—')}</td>
                       <td>{item.total_vendido}</td>
                     </tr>
                   ))}
@@ -1553,6 +2009,11 @@ export default function Relatorios() {
 
       {!carregando && aba === TAB_PRODUTOS && (
         <section className="relatorios-mais-vendidos">
+          {artesaoId && (
+            <p className="relatorios-fornecedor-cabecalho">
+              Fornecedor: <strong>{rotuloArtesaoSelecionado()}</strong>
+            </p>
+          )}
           <h3>Produtos — estoque e preço de custo</h3>
           {produtosRelatorio.length === 0 ? (
             <div className="relatorios-empty">
@@ -1566,7 +2027,74 @@ export default function Relatorios() {
               <p>Nenhum produto encontrado</p>
               <span>
                 {artesaoId
-                  ? 'Não há produtos cadastrados para o artesão selecionado.'
+                  ? 'Não há produtos cadastrados para o fornecedor selecionado.'
+                  : 'Cadastre produtos para visualizar o relatório.'}
+              </span>
+            </div>
+          ) : (
+            <div className="relatorios-table-wrapper">
+              <table className="relatorios-table relatorios-table-produtos-custo">
+                <thead>
+                  <tr>
+                    <th>Produto</th>
+                    {mostrarColunaFornecedor && <th>Fornecedor</th>}
+                    <th>Estoque</th>
+                    <th>Preço de custo</th>
+                    {incluirValorVendaProdutos && <th>Valor venda</th>}
+                  </tr>
+                </thead>
+                <tbody>
+                  {produtosRelatorio.map((p) => (
+                    <tr key={p.id}>
+                      <td>{nomeProdutoRelatorio(p)}</td>
+                      {mostrarColunaFornecedor && (
+                        <td>{rotuloNomeFantasia(p.artesao_nome_fantasia, p.artesao_razao_social, p.artesao_nome, '—')}</td>
+                      )}
+                      <td>{p.estoque ?? 0}</td>
+                      <td>{formatBRL(p.preco_custo)}</td>
+                      {incluirValorVendaProdutos && <td>{formatBRL(p.preco_venda)}</td>}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      )}
+
+      {!carregando && aba === TAB_VALOR && (
+        <section className="relatorios-mais-vendidos">
+          <h3>Produtos — preço de custo</h3>
+          {filtroCusto.status === 'invalido' || filtroCusto.status === 'invertida' ? (
+            <div className="relatorios-empty">
+              <p>
+                {filtroCusto.status === 'invertida'
+                  ? 'O mínimo está acima do máximo'
+                  : 'Informe um preço de custo válido'}
+              </p>
+              <span>
+                {filtroCusto.status === 'invertida'
+                  ? 'Ajuste a faixa de preço de custo.'
+                  : 'Use um valor como 10 ou 10,50.'}
+              </span>
+            </div>
+          ) : produtosValor.length === 0 ? (
+            <div className="relatorios-empty">
+              <div className="relatorios-empty-icon relatorios-empty-icon-box">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                  <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+                  <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
+                  <line x1="12" y1="22.08" x2="12" y2="12" />
+                </svg>
+              </div>
+              <p>
+                {filtroCusto.status === 'ok'
+                  ? 'Nenhum produto nessa faixa de preço de custo'
+                  : 'Nenhum produto encontrado'}
+              </p>
+              <span>
+                {filtroCusto.status === 'ok'
+                  ? 'Nenhum produto cadastrado tem o preço de custo dentro dessa faixa.'
                   : 'Cadastre produtos para visualizar o relatório.'}
               </span>
             </div>
@@ -1576,16 +2104,20 @@ export default function Relatorios() {
                 <thead>
                   <tr>
                     <th>Produto</th>
+                    <th>Fornecedor</th>
                     <th>Estoque</th>
                     <th>Preço de custo</th>
+                    <th>Preço de venda</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {produtosRelatorio.map((p) => (
+                  {produtosValor.map((p) => (
                     <tr key={p.id}>
                       <td>{nomeProdutoRelatorio(p)}</td>
+                      <td>{rotuloNomeFantasia(p.artesao_nome_fantasia, p.artesao_razao_social, p.artesao_nome, '—')}</td>
                       <td>{p.estoque ?? 0}</td>
                       <td>{formatBRL(p.preco_custo)}</td>
+                      <td>{formatBRL(p.preco_venda)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -1619,7 +2151,7 @@ export default function Relatorios() {
               {textoPeriodoRelatorioPdf(dataInicio, dataFim)}
               {' · '}
               Filtro:{' '}
-              {artesaoId ? artesoes.find(a => a.id === artesaoId)?.nome || 'Artesão' : 'Todos os artesãos'}
+              {rotuloArtesaoSelecionado()}
             </p>
             {vendasArtesaoCarregando ? (
               <p className="relatorio-vendas-artesao-loading">Carregando...</p>
