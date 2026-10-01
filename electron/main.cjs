@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog } = require('electron')
+const { app, BrowserWindow, ipcMain, dialog, clipboard } = require('electron')
 const path = require('path')
 const fs = require('fs')
 
@@ -118,6 +118,9 @@ const {
   atualizarValorVariacao,
   excluirValorVariacao,
   listarTodosValoresVariacao,
+  obterFormacaoPreco,
+  salvarFormacaoPreco,
+  aplicarPrecoFormacaoEmTodos,
 } = require('./database')
 
 // CLI: criar usuário e sair — node electron/main.cjs não funciona; use: npx electron . criar-usuario LOGIN SENHA
@@ -134,12 +137,22 @@ if (process.argv[2] === 'criar-usuario' && process.argv[3] && process.argv[4]) {
   process.exit(0)
 }
 
+const { criarFluxoEncerramento, TIMEOUT_ENCERRAMENTO_MS } = require('./atualizacaoPolitica.cjs')
+const {
+  verificarAtualizacoes,
+  obterEstadoAtualizacao,
+  atualizacaoBaixada,
+  executarInstalacao,
+} = require('./updater.cjs')
+
 function createWindow() {
+  const iconPath = path.join(__dirname, '..', 'build', 'icon.ico')
   const win = new BrowserWindow({
     width: 420,
     height: 550,
     show: false,
     backgroundColor: '#f0f0f0',
+    ...(fs.existsSync(iconPath) ? { icon: iconPath } : {}),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -158,6 +171,7 @@ function createWindow() {
 
   win.once('ready-to-show', () => {
     win.show()
+    verificarAtualizacoes()
   })
 }
 
@@ -212,6 +226,10 @@ ipcMain.handle('atualizar-valor-variacao', (_, id, data) => atualizarValorVariac
 ipcMain.handle('excluir-valor-variacao', (_, id) => excluirValorVariacao(id))
 ipcMain.handle('listar-todos-valores-variacao', () => listarTodosValoresVariacao())
 
+ipcMain.handle('obter-formacao-preco', () => obterFormacaoPreco())
+ipcMain.handle('salvar-formacao-preco', (_, data) => salvarFormacaoPreco(data))
+ipcMain.handle('aplicar-preco-formacao-em-todos', (_, multiplicador) => aplicarPrecoFormacaoEmTodos(multiplicador))
+
 ipcMain.handle('criar-venda', (_, data) => criarVenda(data))
 ipcMain.handle('listar-vendas', () => listarVendas())
 ipcMain.handle('listar-vendas-do-dia', () => listarVendasDoDia())
@@ -241,6 +259,11 @@ ipcMain.handle('imprimir-etiquetas', async (event) => {
     silent: false,
     printBackground: true,
   })
+})
+
+ipcMain.handle('copiar-texto', (_, texto) => {
+  clipboard.writeText(String(texto ?? ''))
+  return true
 })
 
 ipcMain.handle('salvar-relatorio-pdf', async (event, pdfBase64, filename) => {
@@ -299,13 +322,26 @@ ipcMain.handle('sync-agora', async () => {
   }
 })
 
-// Sincronização ao fechar: tenta enviar pendentes antes de encerrar
-let syncOnQuitDone = false
+const fluxoEncerramento = criarFluxoEncerramento({
+  sincronizar: () => syncWithSupabase(),
+  instalar: () => executarInstalacao(),
+  sair: () => app.quit(),
+  timeoutMs: TIMEOUT_ENCERRAMENTO_MS,
+})
+
+ipcMain.handle('atualizacao:estado', () => obterEstadoAtualizacao())
+ipcMain.handle('atualizacao:verificar', () => verificarAtualizacoes())
+ipcMain.handle('atualizacao:instalar', () => {
+  const pedido = fluxoEncerramento.pedirInstalacao(atualizacaoBaixada())
+  if (pedido.ok) app.quit()
+  return { ok: Boolean(pedido.ok), reason: pedido.reason || null }
+})
+
+// Sincronização ao fechar: tenta enviar pendentes antes de encerrar.
+// A instalação de atualização usa o mesmo gancho e só chama quitAndInstall depois do sync ou do timeout.
 app.on('before-quit', (event) => {
-  if (syncOnQuitDone) return
-  event.preventDefault()
-  syncOnQuitDone = true
-  syncWithSupabase().finally(() => app.quit())
+  const resultado = fluxoEncerramento.beforeQuit()
+  if (resultado.preventDefault) event.preventDefault()
 })
 
 app.whenReady().then(() => {

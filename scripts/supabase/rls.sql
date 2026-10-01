@@ -14,6 +14,11 @@
 ALTER TABLE public.vendas_itens
   ADD COLUMN IF NOT EXISTS preco_custo_unitario NUMERIC;
 
+-- Razão social e nome fantasia em artesoes (espelha o SQLite local).
+ALTER TABLE public.artesoes
+  ADD COLUMN IF NOT EXISTS razao_social TEXT,
+  ADD COLUMN IF NOT EXISTS nome_fantasia TEXT;
+
 -- Ativar RLS e criar políticas para tabelas sincronizadas
 do $$
 declare

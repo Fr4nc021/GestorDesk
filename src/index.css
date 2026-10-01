@@ -91,6 +91,11 @@
     flex-shrink: 0;
   }
 
+  .sidebar-item span {
+    min-width: 0;
+    line-height: 1.2;
+  }
+
   .sidebar-footer {
     margin-top: auto;
     padding-top: 16px;
@@ -979,6 +984,22 @@
   cursor: pointer;
 }
 
+.produtos-btn-quiet {
+  padding: 8px 12px;
+  background: transparent;
+  color: #757575;
+  border: none;
+  border-radius: 10px;
+  font-weight: 500;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.produtos-btn-quiet:hover {
+  background: #f5f5f5;
+  color: #212121;
+}
+
 .produtos-table-wrapper {
   margin-top: 24px;
   border: 1px solid #e0e0e0;
@@ -1057,7 +1078,7 @@
   margin-top: 24px;
   border: 1px solid #e0e0e0;
   border-radius: 12px;
-  overflow: hidden;
+  overflow-x: auto;
   background: #fff;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
 }
@@ -1103,6 +1124,11 @@
 .artesaos-btn-edit:hover {
   background: #f0f0f0;
   color: #212121;
+}
+
+.artesaos-btn-edit:disabled {
+  opacity: 0.45;
+  cursor: wait;
 }
 
 .artesaos-btn-edit svg {
@@ -2387,8 +2413,233 @@ button.caixa-btn-filtro-periodo {
   grid-template-columns: 1fr 1fr 1fr;
 }
 
+.modal-produto-precos {
+  align-items: start;
+  margin-bottom: 20px;
+}
+
+.modal-produto-precos .modal-field {
+  margin-bottom: 0;
+}
+
+.modal-produto-precos-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.modal-field-hint {
+  display: block;
+  margin-top: 6px;
+  font-size: 12px;
+  font-weight: 400;
+  color: #757575;
+}
+
+.formacao-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.formacao-tab {
+  padding: 8px 14px;
+  border: 1px solid #e0e0e0;
+  border-radius: 999px;
+  background: #fff;
+  color: #555;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.formacao-tab.active {
+  background: #212121;
+  color: #fff;
+  border-color: #212121;
+}
+
+.modal-content.modal-formacao {
+  width: 520px;
+  max-width: 95vw;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.modal-content.modal-formacao form {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+  overflow: hidden;
+}
+
+.formacao-modal-body,
+.formacao-produto {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.formacao-modal-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.formacao-percentuais {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 12px;
+}
+
+.formacao-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 8px 0 16px;
+  font-size: 14px;
+  color: #333;
+}
+
+.formacao-composicao {
+  margin: 8px 0 12px;
+  border: 1px solid #e0e0e0;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.formacao-composicao div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  border-top: 1px solid #f0f0f0;
+  font-size: 14px;
+}
+
+.formacao-composicao div:first-child {
+  border-top: none;
+}
+
+.formacao-composicao dt {
+  color: #555;
+}
+
+.formacao-composicao dd {
+  margin: 0;
+  font-weight: 600;
+  color: #212121;
+}
+
+.formacao-composicao-total {
+  background: #fafafa;
+}
+
+.formacao-aviso {
+  margin: 8px 0 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #fff7ed;
+  color: #9a3412;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.formacao-multiplicador,
+.formacao-sugerido {
+  margin: 8px 0;
+  font-size: 14px;
+  color: #333;
+}
+
+.formacao-sugerido strong {
+  font-size: 18px;
+  color: #212121;
+}
+
+.formacao-reais {
+  list-style: none;
+  margin: 8px 0 12px;
+  padding: 0;
+  border: 1px solid #e0e0e0;
+  border-radius: 12px;
+}
+
+.formacao-reais li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  border-top: 1px solid #f0f0f0;
+  font-size: 14px;
+}
+
+.formacao-reais li:first-child {
+  border-top: none;
+}
+
+.formacao-produto .produtos-btn-secondary {
+  align-self: flex-start;
+  margin-top: 8px;
+}
+
+.formacao-btn-aplicar {
+  width: 100%;
+  padding: 14px;
+  margin-top: 8px;
+  background: #fff;
+  color: #212121;
+  border: 1px solid #212121;
+  border-radius: 12px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.formacao-btn-aplicar:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
 .modal-produto-variacao {
   margin-bottom: 20px;
+}
+
+.modal-variacao-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.modal-variacao-toggle {
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.modal-variacao-desativar {
+  background: none;
+  border: none;
+  padding: 0;
+  color: #757575;
+  font-size: 13px;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.modal-variacao-desativar:hover {
+  color: #212121;
+}
+
+.modal-variacao-resumo {
+  font-size: 13px;
+  color: #757575;
 }
 
 .modal-checkbox-label {
@@ -4025,6 +4276,7 @@ button.caixa-btn-filtro-periodo {
   font-size: 15px;
   color: #333;
 }
+
 .relatorios-custo-artesao {
   margin-top: 28px;
 }
@@ -4343,6 +4595,7 @@ button.caixa-btn-filtro-periodo {
 .relatorios-table-produtos-custo td {
   padding: 8px 10px;
 }
+
 .relatorios-table th,
 .relatorios-table td {
   padding: 12px 16px;
@@ -4637,4 +4890,56 @@ button.caixa-btn-filtro-periodo {
   background: #ffebee;
   border: 1px solid #ffcdd2;
   border-radius: 8px;
+}
+
+.atualizacao-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+  padding: 12px 16px;
+  background: #f5f5f5;
+  border: 1px solid #e0e0e0;
+  border-radius: 12px;
+  color: #212121;
+}
+
+.atualizacao-banner-erro {
+  background: #fff5f5;
+  border-color: #fecaca;
+}
+
+.atualizacao-banner-texto {
+  flex: 1;
+  min-width: 0;
+}
+
+.atualizacao-banner-texto strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.atualizacao-banner-texto p {
+  margin: 0;
+  color: #313131;
+  font-size: 0.92rem;
+}
+
+.atualizacao-progresso {
+  height: 6px;
+  margin-top: 8px;
+  background: #e0e0e0;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.atualizacao-progresso-barra {
+  height: 100%;
+  background: #212121;
+}
+
+.atualizacao-config p {
+  margin-bottom: 8px;
+  color: #212121;
 }

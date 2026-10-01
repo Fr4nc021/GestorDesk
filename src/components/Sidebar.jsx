@@ -10,7 +10,7 @@ const sidebarNavItems = [
   { to: '/app', label: 'Dashboard', icon: relatoriosIcon },
   { to: '/app/pdv', label: 'PDV (Venda)', icon: pdvIcon },
   { to: '/app/produtos', label: 'Produtos', icon: estoqueIcon },
-  { to: '/app/artesaos', label: 'Artesãos', icon: artesaosIcon },
+  { to: '/app/artesaos', label: 'Fornecedores', icon: artesaosIcon },
   { to: '/app/estoque', label: 'Estoque', icon: estoqueIcon },
   { to: '/app/caixa', label: 'Caixa', icon: pdvIcon },
   { to: '/app/relatorios', label: 'Relatórios', icon: relatoriosIcon },

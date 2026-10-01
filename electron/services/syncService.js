@@ -185,6 +185,10 @@ async function pullTabelaDoSupabase(supabase, tabela) {
           'SELECT preco_custo_unitario, preco_unitario FROM vendas_itens WHERE id = ?',
         )
       : null
+  const getLocalArtesao =
+    tabela === 'artesoes'
+      ? db.prepare('SELECT razao_social, nome_fantasia FROM artesoes WHERE id = ?')
+      : null
 
   while (true) {
     const { data, error } = await supabase
@@ -200,7 +204,8 @@ async function pullTabelaDoSupabase(supabase, tabela) {
       for (const row of data) {
         const values = []
         for (const c of colunas) {
-          let v = Object.prototype.hasOwnProperty.call(row, c) ? row[c] : null
+          const colunaNoRemoto = Object.prototype.hasOwnProperty.call(row, c)
+          let v = colunaNoRemoto ? row[c] : null
           if (
             getLocalPrecosItem &&
             (c === 'preco_custo_unitario' || c === 'preco_unitario') &&
@@ -210,6 +215,14 @@ async function pullTabelaDoSupabase(supabase, tabela) {
             if (localRow && localRow[c] != null) {
               v = localRow[c]
             }
+          }
+          if (
+            getLocalArtesao &&
+            (c === 'razao_social' || c === 'nome_fantasia') &&
+            !colunaNoRemoto
+          ) {
+            const localRow = getLocalArtesao.get(row.id)
+            if (localRow) v = localRow[c]
           }
           values.push(v)
         }

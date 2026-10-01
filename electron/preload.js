@@ -33,6 +33,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   atualizarValorVariacao: (id, data) => invoke('atualizar-valor-variacao', id, data),
   excluirValorVariacao: (id) => invoke('excluir-valor-variacao', id),
   listarTodosValoresVariacao: () => invoke('listar-todos-valores-variacao'),
+  obterFormacaoPreco: () => invoke('obter-formacao-preco'),
+  salvarFormacaoPreco: (data) => invoke('salvar-formacao-preco', data),
+  aplicarPrecoFormacaoEmTodos: (multiplicador) => invoke('aplicar-preco-formacao-em-todos', multiplicador),
 
   // Vendas
   criarVenda: (data) => invoke('criar-venda', data),
@@ -51,6 +54,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   obterVendaParaEdicao: (id) => invoke('obter-venda-para-edicao', id),
   atualizarVenda: (id, data) => invoke('atualizar-venda', id, data),
   salvarRelatorioPDF: (pdfBase64, filename) => invoke('salvar-relatorio-pdf', pdfBase64, filename),
+  copiarTexto: (texto) => invoke('copiar-texto', texto),
 
   // Estoque
   adicionarEstoque: (produtoId, quantidade, origem) =>
@@ -76,4 +80,23 @@ contextBridge.exposeInMainWorld('electronAPI', {
     invoke('obter-totais-pagamentos-por-periodo', dataInicio, dataFim),
 
   sincronizarAgora: () => invoke('sync-agora'),
+
+  atualizacaoEstado: () => invoke('atualizacao:estado'),
+  atualizacaoVerificar: () => invoke('atualizacao:verificar'),
+  atualizacaoInstalar: () => invoke('atualizacao:instalar'),
+  onAtualizacao: (callback) => {
+    if (typeof callback !== 'function') return () => {}
+    const listener = (_event, payload) => {
+      if (!payload || typeof payload.status !== 'string') return
+      callback({
+        status: payload.status,
+        versaoAtual: typeof payload.versaoAtual === 'string' ? payload.versaoAtual : '',
+        versaoNova: typeof payload.versaoNova === 'string' ? payload.versaoNova : null,
+        progresso: typeof payload.progresso === 'number' ? payload.progresso : null,
+        mensagem: typeof payload.mensagem === 'string' ? payload.mensagem : '',
+      })
+    }
+    ipcRenderer.on('atualizacao:evento', listener)
+    return () => ipcRenderer.removeListener('atualizacao:evento', listener)
+  },
 })

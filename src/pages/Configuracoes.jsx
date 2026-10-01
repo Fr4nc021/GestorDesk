@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useAtualizacao } from '../hooks/useAtualizacao'
 
 const SYNC_STATUS_CSS = {
   ok: 'ok',
@@ -15,6 +16,7 @@ export default function Configuracoes() {
 
   const [syncStatus, setSyncStatus] = useState('idle')
   const [syncMessage, setSyncMessage] = useState('')
+  const { estado: atualizacao, instalar: instalarAtualizacao, verificar: verificarAtualizacao, temApi: temAtualizacao } = useAtualizacao()
 
   useEffect(() => {
     carregarUsuarios()
@@ -87,7 +89,7 @@ export default function Configuracoes() {
     <div className="configuracoes">
       <div className="configuracoes-header">
         <h2 className="dashboard-heading">Configurações</h2>
-        <p className="dashboard-subtitle">Gerencie usuários e sincronização do aplicativo.</p>
+        <p className="dashboard-subtitle">Gerencie usuários, sincronização e atualizações do aplicativo.</p>
       </div>
 
       <div className="config-tabs">
@@ -96,6 +98,9 @@ export default function Configuracoes() {
         </button>
         <button className={`config-tab ${abaAtiva === 'sync' ? 'active' : ''}`} onClick={() => setAbaAtiva('sync')}>
           Sincronização
+        </button>
+        <button className={`config-tab ${abaAtiva === 'atualizacao' ? 'active' : ''}`} onClick={() => setAbaAtiva('atualizacao')}>
+          Atualização
         </button>
       </div>
 
@@ -148,6 +153,51 @@ export default function Configuracoes() {
             </button>
             {syncMessage && <span className={`sync-status-text ${syncStatusClass}`}>{syncMessage}</span>}
           </div>
+        </section>
+      )}
+
+      {abaAtiva === 'atualizacao' && (
+        <section className="config-card">
+          <h3>Atualização do aplicativo</h3>
+          <p className="config-card-sub">A versão instalada e o estado da busca por novas versões.</p>
+          {!temAtualizacao && (
+            <p className="config-card-sub">A verificação de atualização só está disponível no aplicativo.</p>
+          )}
+          {temAtualizacao && !atualizacao && (
+            <p className="config-card-sub">Carregando informações da versão...</p>
+          )}
+          {temAtualizacao && atualizacao && (
+            <div className="atualizacao-config">
+              <p>Versão atual: <strong>{atualizacao.versaoAtual || '—'}</strong></p>
+              {atualizacao.versaoNova && atualizacao.status !== 'not-available' && (
+                <p>Nova versão: <strong>{atualizacao.versaoNova}</strong></p>
+              )}
+              {atualizacao.mensagem && <p className="config-card-sub">{atualizacao.mensagem}</p>}
+              {atualizacao.status === 'downloading' && (
+                <div
+                  className="atualizacao-progresso"
+                  role="progressbar"
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={atualizacao.progresso || 0}
+                >
+                  <div className="atualizacao-progresso-barra" style={{ width: `${atualizacao.progresso || 0}%` }} />
+                </div>
+              )}
+              <div className="sync-action-row">
+                {atualizacao.status === 'downloaded' && (
+                  <button type="button" className="btn-sync-manual" onClick={instalarAtualizacao}>
+                    Reiniciar e instalar
+                  </button>
+                )}
+                {atualizacao.status === 'error' && (
+                  <button type="button" className="btn-sync-manual" onClick={verificarAtualizacao}>
+                    Tentar novamente
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
         </section>
       )}
     </div>

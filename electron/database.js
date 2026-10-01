@@ -139,6 +139,8 @@ function initDatabase() {
     CREATE TABLE IF NOT EXISTS artesoes (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       nome TEXT NOT NULL,
+      razao_social TEXT,
+      nome_fantasia TEXT,
       telefone_whats TEXT,
       synced INTEGER DEFAULT 0,
       created_at TEXT DEFAULT (datetime('now')),
@@ -341,6 +343,30 @@ for (const tabela of ORDEM_SYNC) {
   } catch (_) {}
 }
 
+try {
+  arredondarPrecosVendaExistentes()
+} catch (err) {
+  console.error('[DB] Falha ao arredondar preços de venda:', err?.message || err)
+}
+
+// Razão social e nome fantasia do fornecedor (idempotente).
+// Nomes já preenchidos em `nome` viram razão social; a coluna `nome` permanece.
+try {
+  if (!tabelaTemColuna(db, 'artesoes', 'razao_social')) {
+    db.exec(`ALTER TABLE artesoes ADD COLUMN razao_social TEXT`)
+  }
+  if (!tabelaTemColuna(db, 'artesoes', 'nome_fantasia')) {
+    db.exec(`ALTER TABLE artesoes ADD COLUMN nome_fantasia TEXT`)
+  }
+  const temSync = tabelaTemColuna(db, 'artesoes', 'sync_status')
+  db.prepare(`
+    UPDATE artesoes
+    SET razao_social = nome${temSync ? ", sync_status = 'pending'" : ''}
+    WHERE TRIM(COALESCE(nome, '')) != ''
+      AND (razao_social IS NULL OR TRIM(razao_social) = '')
+  `).run()
+} catch (_) {}
+
 // Snapshot de custo unitário no momento da venda (idempotente + backfill).
 try {
   if (!tabelaTemColuna(db, 'vendas_itens', 'preco_custo_unitario')) {
@@ -364,12 +390,12 @@ function markAsSynced(tabela, ids) {
 
 // --- Artesãos ---
 
-function criarArtesao({ nome, telefone_whats = null }) {
+function criarArtesao({ nome, telefone_whats = null, razao_social = null, nome_fantasia = null }) {
   const stmt = db.prepare(`
-    INSERT INTO artesoes (nome, telefone_whats) VALUES (?, ?)
+    INSERT INTO artesoes (nome, telefone_whats, razao_social, nome_fantasia) VALUES (?, ?, ?, ?)
   `)
-  const result = stmt.run(nome, telefone_whats)
-  return { id: result.lastInsertRowid, nome, telefone_whats }
+  const result = stmt.run(nome, telefone_whats, razao_social, nome_fantasia)
+  return { id: result.lastInsertRowid, nome, telefone_whats, razao_social, nome_fantasia }
 }
 
 function listarArtesoes() {
@@ -379,16 +405,16 @@ function listarArtesoes() {
     LEFT JOIN produtos p ON p.artesao_id = a.id AND p.deleted_at IS NULL
     WHERE a.deleted_at IS NULL
     GROUP BY a.id
-    ORDER BY a.nome
+    ORDER BY COALESCE(NULLIF(TRIM(a.razao_social), ''), a.nome)
   `)
   return stmt.all()
 }
 
-function atualizarArtesao(id, { nome, telefone_whats = null }) {
+function atualizarArtesao(id, { nome, telefone_whats = null, razao_social = null, nome_fantasia = null }) {
   const stmt = db.prepare(`
-    UPDATE artesoes SET nome = ?, telefone_whats = ?, sync_status = 'pending' WHERE id = ?
+    UPDATE artesoes SET nome = ?, telefone_whats = ?, razao_social = ?, nome_fantasia = ?, sync_status = 'pending' WHERE id = ?
   `)
-  stmt.run(nome, telefone_whats, id)
+  stmt.run(nome, telefone_whats, razao_social, nome_fantasia, id)
   return { id }
 }
 
@@ -402,6 +428,33 @@ function excluirArtesao(id) {
 
 // --- Produtos ---
 
+/** Preço de venda no valor mais próximo terminado em ,00 ou ,50. Empate sobe. */
+function arredondarPrecoVenda(valor) {
+  const n = Number(valor)
+  if (!Number.isFinite(n) || n <= 0) return 0
+  const centavos = Math.round(n * 100)
+  return (Math.round(centavos / 50) * 50) / 100
+}
+
+function arredondarPrecosVendaExistentes() {
+  const produtos = db.prepare(`
+    SELECT id, preco_venda FROM produtos WHERE deleted_at IS NULL
+  `).all()
+  const update = db.prepare(`
+    UPDATE produtos SET preco_venda = ?, sync_status = 'pending' WHERE id = ?
+  `)
+  const gravar = db.transaction(() => {
+    for (const produto of produtos) {
+      const atual = Number(produto.preco_venda) || 0
+      const arredondado = arredondarPrecoVenda(atual)
+      if (Math.abs(atual - arredondado) > 0.001) {
+        update.run(arredondado, produto.id)
+      }
+    }
+  })
+  gravar()
+}
+
 function criarProduto({ nome, variacao = null, preco_custo = 0, preco_venda = 0, estoque = 0, artesao_id }) {
   let codigo_barras = gerarCodigoBarras()
   const checkStmt = db.prepare('SELECT id FROM produtos WHERE codigo_barras = ?')
@@ -414,13 +467,14 @@ function criarProduto({ nome, variacao = null, preco_custo = 0, preco_venda = 0,
     INSERT INTO produtos (nome, variacao, preco_custo, preco_venda, estoque, codigo_barras, artesao_id)
     VALUES (?, ?, ?, ?, ?, ?, ?)
   `)
-  const result = stmt.run(nome, variacao, preco_custo, preco_venda, estoque, codigo_barras, artesao_id)
+  const venda = arredondarPrecoVenda(preco_venda)
+  const result = stmt.run(nome, variacao, preco_custo, venda, estoque, codigo_barras, artesao_id)
   return {
     id: result.lastInsertRowid,
     nome,
     variacao,
     preco_custo,
-    preco_venda,
+    preco_venda: venda,
     estoque,
     codigo_barras,
     artesao_id,
@@ -429,7 +483,7 @@ function criarProduto({ nome, variacao = null, preco_custo = 0, preco_venda = 0,
 
 function listarProdutos() {
   const stmt = db.prepare(`
-    SELECT p.*, a.nome as artesao_nome
+    SELECT p.*, a.nome as artesao_nome, a.razao_social as artesao_razao_social, a.nome_fantasia as artesao_nome_fantasia
     FROM produtos p
     LEFT JOIN artesoes a ON a.id = p.artesao_id
     WHERE p.deleted_at IS NULL
@@ -440,11 +494,12 @@ function listarProdutos() {
 }
 
 function atualizarProduto(id, { nome, variacao = null, preco_custo = 0, preco_venda = 0, estoque = 0, artesao_id }) {
+  const venda = arredondarPrecoVenda(preco_venda)
   const stmt = db.prepare(`
     UPDATE produtos SET nome = ?, variacao = ?, preco_custo = ?, preco_venda = ?, estoque = ?, artesao_id = ?, sync_status = 'pending'
     WHERE id = ?
   `)
-  stmt.run(nome, variacao, preco_custo, preco_venda, estoque, artesao_id, id)
+  stmt.run(nome, variacao, preco_custo, venda, estoque, artesao_id, id)
   return { id }
 }
 
@@ -458,7 +513,7 @@ function excluirProduto(id) {
 
 function buscarProdutoPorCodigo(codigo_barras) {
   const stmt = db.prepare(`
-    SELECT p.*, a.nome as artesao_nome
+    SELECT p.*, a.nome as artesao_nome, a.razao_social as artesao_razao_social, a.nome_fantasia as artesao_nome_fantasia
     FROM produtos p
     LEFT JOIN artesoes a ON a.id = p.artesao_id
     WHERE p.codigo_barras = ? AND p.deleted_at IS NULL
@@ -698,7 +753,7 @@ function listarVendas() {
            (SELECT SUM(quantidade) FROM vendas_itens WHERE venda_id = v.id AND deleted_at IS NULL) as qtd_itens
     FROM vendas v
     LEFT JOIN vendas_itens vi ON vi.venda_id = v.id AND vi.deleted_at IS NULL
-    LEFT JOIN produtos p ON p.id = vi.produto_id AND p.deleted_at IS NULL
+    LEFT JOIN produtos p ON p.id = vi.produto_id
     WHERE v.deleted_at IS NULL
     GROUP BY v.id
     ORDER BY v.data DESC
@@ -712,7 +767,7 @@ function listarVendasDoDia() {
            (SELECT SUM(quantidade) FROM vendas_itens WHERE venda_id = v.id AND deleted_at IS NULL) as qtd_itens
     FROM vendas v
     LEFT JOIN vendas_itens vi ON vi.venda_id = v.id AND vi.deleted_at IS NULL
-    LEFT JOIN produtos p ON p.id = vi.produto_id AND p.deleted_at IS NULL
+    LEFT JOIN produtos p ON p.id = vi.produto_id
     WHERE v.deleted_at IS NULL
       AND date(v.data) = date('now', 'localtime')
     GROUP BY v.id
@@ -727,7 +782,7 @@ function listarVendasPorData(dataISO) {
            (SELECT SUM(quantidade) FROM vendas_itens WHERE venda_id = v.id AND deleted_at IS NULL) as qtd_itens
     FROM vendas v
     LEFT JOIN vendas_itens vi ON vi.venda_id = v.id AND vi.deleted_at IS NULL
-    LEFT JOIN produtos p ON p.id = vi.produto_id AND p.deleted_at IS NULL
+    LEFT JOIN produtos p ON p.id = vi.produto_id
     WHERE v.deleted_at IS NULL
       AND date(v.data) = date(?)
     GROUP BY v.id
@@ -829,7 +884,7 @@ function listarVendasPorPeriodo(dataInicio, dataFim) {
            (SELECT SUM(quantidade) FROM vendas_itens WHERE venda_id = v.id AND deleted_at IS NULL) as qtd_itens
     FROM vendas v
     LEFT JOIN vendas_itens vi ON vi.venda_id = v.id AND vi.deleted_at IS NULL
-    LEFT JOIN produtos p ON p.id = vi.produto_id AND p.deleted_at IS NULL
+    LEFT JOIN produtos p ON p.id = vi.produto_id
     WHERE v.deleted_at IS NULL
       AND date(v.data) >= date(?) AND date(v.data) <= date(?)
     GROUP BY v.id
@@ -850,7 +905,7 @@ function listarVendasPorPeriodoEArtesao(dataInicio, dataFim, artesaoId = null) {
            (SELECT COALESCE(SUM(quantidade), 0) FROM vendas_itens WHERE venda_id = v.id AND deleted_at IS NULL) as qtd_itens
     FROM vendas v
     LEFT JOIN vendas_itens vi ON vi.venda_id = v.id AND vi.deleted_at IS NULL
-    LEFT JOIN produtos p ON p.id = vi.produto_id AND p.deleted_at IS NULL
+    LEFT JOIN produtos p ON p.id = vi.produto_id
     WHERE v.deleted_at IS NULL
       AND date(v.data) >= date(?) AND date(v.data) <= date(?)
   `
@@ -864,7 +919,7 @@ function listarVendasPorPeriodoEArtesao(dataInicio, dataFim, artesaoId = null) {
       base +
         ` AND EXISTS (
       SELECT 1 FROM vendas_itens vi2
-      JOIN produtos p2 ON p2.id = vi2.produto_id AND p2.deleted_at IS NULL
+      JOIN produtos p2 ON p2.id = vi2.produto_id
       WHERE vi2.venda_id = v.id AND vi2.deleted_at IS NULL AND p2.artesao_id = ?
     ) GROUP BY v.id ORDER BY v.data DESC`,
     )
@@ -1078,7 +1133,7 @@ function listarProdutosMaisVendidos() {
     SELECT p.id, p.nome, p.codigo_barras, p.estoque, p.variacao, SUM(vi.quantidade) as total_vendido
     FROM vendas_itens vi
     JOIN vendas v ON v.id = vi.venda_id AND v.deleted_at IS NULL
-    JOIN produtos p ON p.id = vi.produto_id AND p.deleted_at IS NULL
+    JOIN produtos p ON p.id = vi.produto_id
     WHERE vi.deleted_at IS NULL
     GROUP BY vi.produto_id
     ORDER BY total_vendido DESC
@@ -1097,10 +1152,10 @@ function listarMovimentacoesPorPeriodo(dataInicio, dataFim) {
 
 function listarProdutosMaisVendidosPorPeriodo(dataInicio, dataFim) {
   return db.prepare(`
-    SELECT p.id, p.nome, p.codigo_barras, p.estoque, p.variacao, p.artesao_id, a.nome as artesao_nome, SUM(vi.quantidade) as total_vendido
+    SELECT p.id, p.nome, p.codigo_barras, p.estoque, p.variacao, p.artesao_id, a.nome as artesao_nome, a.nome_fantasia as artesao_nome_fantasia, SUM(vi.quantidade) as total_vendido
     FROM vendas_itens vi
     JOIN vendas v ON v.id = vi.venda_id AND v.deleted_at IS NULL
-    JOIN produtos p ON p.id = vi.produto_id AND p.deleted_at IS NULL
+    JOIN produtos p ON p.id = vi.produto_id
     LEFT JOIN artesoes a ON a.id = p.artesao_id
     WHERE vi.deleted_at IS NULL
       AND date(v.data) >= date(?) AND date(v.data) <= date(?)
@@ -1110,6 +1165,8 @@ function listarProdutosMaisVendidosPorPeriodo(dataInicio, dataFim) {
 }
 
 // --- Relatórios ---
+// Produto excluído (deleted_at) continua nestas consultas: a venda já aconteceu.
+// Cadastro, PDV e estoque seguem ocultando esse produto.
 
 /**
  * Retorna resumo de vendas para um período, opcionalmente filtrado por artesão.
@@ -1126,7 +1183,7 @@ function obterResumoVendasPeriodo(dataInicio, dataFim, artesaoId = null) {
         COUNT(DISTINCT v.id) as qtd_vendas,
         COALESCE((SELECT SUM(vi.quantidade) FROM vendas_itens vi
           JOIN vendas v2 ON v2.id = vi.venda_id AND v2.deleted_at IS NULL
-          JOIN produtos p ON p.id = vi.produto_id AND p.deleted_at IS NULL
+          JOIN produtos p ON p.id = vi.produto_id
           WHERE vi.deleted_at IS NULL
             AND date(v2.data) >= date(?) AND date(v2.data) <= date(?)), 0) as qtd_itens
       FROM vendas v
@@ -1147,7 +1204,7 @@ function obterResumoVendasPeriodo(dataInicio, dataFim, artesaoId = null) {
       COALESCE(SUM(vi.quantidade), 0) as qtd_itens
     FROM vendas_itens vi
     JOIN vendas v ON v.id = vi.venda_id AND v.deleted_at IS NULL
-    JOIN produtos p ON p.id = vi.produto_id AND p.deleted_at IS NULL
+    JOIN produtos p ON p.id = vi.produto_id
     WHERE vi.deleted_at IS NULL
       AND date(v.data) >= date(?) AND date(v.data) <= date(?)
       AND p.artesao_id = ?
@@ -1190,7 +1247,7 @@ function obterVendasPorDia(dataInicio, dataFim, artesaoId = null) {
       COALESCE(SUM(vi.quantidade), 0) as qtd_itens
     FROM vendas_itens vi
     JOIN vendas v ON v.id = vi.venda_id AND v.deleted_at IS NULL
-    JOIN produtos p ON p.id = vi.produto_id AND p.deleted_at IS NULL
+    JOIN produtos p ON p.id = vi.produto_id
     WHERE vi.deleted_at IS NULL
       AND date(v.data) >= date(?) AND date(v.data) <= date(?)
       AND p.artesao_id = ?
@@ -1210,7 +1267,7 @@ function obterTotalVendasHoje() {
       COUNT(v.id) as qtd_vendas,
       COALESCE((SELECT SUM(vi.quantidade) FROM vendas_itens vi
         JOIN vendas v2 ON v2.id = vi.venda_id AND v2.deleted_at IS NULL
-        JOIN produtos p ON p.id = vi.produto_id AND p.deleted_at IS NULL
+        JOIN produtos p ON p.id = vi.produto_id
         WHERE vi.deleted_at IS NULL
           AND date(v2.data) = date('now', 'localtime')), 0) as qtd_itens
     FROM vendas v
@@ -1239,7 +1296,7 @@ function obterLucroPeriodo(dataInicio, dataFim) {
       COALESCE(SUM(vi.quantidade), 0) as qtd_itens
     FROM vendas_itens vi
     JOIN vendas v ON v.id = vi.venda_id AND v.deleted_at IS NULL
-    JOIN produtos p ON p.id = vi.produto_id AND p.deleted_at IS NULL
+    JOIN produtos p ON p.id = vi.produto_id
     WHERE vi.deleted_at IS NULL
       AND date(v.data) >= date(?) AND date(v.data) <= date(?)
   `).get(dataInicio, dataFim)
@@ -1258,10 +1315,10 @@ function listarProdutosMaisVendidosPorPeriodoEArtesao(dataInicio, dataFim, artes
   }
 
   return db.prepare(`
-    SELECT p.id, p.nome, p.codigo_barras, p.estoque, p.variacao, p.artesao_id, a.nome as artesao_nome, SUM(vi.quantidade) as total_vendido
+    SELECT p.id, p.nome, p.codigo_barras, p.estoque, p.variacao, p.artesao_id, a.nome as artesao_nome, a.nome_fantasia as artesao_nome_fantasia, SUM(vi.quantidade) as total_vendido
     FROM vendas_itens vi
     JOIN vendas v ON v.id = vi.venda_id AND v.deleted_at IS NULL
-    JOIN produtos p ON p.id = vi.produto_id AND p.deleted_at IS NULL
+    JOIN produtos p ON p.id = vi.produto_id
     LEFT JOIN artesoes a ON a.id = p.artesao_id
     WHERE vi.deleted_at IS NULL
       AND date(v.data) >= date(?) AND date(v.data) <= date(?)
@@ -1301,7 +1358,7 @@ function obterRelatorioCustoVendasPeriodo(dataInicio, dataFim, artesaoId = null)
         COALESCE(SUM(COALESCE(vi.preco_custo_unitario, p.preco_custo) * vi.quantidade), 0) as total_custo
       FROM vendas_itens vi
       JOIN vendas v ON v.id = vi.venda_id AND v.deleted_at IS NULL
-      JOIN produtos p ON p.id = vi.produto_id AND p.deleted_at IS NULL
+      JOIN produtos p ON p.id = vi.produto_id
       WHERE vi.deleted_at IS NULL
         AND date(v.data) >= date(?) AND date(v.data) <= date(?)
     `).get(dataInicio, dataFim)
@@ -1310,14 +1367,14 @@ function obterRelatorioCustoVendasPeriodo(dataInicio, dataFim, artesaoId = null)
         p.id,
         p.nome,
         p.variacao,
-        a.nome as artesao_nome,
+        a.nome as artesao_nome, a.nome_fantasia as artesao_nome_fantasia,
         ${custoSnapshotExpr} as preco_custo,
         SUM(vi.quantidade) as total_vendido,
         SUM(COALESCE(vi.preco_custo_unitario, p.preco_custo) * vi.quantidade) as total_custo_produto,
         SUM(COALESCE(vi.preco_unitario, p.preco_venda) * vi.quantidade) as total_venda_produto
       FROM vendas_itens vi
       JOIN vendas v ON v.id = vi.venda_id AND v.deleted_at IS NULL
-      JOIN produtos p ON p.id = vi.produto_id AND p.deleted_at IS NULL
+      JOIN produtos p ON p.id = vi.produto_id
       LEFT JOIN artesoes a ON a.id = p.artesao_id
       WHERE vi.deleted_at IS NULL
         AND date(v.data) >= date(?) AND date(v.data) <= date(?)
@@ -1337,7 +1394,7 @@ function obterRelatorioCustoVendasPeriodo(dataInicio, dataFim, artesaoId = null)
       COALESCE(SUM(COALESCE(vi.preco_custo_unitario, p.preco_custo) * vi.quantidade), 0) as total_custo
     FROM vendas_itens vi
     JOIN vendas v ON v.id = vi.venda_id AND v.deleted_at IS NULL
-    JOIN produtos p ON p.id = vi.produto_id AND p.deleted_at IS NULL
+    JOIN produtos p ON p.id = vi.produto_id
     WHERE vi.deleted_at IS NULL
       AND date(v.data) >= date(?) AND date(v.data) <= date(?)
       AND p.artesao_id = ?
@@ -1347,14 +1404,14 @@ function obterRelatorioCustoVendasPeriodo(dataInicio, dataFim, artesaoId = null)
       p.id,
       p.nome,
       p.variacao,
-      a.nome as artesao_nome,
+      a.nome as artesao_nome, a.nome_fantasia as artesao_nome_fantasia,
       ${custoSnapshotExpr} as preco_custo,
       SUM(vi.quantidade) as total_vendido,
       SUM(COALESCE(vi.preco_custo_unitario, p.preco_custo) * vi.quantidade) as total_custo_produto,
       SUM(COALESCE(vi.preco_unitario, p.preco_venda) * vi.quantidade) as total_venda_produto
     FROM vendas_itens vi
     JOIN vendas v ON v.id = vi.venda_id AND v.deleted_at IS NULL
-    JOIN produtos p ON p.id = vi.produto_id AND p.deleted_at IS NULL
+    JOIN produtos p ON p.id = vi.produto_id
     LEFT JOIN artesoes a ON a.id = p.artesao_id
     WHERE vi.deleted_at IS NULL
       AND date(v.data) >= date(?) AND date(v.data) <= date(?)
@@ -1393,6 +1450,108 @@ function obterTotaisPagamentosPorPeriodo(dataInicio, dataFim) {
 function validarLogin(login, senha) {
   const row = db.prepare('SELECT id, login FROM usuarios WHERE login = ? AND senha = ?').get(String(login).trim(), senha)
   return row || null
+}
+
+const FORMACAO_PRECO_PADRAO = {
+  faturamento_medio: '14064.90',
+  despesas_fixas_mensais: '3572.43',
+  imposto: '4',
+  investimento: '10',
+  lucro: '10',
+  usar_folga: '0',
+}
+
+function garantirFormacaoPrecoPadrao() {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS configuracoes (
+      chave TEXT PRIMARY KEY,
+      valor TEXT NOT NULL
+    )
+  `)
+  const insert = db.prepare('INSERT OR IGNORE INTO configuracoes (chave, valor) VALUES (?, ?)')
+  const gravar = db.transaction(() => {
+    for (const [chave, valor] of Object.entries(FORMACAO_PRECO_PADRAO)) {
+      insert.run(chave, valor)
+    }
+  })
+  gravar()
+}
+
+garantirFormacaoPrecoPadrao()
+
+function lerNumeroConfig(map, chave, fallback) {
+  const n = parseFloat(map[chave])
+  return Number.isFinite(n) ? n : fallback
+}
+
+function obterFormacaoPreco() {
+  garantirFormacaoPrecoPadrao()
+  const rows = db.prepare('SELECT chave, valor FROM configuracoes').all()
+  const map = Object.fromEntries(rows.map((row) => [row.chave, row.valor]))
+  return {
+    faturamento_medio: lerNumeroConfig(map, 'faturamento_medio', 14064.9),
+    despesas_fixas_mensais: lerNumeroConfig(map, 'despesas_fixas_mensais', 3572.43),
+    imposto: lerNumeroConfig(map, 'imposto', 4),
+    investimento: lerNumeroConfig(map, 'investimento', 10),
+    lucro: lerNumeroConfig(map, 'lucro', 10),
+    usar_folga: map.usar_folga === '1',
+  }
+}
+
+function numeroFormacao(valor, nome) {
+  const n = typeof valor === 'number'
+    ? valor
+    : parseFloat(String(valor ?? '').trim().replace(',', '.'))
+  if (!Number.isFinite(n) || n < 0) throw new Error(`Valor inválido para ${nome}.`)
+  return n
+}
+
+function salvarFormacaoPreco(data) {
+  garantirFormacaoPrecoPadrao()
+  const faturamento = numeroFormacao(data?.faturamento_medio, 'faturamento médio')
+  if (faturamento <= 0) throw new Error('Informe o faturamento médio.')
+  const registro = {
+    faturamento_medio: String(faturamento),
+    despesas_fixas_mensais: String(numeroFormacao(data?.despesas_fixas_mensais, 'despesas fixas')),
+    imposto: String(numeroFormacao(data?.imposto, 'imposto')),
+    investimento: String(numeroFormacao(data?.investimento, 'investimento')),
+    lucro: String(numeroFormacao(data?.lucro, 'lucro')),
+    usar_folga: data?.usar_folga ? '1' : '0',
+  }
+  const upsert = db.prepare(`
+    INSERT INTO configuracoes (chave, valor) VALUES (?, ?)
+    ON CONFLICT(chave) DO UPDATE SET valor = excluded.valor
+  `)
+  const gravar = db.transaction(() => {
+    for (const [chave, valor] of Object.entries(registro)) {
+      upsert.run(chave, valor)
+    }
+  })
+  gravar()
+  return obterFormacaoPreco()
+}
+
+function aplicarPrecoFormacaoEmTodos(multiplicador) {
+  const mult = Number(multiplicador)
+  if (!Number.isFinite(mult) || mult <= 0) throw new Error('Multiplicador inválido.')
+  const produtos = db.prepare(`
+    SELECT id, preco_custo
+    FROM produtos
+    WHERE deleted_at IS NULL AND preco_custo > 0
+  `).all()
+  const update = db.prepare(`
+    UPDATE produtos
+    SET preco_venda = ?, sync_status = 'pending'
+    WHERE id = ?
+  `)
+  const gravar = db.transaction(() => {
+    for (const produto of produtos) {
+      const venda = arredondarPrecoVenda(Number(produto.preco_custo) * mult)
+      update.run(venda, produto.id)
+    }
+  })
+  gravar()
+  return { atualizados: produtos.length }
 }
 
 function criarUsuario(login, senha) {
@@ -1459,4 +1618,7 @@ module.exports = {
   atualizarValorVariacao,
   excluirValorVariacao,
   listarTodosValoresVariacao,
+  obterFormacaoPreco,
+  salvarFormacaoPreco,
+  aplicarPrecoFormacaoEmTodos,
 }
