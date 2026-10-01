@@ -1,6 +1,7 @@
 import loupeIcon from '../assets/complements/loupe.png'
 import { useState, useEffect, useRef } from 'react'
 import { recoverInputFocus } from '../utils/focusRecovery'
+import { textoInclui } from '../utils/artesao'
 
 function hojeISO() {
   const d = new Date()
@@ -113,7 +114,7 @@ export default function Estoque() {
   const produtosFiltrados = termoBusca
     ? produtos.filter(
         (produto) =>
-          (produto.nome && produto.nome.toLowerCase().includes(termoBusca)) ||
+          textoInclui(termoBusca, produto.nome, produto.artesao_nome, produto.artesao_nome_fantasia) ||
           (produto.codigo_barras && String(produto.codigo_barras).includes(buscaTrim))
       )
     : produtos
@@ -161,7 +162,7 @@ export default function Estoque() {
               <input
                 ref={buscaInputRef}
                 type="text"
-                placeholder="Buscar produto para lançar estoque..."
+                placeholder="Buscar por nome, nome fantasia ou código..."
                 value={busca}
                 onChange={(e) => setBusca(e.target.value)}
               />
@@ -198,6 +199,9 @@ export default function Estoque() {
                       <td>
                         <div className="estoque-produto-cell">
                           <span className="estoque-produto-nome">{nomeProdutoComVariacao(produto)}</span>
+                          {produto.artesao_nome_fantasia ? (
+                            <span className="estoque-produto-codigo">{produto.artesao_nome_fantasia}</span>
+                          ) : null}
                           <span className="estoque-produto-codigo">{produto.codigo_barras}</span>
                         </div>
                       </td>

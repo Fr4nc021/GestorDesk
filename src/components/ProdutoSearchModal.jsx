@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { textoInclui } from '../utils/artesao'
 
 function formatarPrecoVenda(valor) {
   if (valor == null) return '-'
@@ -50,9 +51,11 @@ export default function ProdutoSearchModal({
     const termoBruto = busca.trim()
     if (!termoLower) return produtos
     return produtos.filter((produto) => {
-      const nomeLower = (produto.nome || '').toLowerCase()
       const codigo = String(produto.codigo_barras || '')
-      return nomeLower.includes(termoLower) || codigo.includes(termoBruto)
+      return (
+        textoInclui(termoLower, produto.nome, produto.artesao_nome, produto.artesao_nome_fantasia) ||
+        codigo.includes(termoBruto)
+      )
     })
   }, [busca, produtos])
 
@@ -81,7 +84,7 @@ export default function ProdutoSearchModal({
             <input
               ref={inputRef}
               type="text"
-              placeholder="Digite o nome do produto ou código..."
+              placeholder="Nome, nome fantasia ou código..."
               value={busca}
               onChange={(e) => setBusca(e.target.value)}
             />
@@ -120,6 +123,7 @@ export default function ProdutoSearchModal({
                       <td>
                         {produto.nome}
                         {produto.variacao ? ` (${produto.variacao})` : ''}
+                        {produto.artesao_nome_fantasia ? ` — ${produto.artesao_nome_fantasia}` : ''}
                       </td>
                       <td>{produto.estoque ?? 0}</td>
                       <td>{formatarPrecoVenda(produto.preco_venda)}</td>

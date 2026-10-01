@@ -1,7 +1,7 @@
 {
   "name": "gestordesk",
   "private": true,
-  "version": "1.9.0",
+  "version": "2.1.0",
   "main": "electron/main.cjs",
   "type": "module",
   "scripts": {
@@ -61,6 +61,7 @@
       "output": "release",
       "buildResources": "build"
     },
+    "afterPack": "scripts/embed-win-icon.cjs",
     "win": {
       "target": "nsis",
       "icon": "build/icon.ico",
@@ -72,7 +73,9 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "GestorDesk"
+      "shortcutName": "GestorDesk",
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico"
     }
   }
 }

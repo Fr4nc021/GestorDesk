@@ -26,7 +26,8 @@ export default function Artesaos() {
   const [modalExcluirAberto, setModalExcluirAberto] = useState(false)
   const [artesaoEmEdicao, setArtesaoEmEdicao] = useState(null)
   const [artesaoParaExcluir, setArtesaoParaExcluir] = useState(null)
-  const [nome, setNome] = useState('')
+  const [razaoSocial, setRazaoSocial] = useState('')
+  const [nomeFantasia, setNomeFantasia] = useState('')
   const [telefoneWhatsapp, setTelefoneWhatsapp] = useState('')
   const [modalRegiaoAberto, setModalRegiaoAberto] = useState(false)
   const [regiaoTelefone, setRegiaoTelefone] = useState(REGIAO_PADRAO)
@@ -36,7 +37,7 @@ export default function Artesaos() {
       const lista = await window.electronAPI.listarArtesoes()
       setArtesoes(lista)
     } catch (err) {
-      console.error('[Artesãos] Erro ao carregar lista:', err)
+      console.error('[Fornecedores] Erro ao carregar lista:', err)
     } finally {
       setLoading(false)
     }
@@ -62,7 +63,8 @@ export default function Artesaos() {
 
   function abrirModal() {
     setArtesaoEmEdicao(null)
-    setNome('')
+    setRazaoSocial('')
+    setNomeFantasia('')
     setTelefoneWhatsapp('')
     setRegiaoTelefone(REGIAO_PADRAO)
     setModalAberto(true)
@@ -70,7 +72,8 @@ export default function Artesaos() {
 
   function abrirModalEdicao(artesao) {
     setArtesaoEmEdicao(artesao)
-    setNome(artesao.nome)
+    setRazaoSocial((artesao.razao_social || '').trim() || artesao.nome || '')
+    setNomeFantasia(artesao.nome_fantasia || '')
     const { regiao, telefoneLocal } = extrairRegiaoETelefone(artesao.telefone_whats)
     setRegiaoTelefone(regiao)
     setTelefoneWhatsapp(telefoneLocal)
@@ -115,7 +118,8 @@ export default function Artesaos() {
 
   async function handleSalvarArtesao(e) {
     e.preventDefault()
-    if (!nome.trim()) return
+    const razao = razaoSocial.trim()
+    if (!razao) return
 
     if (!window.electronAPI) {
       alert('Execute o app pelo Electron (npm start). O banco de dados não está disponível no navegador.')
@@ -125,30 +129,39 @@ export default function Artesaos() {
     try {
       const temTelefone = telefoneWhatsapp.replace(/\D/g, '').length > 0
       const telefoneCompleto = temTelefone ? `${regiaoTelefone.codigo} ${telefoneWhatsapp.trim()}` : null
+      const nomeAnterior = String(artesaoEmEdicao?.nome || '').trim()
+      const razaoAnterior = String(artesaoEmEdicao?.razao_social || '').trim() || nomeAnterior
+      const razaoMudou = !artesaoEmEdicao || razao.toLowerCase() !== razaoAnterior.toLowerCase()
+      const dados = {
+        nome: razaoMudou ? razao : (nomeAnterior || razao),
+        telefone_whats: telefoneCompleto,
+        razao_social: razao,
+        nome_fantasia: nomeFantasia.trim() || null,
+      }
 
       if (artesaoEmEdicao) {
-        await window.electronAPI.atualizarArtesao(artesaoEmEdicao.id, {
-          nome: nome.trim(),
-          telefone_whats: telefoneCompleto,
-        })
+        await window.electronAPI.atualizarArtesao(artesaoEmEdicao.id, dados)
       } else {
-        await window.electronAPI.criarArtesao({
-          nome: nome.trim(),
-          telefone_whats: telefoneCompleto,
-        })
+        await window.electronAPI.criarArtesao(dados)
       }
       setModalAberto(false)
       carregarArtesoes()
     } catch (err) {
-      console.error('[Artesãos] Erro ao salvar artesão:', err)
+      console.error('[Fornecedores] Erro ao salvar fornecedor:', err)
       const msg = err?.message || String(err)
-      alert(`Erro ao salvar artesão: ${msg}`)
+      alert(`Erro ao salvar fornecedor: ${msg}`)
     }
   }
 
   const buscaNome = termoBusca.trim().toLowerCase()
   const artesoesFiltrados = buscaNome
-    ? artesoes.filter((artesao) => artesao.nome?.toLowerCase().includes(buscaNome))
+    ? artesoes.filter((artesao) =>
+        [artesao.nome, artesao.razao_social, artesao.nome_fantasia]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase()
+          .includes(buscaNome)
+      )
     : artesoes
 
   async function handleExcluirArtesao() {
@@ -165,9 +178,9 @@ export default function Artesaos() {
       setArtesaoParaExcluir(null)
       carregarArtesoes()
     } catch (err) {
-      console.error('[Artesãos] Erro ao excluir artesão:', err)
+      console.error('[Fornecedores] Erro ao excluir fornecedor:', err)
       const msg = err?.message || String(err)
-      alert(`Erro ao excluir artesão: ${msg}`)
+      alert(`Erro ao excluir fornecedor: ${msg}`)
     }
   }
 
@@ -175,7 +188,7 @@ export default function Artesaos() {
     <div className="artesaos">
       <div className="artesaos-header">
         <div className="artesaos-header-left">
-          <h2 className="dashboard-heading">Artesãos</h2>
+          <h2 className="dashboard-heading">Fornecedores</h2>
           <p className="dashboard-subtitle">Gerencie os parceiros</p>
           <div className="artesaos-search-row">
             <div className="artesaos-search-wrapper">
@@ -183,7 +196,7 @@ export default function Artesaos() {
               <input
                 ref={buscaInputRef}
                 type="text"
-                placeholder="Buscar por nome..."
+                placeholder="Buscar por razão social ou nome fantasia..."
                 value={termoBusca}
                 onChange={(e) => setTermoBusca(e.target.value)}
               />
@@ -192,7 +205,7 @@ export default function Artesaos() {
         </div>
         <div className="artesaos-actions">
           <button type="button" className="artesaos-btn-primary" onClick={abrirModal}>
-            <span>+</span> Novo Artesão
+            <span>+</span> Novo Fornecedor
           </button>
         </div>
       </div>
@@ -201,7 +214,8 @@ export default function Artesaos() {
         <table className="pdv-products-table">
           <thead>
             <tr>
-              <th>Nome</th>
+              <th>Razão Social</th>
+              <th>Nome Fantasia</th>
               <th>Contato</th>
               <th>Status</th>
               <th>Produtos Relacionados</th>
@@ -211,20 +225,21 @@ export default function Artesaos() {
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={5}>Carregando...</td>
+                <td colSpan={6}>Carregando...</td>
               </tr>
             ) : artesoesFiltrados.length === 0 ? (
               <tr>
-                <td colSpan={5}>
+                <td colSpan={6}>
                   {buscaNome
-                    ? 'Nenhum artesão encontrado com esse nome.'
-                    : 'Nenhum artesão cadastrado.'}
+                    ? 'Nenhum fornecedor encontrado com esse nome.'
+                    : 'Nenhum fornecedor cadastrado.'}
                 </td>
               </tr>
             ) : (
               artesoesFiltrados.map((artesao) => (
                 <tr key={artesao.id}>
-                  <td>{artesao.nome}</td>
+                  <td>{(artesao.razao_social || '').trim() || artesao.nome || '—'}</td>
+                  <td>{artesao.nome_fantasia || '—'}</td>
                   <td>
                     <span className="artesaos-contato">
                       {artesao.telefone_whats ? (
@@ -282,21 +297,31 @@ export default function Artesaos() {
         <div className="modal-overlay" onClick={() => setModalAberto(false)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h3>{artesaoEmEdicao ? 'Editar Artesão' : 'Cadastrar Novo Artesão'}</h3>
+              <h3>{artesaoEmEdicao ? 'Editar Fornecedor' : 'Cadastrar Novo Fornecedor'}</h3>
               <button type="button" className="modal-close" onClick={() => setModalAberto(false)} aria-label="Fechar">
                 ×
               </button>
             </div>
             <form onSubmit={handleSalvarArtesao}>
               <div className="modal-field">
-                <label htmlFor="nome">Nome Completo</label>
+                <label htmlFor="razao-social">Razão Social</label>
                 <input
-                  id="nome"
+                  id="razao-social"
                   type="text"
-                  value={nome}
-                  onChange={(e) => setNome(e.target.value)}
-                  placeholder="Ex: Maria Silva"
+                  value={razaoSocial}
+                  onChange={(e) => setRazaoSocial(e.target.value)}
+                  placeholder="Ex: Maria Silva Artesanato Ltda"
                   required
+                />
+              </div>
+              <div className="modal-field">
+                <label htmlFor="nome-fantasia">Nome Fantasia</label>
+                <input
+                  id="nome-fantasia"
+                  type="text"
+                  value={nomeFantasia}
+                  onChange={(e) => setNomeFantasia(e.target.value)}
+                  placeholder="Ex: Ateliê da Maria"
                 />
               </div>
               <div className="modal-field">
@@ -318,7 +343,7 @@ export default function Artesaos() {
                 />
               </div>
               <button type="submit" className="modal-submit">
-                {artesaoEmEdicao ? 'Salvar Alterações' : 'Salvar Artesão'}
+                {artesaoEmEdicao ? 'Salvar Alterações' : 'Salvar Fornecedor'}
               </button>
             </form>
           </div>
@@ -357,15 +382,15 @@ export default function Artesaos() {
         <div className="modal-overlay" onClick={() => setModalExcluirAberto(false)}>
           <div className="modal-content modal-confirm" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h3>Excluir artesão</h3>
+              <h3>Excluir fornecedor</h3>
               <button type="button" className="modal-close" onClick={() => setModalExcluirAberto(false)} aria-label="Fechar">
                 ×
               </button>
             </div>
             <p className="modal-confirm-message">
-              Tem certeza que deseja excluir esse artesão? Essa ação é permanente e todos os produtos relacionados a ele ficarão sem relação com fornecedor.
+              Tem certeza que deseja excluir esse fornecedor? Essa ação é permanente e todos os produtos relacionados a ele ficarão sem relação com fornecedor.
             </p>
-            <p className="modal-confirm-nome"><strong>{artesaoParaExcluir.nome}</strong></p>
+            <p className="modal-confirm-nome"><strong>{(artesaoParaExcluir.razao_social || '').trim() || artesaoParaExcluir.nome}</strong></p>
             <div className="modal-confirm-acoes">
               <button type="button" className="modal-btn-cancelar" onClick={() => setModalExcluirAberto(false)}>
                 Cancelar

@@ -2,6 +2,19 @@ import loupeIcon from '../assets/complements/loupe.png'
 import filterIcon from '../assets/complements/filter.png'
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { recoverInputFocus } from '../utils/focusRecovery'
+import { rotuloNomeFantasia, textoInclui } from '../utils/artesao'
+import {
+  FORMACAO_PADRAO,
+  MULTIPLICADOR_FOLGA,
+  calcularFormacao,
+  camposDeFormacao,
+  composicaoEmReais,
+  formatarMoeda,
+  formatarMultiplicador,
+  formatarPercentual,
+  precoSugerido,
+  arredondarPrecoVenda,
+} from '../utils/formacaoPreco'
 import Barcode from 'react-barcode'
 import JsBarcode from 'jsbarcode'
 
@@ -21,14 +34,17 @@ export default function Produtos() {
   const [refazendoCodigo, setRefazendoCodigo] = useState(false)
   const [nome, setNome] = useState('')
   const [adicionarVariacao, setAdicionarVariacao] = useState(false)
+  const [painelVariacoesAberto, setPainelVariacoesAberto] = useState(false)
   const [variacoesComQuantidade, setVariacoesComQuantidade] = useState({ P: 0, M: 0, G: 0, GG: 0 })
   /** Variações ativas do produto (independe do estoque; permite estoque 0). */
   const [variacoesIncluidas, setVariacoesIncluidas] = useState({})
   const [precoCusto, setPrecoCusto] = useState('')
+  const [lucroEsperado, setLucroEsperado] = useState('')
   const [precoVenda, setPrecoVenda] = useState('')
   const [estoque, setEstoque] = useState('')
   const [artesaoId, setArtesaoId] = useState('')
   const [salvando, setSalvando] = useState(false)
+  const [duplicandoId, setDuplicandoId] = useState(null)
   const [toast, setToast] = useState({ visible: false, message: '', type: 'success' })
 
   const [tiposVariacao, setTiposVariacao] = useState([])
@@ -62,6 +78,15 @@ export default function Produtos() {
     exibirCodigoBarras: true,
   })
 
+  const [formacao, setFormacao] = useState(FORMACAO_PADRAO)
+  const [modalFormacaoAberto, setModalFormacaoAberto] = useState(false)
+  const [formacaoRascunho, setFormacaoRascunho] = useState(() => camposDeFormacao(FORMACAO_PADRAO))
+  const [salvandoFormacao, setSalvandoFormacao] = useState(false)
+  const [aplicandoEmTodos, setAplicandoEmTodos] = useState(false)
+  const [abaProduto, setAbaProduto] = useState('dados')
+  const formacaoCalc = useMemo(() => calcularFormacao(formacao), [formacao])
+  const formacaoRascunhoCalc = useMemo(() => calcularFormacao(formacaoRascunho), [formacaoRascunho])
+
   function mostrarToast(message, type = 'success') {
     setToast({ visible: true, message, type })
   }
@@ -80,6 +105,7 @@ export default function Produtos() {
     modalRefazerCodigoAberto ||
     modalEtiquetasAberto ||
     modalVisualizarEtiquetasAberto ||
+    modalFormacaoAberto ||
     Boolean(valorVariacaoParaExcluir)
   const prevModalOpen = useRef(false)
   useEffect(() => {
@@ -303,12 +329,14 @@ export default function Produtos() {
     carregarArtesoes()
     carregarValoresVariacao()
     carregarTiposVariacao()
+    carregarFormacao()
   }, [])
 
   function abrirModal() {
     setProdutoEmEdicao(null)
     setNome('')
     setAdicionarVariacao(false)
+    setPainelVariacoesAberto(false)
     const quantidadesIniciais = {}
     const incluidasIniciais = {}
     valoresVariacao.forEach((v) => {
@@ -318,11 +346,13 @@ export default function Produtos() {
     setVariacoesComQuantidade(quantidadesIniciais)
     setVariacoesIncluidas(incluidasIniciais)
     setPrecoCusto('')
+    setLucroEsperado('')
     setPrecoVenda('')
     setEstoque('')
     setArtesaoId('')
     setTipoVariacaoProdutoId('')
     setErroTipoVariacaoProduto('')
+    setAbaProduto('dados')
     setModalAberto(true)
   }
 
@@ -330,6 +360,7 @@ export default function Produtos() {
     setProdutoEmEdicao(produto)
     setNome(produto.nome)
     setAdicionarVariacao(!!produto.variacao)
+    setPainelVariacoesAberto(false)
     const tipoDoProduto = produto.variacao
       ? tiposVariacao.find((tipo) => (tipo.valores || []).some((valor) => valor.valor === produto.variacao))
       : null
@@ -368,17 +399,50 @@ export default function Produtos() {
     setVariacoesComQuantidade(variacoes)
     setVariacoesIncluidas(incluidas)
     setPrecoCusto(String(produto.preco_custo ?? ''))
+    setLucroEsperado(lucroPercentualDePrecos(produto.preco_custo, produto.preco_venda))
     setPrecoVenda(String(produto.preco_venda ?? ''))
     setEstoque(String(produto.estoque ?? ''))
     setArtesaoId(String(produto.artesao_id ?? ''))
     setTipoVariacaoProdutoId(tipoDoProduto ? String(tipoDoProduto.id) : '')
     setErroTipoVariacaoProduto('')
+    setAbaProduto('dados')
     setModalAberto(true)
   }
 
   function abrirModalExcluir(produto) {
     setProdutoParaExcluir(produto)
     setModalExcluirAberto(true)
+  }
+
+  async function handleDuplicarProduto(produto) {
+    if (!produto || duplicandoId) return
+    if (!window.electronAPI?.criarProduto) {
+      alert('Execute o app pelo Electron (npm start). O banco de dados não está disponível no navegador.')
+      return
+    }
+    const artesaoVal = parseInt(produto.artesao_id, 10)
+    if (!artesaoVal || artesaoVal < 1) {
+      mostrarToast('Não foi possível duplicar: o produto não tem fornecedor.', 'error')
+      return
+    }
+    setDuplicandoId(produto.id)
+    try {
+      await window.electronAPI.criarProduto({
+        nome: `${String(produto.nome || '').trim()} (cópia)`,
+        variacao: produto.variacao || null,
+        preco_custo: Number(produto.preco_custo) || 0,
+        preco_venda: Number(produto.preco_venda) || 0,
+        estoque: Number(produto.estoque) || 0,
+        artesao_id: artesaoVal,
+      })
+      await carregarProdutos()
+      mostrarToast('Produto duplicado com sucesso!', 'success')
+    } catch (err) {
+      console.error('[Produtos] Erro ao duplicar produto:', err)
+      mostrarToast(`Erro ao duplicar produto: ${err?.message || err}`, 'error')
+    } finally {
+      setDuplicandoId(null)
+    }
   }
 
   async function handleRefazerCodigoBarras() {
@@ -423,6 +487,7 @@ export default function Produtos() {
   function fecharModalProduto() {
     if (salvando) return
     setModalAberto(false)
+    setAbaProduto('dados')
   }
 
   function handleSelecionarTipoVariacaoProduto(tipoId) {
@@ -448,6 +513,176 @@ export default function Produtos() {
     return parseFloat(String(valor).replace(',', '.')) || 0
   }
 
+  function parsePrecoOpcional(valor) {
+    const texto = String(valor ?? '').trim()
+    if (!texto) return null
+    const n = parseFloat(texto.replace(',', '.'))
+    return Number.isFinite(n) ? n : null
+  }
+
+  function formatPrecoInput(valor) {
+    return valor.toFixed(2).replace('.', ',')
+  }
+
+  function lucroPercentualDePrecos(custo, venda) {
+    const c = Number(custo)
+    const v = Number(venda)
+    if (!Number.isFinite(c) || c <= 0 || !Number.isFinite(v)) return ''
+    const pct = Math.round((((v - c) / c) * 100) * 100) / 100
+    return String(pct).replace('.', ',')
+  }
+
+  function aplicarPrecoVendaCalculado(custoTexto, lucroTexto) {
+    const custo = parsePrecoOpcional(custoTexto)
+    const lucro = parsePrecoOpcional(lucroTexto)
+    if (custo == null || lucro == null || custo < 0) return
+    const venda = arredondarPrecoVenda(custo * (1 + lucro / 100))
+    setPrecoVenda(formatPrecoInput(venda))
+  }
+
+  function handlePrecoCustoChange(valor, preservarVenda = false) {
+    setPrecoCusto(valor)
+    if (preservarVenda && produtoEmEdicao) return
+    if (!produtoEmEdicao && formacaoCalc.ok) {
+      const custo = parsePrecoOpcional(valor)
+      if (custo != null && custo >= 0) {
+        const venda = precoSugerido(custo, formacaoCalc.multiplicador)
+        if (venda != null) {
+          setPrecoVenda(formatPrecoInput(venda))
+          setLucroEsperado(lucroPercentualDePrecos(custo, venda))
+          return
+        }
+      }
+    }
+    aplicarPrecoVendaCalculado(valor, lucroEsperado)
+  }
+
+  function aplicarPrecoFormacao() {
+    if (!formacaoCalc.ok) return
+    const custo = parsePrecoOpcional(precoCusto)
+    if (custo == null || custo < 0) return
+    const venda = precoSugerido(custo, formacaoCalc.multiplicador)
+    if (venda == null) return
+    setPrecoVenda(formatPrecoInput(venda))
+    setLucroEsperado(lucroPercentualDePrecos(custo, venda))
+  }
+
+  async function carregarFormacao() {
+    try {
+      if (!window.electronAPI?.obterFormacaoPreco) return
+      const dados = await window.electronAPI.obterFormacaoPreco()
+      setFormacao(dados)
+    } catch (err) {
+      console.error('[Produtos] Erro ao carregar formação de preço:', err)
+    }
+  }
+
+  function abrirModalFormacao() {
+    setFormacaoRascunho(camposDeFormacao(formacao))
+    setModalFormacaoAberto(true)
+  }
+
+  function atualizarRascunhoFormacao(campo, valor) {
+    setFormacaoRascunho((prev) => ({ ...prev, [campo]: valor }))
+  }
+
+  function montarPayloadFormacao() {
+    return {
+      faturamento_medio: parsePrecoOpcional(formacaoRascunho.faturamento_medio),
+      despesas_fixas_mensais: parsePrecoOpcional(formacaoRascunho.despesas_fixas_mensais),
+      imposto: parsePrecoOpcional(formacaoRascunho.imposto),
+      investimento: parsePrecoOpcional(formacaoRascunho.investimento),
+      lucro: parsePrecoOpcional(formacaoRascunho.lucro),
+      usar_folga: Boolean(formacaoRascunho.usar_folga),
+    }
+  }
+
+  async function handleSalvarFormacao(e) {
+    e.preventDefault()
+    const payload = montarPayloadFormacao()
+    const calc = calcularFormacao(payload)
+    if (!calc.ok) {
+      mostrarToast(
+        calc.motivo === 'soma'
+          ? 'A soma dos percentuais chega a 100% ou mais. Ajuste os valores.'
+          : 'Informe o faturamento médio e as despesas fixas.',
+        'error',
+      )
+      return
+    }
+    setSalvandoFormacao(true)
+    try {
+      if (window.electronAPI?.salvarFormacaoPreco) {
+        const salvo = await window.electronAPI.salvarFormacaoPreco(payload)
+        setFormacao(salvo)
+      } else {
+        setFormacao(payload)
+      }
+      setModalFormacaoAberto(false)
+      mostrarToast('Formação de preço salva.', 'success')
+    } catch (err) {
+      mostrarToast(err?.message || 'Erro ao salvar a formação de preço.', 'error')
+    } finally {
+      setSalvandoFormacao(false)
+    }
+  }
+
+  async function aplicarFormacaoEmTodos() {
+    const payload = montarPayloadFormacao()
+    const calc = calcularFormacao(payload)
+    if (!calc.ok) {
+      mostrarToast(
+        calc.motivo === 'soma'
+          ? 'A soma dos percentuais chega a 100% ou mais. Ajuste os valores.'
+          : 'Informe o faturamento médio e as despesas fixas.',
+        'error',
+      )
+      return
+    }
+    const multiplicador = formatarMultiplicador(calc.multiplicador)
+    const confirmar = window.confirm(
+      `Substituir o preço de venda de todos os produtos com custo? Cada preço passa a ser o custo × ${multiplicador}. Produtos sem custo ficam como estão.`,
+    )
+    if (!confirmar) return
+    if (!window.electronAPI?.aplicarPrecoFormacaoEmTodos) {
+      mostrarToast('Execute o app pelo Electron para aplicar nos produtos.', 'error')
+      return
+    }
+    setAplicandoEmTodos(true)
+    try {
+      if (window.electronAPI.salvarFormacaoPreco) {
+        const salvo = await window.electronAPI.salvarFormacaoPreco(payload)
+        setFormacao(salvo)
+      }
+      const resultado = await window.electronAPI.aplicarPrecoFormacaoEmTodos(calc.multiplicador)
+      await carregarProdutos()
+      const qtd = resultado?.atualizados ?? 0
+      mostrarToast(
+        qtd === 1
+          ? 'Preço atualizado em 1 produto.'
+          : `Preço atualizado em ${qtd} produtos.`,
+        'success',
+      )
+    } catch (err) {
+      mostrarToast(err?.message || 'Erro ao aplicar o preço nos produtos.', 'error')
+    } finally {
+      setAplicandoEmTodos(false)
+    }
+  }
+
+  function handleLucroEsperadoChange(valor) {
+    setLucroEsperado(valor)
+    aplicarPrecoVendaCalculado(precoCusto, valor)
+  }
+
+  function handlePrecoVendaChange(valor) {
+    setPrecoVenda(valor)
+    const custo = parsePrecoOpcional(precoCusto)
+    const venda = parsePrecoOpcional(valor)
+    if (custo == null || custo <= 0 || venda == null) return
+    setLucroEsperado(lucroPercentualDePrecos(custo, venda))
+  }
+
   function parseEstoqueInput(valor) {
     return parseInt(String(valor).replace(/\D/g, ''), 10) || 0
   }
@@ -456,12 +691,16 @@ export default function Produtos() {
     const tipoSelecionado = tiposVariacao.find((t) => String(t.id) === String(tipoVariacaoProdutoId))
     if (!tipoSelecionado) {
       setErroTipoVariacaoProduto('Selecione um tipo de variação.')
+      setAbaProduto('dados')
+      setPainelVariacoesAberto(true)
       setSalvando(false)
       return false
     }
     const valoresDoTipo = (tipoSelecionado.valores || []).map((v) => v.valor)
     const variacoesSelecionadas = obterVariacoesSelecionadas(valoresDoTipo)
     if (variacoesSelecionadas.length === 0) {
+      setAbaProduto('dados')
+      setPainelVariacoesAberto(true)
       alert('Marque pelo menos uma variação e informe o estoque de cada uma.')
       setSalvando(false)
       return false
@@ -528,12 +767,16 @@ export default function Produtos() {
     const tipoSelecionado = tiposVariacao.find((t) => String(t.id) === String(tipoVariacaoProdutoId))
     if (!tipoSelecionado) {
       setErroTipoVariacaoProduto('Selecione um tipo de variação.')
+      setAbaProduto('dados')
+      setPainelVariacoesAberto(true)
       setSalvando(false)
       return false
     }
     const valoresDoTipo = (tipoSelecionado.valores || []).map((v) => v.valor)
     const variacoesSelecionadas = obterVariacoesSelecionadas(valoresDoTipo)
     if (variacoesSelecionadas.length === 0) {
+      setAbaProduto('dados')
+      setPainelVariacoesAberto(true)
       alert('Marque pelo menos uma variação e informe o estoque de cada uma.')
       setSalvando(false)
       return false
@@ -568,18 +811,20 @@ export default function Produtos() {
     e.preventDefault()
 
     if (!nome.trim()) {
+      setAbaProduto('dados')
       alert('Informe o nome do produto.')
       return
     }
 
     const artesaoVal = parseInt(artesaoId, 10)
     if (!artesaoVal || artesaoVal < 1) {
-      alert('Selecione um artesão.')
+      setAbaProduto('dados')
+      alert('Selecione um fornecedor.')
       return
     }
 
     const custo = parsePrecoInput(precoCusto)
-    const venda = parsePrecoInput(precoVenda)
+    const venda = arredondarPrecoVenda(parsePrecoInput(precoVenda))
 
     if (!window.electronAPI) {
       alert('Execute o app pelo Electron (npm start). O banco de dados não está disponível no navegador.')
@@ -667,7 +912,7 @@ export default function Produtos() {
       const porCodigo = await window.electronAPI.buscarProdutoPorCodigo(termo)
       if (porCodigo) {
         if (!produtoPassaFiltroArtesaoEtiqueta(porCodigo)) {
-          mostrarToast('Este produto não corresponde ao filtro de artesão.', 'error')
+          mostrarToast('Este produto não corresponde ao filtro de fornecedor.', 'error')
           return
         }
         adicionarProdutoParaEtiquetas(porCodigo)
@@ -680,7 +925,7 @@ export default function Produtos() {
     const encontrado = produtos.find(
       (p) =>
         produtoPassaFiltroArtesaoEtiqueta(p) &&
-        ((p.nome && p.nome.toLowerCase().includes(termoLower)) ||
+        (textoInclui(termoLower, p.nome, p.artesao_nome, p.artesao_razao_social, p.artesao_nome_fantasia) ||
           (p.codigo_barras && String(p.codigo_barras).includes(termo)))
     )
     if (encontrado) {
@@ -796,9 +1041,11 @@ export default function Produtos() {
     return produtos.filter((p) => {
       if (filtroArt && String(p.artesao_id) !== filtroArt) return false
       if (!termo) return true
-      const nome = (p.nome || '').toLowerCase()
       const codigo = String(p.codigo_barras || '')
-      return nome.includes(termo) || codigo.includes(buscaEtiqueta.trim())
+      return (
+        textoInclui(termo, p.nome, p.artesao_nome, p.artesao_razao_social, p.artesao_nome_fantasia) ||
+        codigo.includes(buscaEtiqueta.trim())
+      )
     })
   }, [buscaEtiqueta, filtroArtesaoEtiqueta, produtos])
 
@@ -1219,9 +1466,8 @@ ${chunk.join('\n')}
     const termo = busca.toLowerCase().trim()
     if (!termo) return produtos
     return produtos.filter((produto) => {
-      const nomeOk = produto.nome && produto.nome.toLowerCase().includes(termo)
       const codigoOk = produto.codigo_barras && String(produto.codigo_barras).includes(termo)
-      return nomeOk || codigoOk
+      return textoInclui(termo, produto.nome, produto.artesao_nome, produto.artesao_razao_social, produto.artesao_nome_fantasia) || codigoOk
     })
   }, [produtos, busca])
 
@@ -1251,6 +1497,28 @@ ${chunk.join('\n')}
     () => valoresTipoProduto.filter((vo) => !variacoesIncluidas[vo.valor]),
     [valoresTipoProduto, variacoesIncluidas],
   )
+
+  function alternarPainelVariacoes() {
+    if (painelVariacoesAberto) {
+      setPainelVariacoesAberto(false)
+      const produtoJaTemVariacao = Boolean(produtoEmEdicao?.variacao)
+      if (variacoesAtivasCount === 0 && !produtoJaTemVariacao) {
+        setAdicionarVariacao(false)
+        setErroTipoVariacaoProduto('')
+        setTipoVariacaoProdutoId('')
+      }
+      return
+    }
+    setAdicionarVariacao(true)
+    setPainelVariacoesAberto(true)
+  }
+
+  function desativarVariacoesProduto() {
+    setAdicionarVariacao(false)
+    setPainelVariacoesAberto(false)
+    setErroTipoVariacaoProduto('')
+    setTipoVariacaoProdutoId('')
+  }
 
   function renderLinhaVariacaoEstoque(valorObj) {
     const v = valorObj.valor
@@ -1305,6 +1573,65 @@ ${chunk.join('\n')}
     )
   }
 
+  const custoInformado = parsePrecoOpcional(precoCusto)
+  const vendaInformada = parsePrecoOpcional(precoVenda)
+  const lucroEmReais =
+    custoInformado != null && vendaInformada != null
+      ? Math.round((vendaInformada - custoInformado) * 100) / 100
+      : null
+  const vendaSugerida =
+    formacaoCalc.ok && custoInformado != null
+      ? precoSugerido(custoInformado, formacaoCalc.multiplicador)
+      : null
+  const partesReais =
+    vendaSugerida != null && custoInformado != null
+      ? composicaoEmReais(custoInformado, vendaSugerida, formacaoCalc)
+      : null
+
+  function renderAvisoFormacao(calc) {
+    if (!calc?.ok && calc?.motivo === 'soma') {
+      return (
+        <p className="formacao-aviso">
+          A soma de imposto, custos, investimento e lucro chega a 100% ou mais. Não há preço possível.
+        </p>
+      )
+    }
+    if (!calc?.ok) {
+      return <p className="formacao-aviso">Informe o faturamento médio e as despesas fixas.</p>
+    }
+    if (calc.abaixoDeDois && !calc.usarFolga) {
+      return (
+        <p className="formacao-aviso">
+          Multiplicador abaixo de 2. Com esta carga de despesas, um índice menor que o calculado não gera o lucro informado. A planilha sugere {formatarMultiplicador(MULTIPLICADOR_FOLGA)} como folga.
+        </p>
+      )
+    }
+    return null
+  }
+
+  function renderLinhasComposicao(calc) {
+    if (!calc?.ok) return null
+    return (
+      <dl className="formacao-composicao">
+        <div><dt>Imposto</dt><dd>{formatarPercentual(calc.imposto)}</dd></div>
+        <div><dt>Custos</dt><dd>{formatarPercentual(calc.custosPct)}</dd></div>
+        <div><dt>Investimento</dt><dd>{formatarPercentual(calc.investimento)}</dd></div>
+        <div><dt>Lucro</dt><dd>{formatarPercentual(calc.lucro)}</dd></div>
+        <div><dt>CMV que sobra</dt><dd>{formatarPercentual(calc.cmvPct)}</dd></div>
+        <div className="formacao-composicao-total">
+          <dt>Multiplicador</dt>
+          <dd>{formatarMultiplicador(calc.multiplicadorCalculado)}</dd>
+        </div>
+        {calc.usarFolga && (
+          <div>
+            <dt>Multiplicador usado</dt>
+            <dd>{formatarMultiplicador(calc.multiplicador)}</dd>
+          </div>
+        )}
+      </dl>
+    )
+  }
+
   return (
     <div className="produtos">
       {toast.visible && (
@@ -1326,7 +1653,7 @@ ${chunk.join('\n')}
               <input
                 ref={buscaInputRef}
                 type="text"
-                placeholder="Buscar por nome ou código..."
+                placeholder="Buscar por nome, nome fantasia ou código..."
                 value={busca}
                 onChange={(e) => setBusca(e.target.value)}
               />
@@ -1340,8 +1667,11 @@ ${chunk.join('\n')}
           </div>
         </div>
         <div className="produtos-actions">
-          <button type="button" className="produtos-btn-secondary" onClick={abrirModalVariacoes}>
-            Adicionar Variação
+          <button type="button" className="produtos-btn-quiet" onClick={abrirModalVariacoes}>
+            Variações
+          </button>
+          <button type="button" className="produtos-btn-quiet" onClick={abrirModalFormacao}>
+            Formação de Preço
           </button>
           <button type="button" className="produtos-btn-primary" onClick={abrirModal}>
             <span>+</span> Novo Produto
@@ -1370,7 +1700,7 @@ ${chunk.join('\n')}
             <tr>
               <th>Código</th>
               <th>Produto</th>
-              <th>Artesão</th>
+              <th>Fornecedor</th>
               <th>Estoque</th>
               <th>Preço</th>
               <th>Ações</th>
@@ -1392,7 +1722,7 @@ ${chunk.join('\n')}
                 <tr key={p.id}>
                   <td>{p.codigo_barras}</td>
                   <td>{p.nome}{p.variacao ? ` (${p.variacao})` : ''}</td>
-                  <td>{p.artesao_nome || '-'}</td>
+                  <td>{rotuloNomeFantasia(p.artesao_nome_fantasia, p.artesao_razao_social, p.artesao_nome, '-')}</td>
                   <td>{p.estoque}</td>
                   <td>R$ {p.preco_venda?.toFixed(2).replace('.', ',')}</td>
                   <td>
@@ -1406,6 +1736,19 @@ ${chunk.join('\n')}
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                           <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
                           <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                        </svg>
+                      </button>
+                      <button
+                        type="button"
+                        className="artesaos-btn-edit"
+                        title="Duplicar"
+                        aria-label="Duplicar produto"
+                        disabled={duplicandoId === p.id}
+                        onClick={() => handleDuplicarProduto(p)}
+                      >
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
                         </svg>
                       </button>
                       <button
@@ -1447,6 +1790,28 @@ ${chunk.join('\n')}
             </div>
             <form onSubmit={handleSalvarProduto}>
               <div className="modal-produto-body">
+                <div className="formacao-tabs" role="tablist">
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={abaProduto === 'dados'}
+                    className={`formacao-tab ${abaProduto === 'dados' ? 'active' : ''}`}
+                    onClick={() => setAbaProduto('dados')}
+                  >
+                    Dados
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={abaProduto === 'formacao'}
+                    className={`formacao-tab ${abaProduto === 'formacao' ? 'active' : ''}`}
+                    onClick={() => setAbaProduto('formacao')}
+                  >
+                    Formação de Preço
+                  </button>
+                </div>
+                {abaProduto === 'dados' && (
+                <>
                 <div className="modal-field">
                   <label htmlFor="nome">Nome do Produto</label>
                   <input
@@ -1479,22 +1844,40 @@ ${chunk.join('\n')}
                 )}
 
                 <div className="modal-produto-variacao">
-                  <label className="modal-checkbox-label">
-                    <input
-                      type="checkbox"
-                      checked={adicionarVariacao}
-                      onChange={(e) => {
-                        const checked = e.target.checked
-                        setAdicionarVariacao(checked)
-                        if (!checked) {
-                          setErroTipoVariacaoProduto('')
-                          setTipoVariacaoProdutoId('')
-                        }
-                      }}
-                    />
-                    Adicionar variação
-                  </label>
-                  {adicionarVariacao && (
+                  <div className="modal-variacao-toggle-row">
+                    <button
+                      type="button"
+                      className="produtos-btn-secondary modal-variacao-toggle"
+                      onClick={alternarPainelVariacoes}
+                      aria-expanded={painelVariacoesAberto}
+                    >
+                      {painelVariacoesAberto
+                        ? 'Ocultar variações'
+                        : variacoesAtivasCount > 0
+                          ? `Variações (${variacoesAtivasCount})`
+                          : adicionarVariacao
+                            ? 'Variações'
+                            : 'Cadastrar variações'}
+                    </button>
+                    {painelVariacoesAberto ? (
+                      <button
+                        type="button"
+                        className="modal-variacao-desativar"
+                        onClick={desativarVariacoesProduto}
+                      >
+                        Sem variação
+                      </button>
+                    ) : (
+                      adicionarVariacao && (
+                        <span className="modal-variacao-resumo">
+                          {variacoesAtivasCount > 0
+                            ? variacoesAtivasLista.map((vo) => vo.valor).join(', ')
+                            : produtoEmEdicao?.variacao || 'Estoque definido por variação'}
+                        </span>
+                      )
+                    )}
+                  </div>
+                  {painelVariacoesAberto && (
                   <>
                     <div className="modal-field">
                       <label htmlFor="tipoVariacaoProduto">Tipo de variação</label>
@@ -1516,7 +1899,7 @@ ${chunk.join('\n')}
                       <div className="modal-variacoes-estoque">
                         {valoresTipoProduto.length === 0 ? (
                           <p className="modal-variacoes-empty">
-                            Nenhum valor neste tipo. Cadastre em &quot;Adicionar Variação&quot; no menu de produtos.
+                            Nenhum valor neste tipo. Cadastre em &quot;Variações&quot; no menu de produtos.
                           </p>
                         ) : (
                           <>
@@ -1562,17 +1945,33 @@ ${chunk.join('\n')}
                   )}
                 </div>
 
-                <div className="modal-produto-row modal-produto-row-3">
-                  <div className="modal-field">
-                    <label htmlFor="precoCusto">Preço Custo</label>
-                    <input
-                      id="precoCusto"
-                      type="text"
-                      inputMode="decimal"
-                      value={precoCusto}
-                      onChange={(e) => setPrecoCusto(e.target.value)}
-                      placeholder="0,00"
-                    />
+                <div className="modal-produto-row modal-produto-row-3 modal-produto-precos">
+                  <div className="modal-produto-precos-stack">
+                    <div className="modal-field">
+                      <label htmlFor="precoCusto">Preço Custo</label>
+                      <input
+                        id="precoCusto"
+                        type="text"
+                        inputMode="decimal"
+                        value={precoCusto}
+                        onChange={(e) => handlePrecoCustoChange(e.target.value)}
+                        placeholder="0,00"
+                      />
+                    </div>
+                    <div className="modal-field">
+                      <label htmlFor="lucroEsperado">Lucro esperado (%)</label>
+                      <input
+                        id="lucroEsperado"
+                        type="text"
+                        inputMode="decimal"
+                        value={lucroEsperado}
+                        onChange={(e) => handleLucroEsperadoChange(e.target.value)}
+                        placeholder="0"
+                      />
+                      {lucroEmReais != null && (
+                        <small className="modal-field-hint">Lucro: R$ {formatPrecoInput(lucroEmReais)}</small>
+                      )}
+                    </div>
                   </div>
                   <div className="modal-field">
                     <label htmlFor="precoVenda">Preço Venda</label>
@@ -1581,9 +1980,22 @@ ${chunk.join('\n')}
                       type="text"
                       inputMode="decimal"
                       value={precoVenda}
-                      onChange={(e) => setPrecoVenda(e.target.value)}
+                      onChange={(e) => handlePrecoVendaChange(e.target.value)}
+                      onBlur={() => {
+                        const venda = parsePrecoOpcional(precoVenda)
+                        if (venda == null) return
+                        const arredondado = arredondarPrecoVenda(venda)
+                        setPrecoVenda(formatPrecoInput(arredondado))
+                        const custo = parsePrecoOpcional(precoCusto)
+                        if (custo != null && custo > 0) {
+                          setLucroEsperado(lucroPercentualDePrecos(custo, arredondado))
+                        }
+                      }}
                       placeholder="0,00"
                     />
+                    <small className="modal-field-hint">
+                      Ajustado para o mais próximo entre ,00 e ,50. Pode ser alterado.
+                    </small>
                   </div>
                   {!adicionarVariacao && (
                     <div className="modal-field">
@@ -1601,24 +2013,171 @@ ${chunk.join('\n')}
                 </div>
 
                 <div className="modal-field">
-                  <label htmlFor="artesao">Artesão</label>
+                  <label htmlFor="artesao">Fornecedor</label>
                   <select
                     id="artesao"
                     value={artesaoId}
                     onChange={(e) => setArtesaoId(e.target.value)}
                     required
                   >
-                    <option value="">Selecione um artesão...</option>
+                    <option value="">Selecione um fornecedor...</option>
                     {artesoes.map((a) => (
                       <option key={a.id} value={a.id}>
-                        {a.nome}
+                        {rotuloNomeFantasia(a.nome_fantasia, a.razao_social, a.nome)}
                       </option>
                     ))}
                   </select>
                 </div>
+                </>
+                )}
+                {abaProduto === 'formacao' && (
+                  <div className="formacao-produto">
+                    <div className="modal-field">
+                      <label htmlFor="precoCustoFormacao">Preço de custo</label>
+                      <input
+                        id="precoCustoFormacao"
+                        type="text"
+                        inputMode="decimal"
+                        value={precoCusto}
+                        onChange={(e) => handlePrecoCustoChange(e.target.value, true)}
+                        placeholder="0,00"
+                      />
+                    </div>
+                    {renderAvisoFormacao(formacaoCalc)}
+                    {formacaoCalc.ok && (
+                      <>
+                        {renderLinhasComposicao(formacaoCalc)}
+                        <p className="formacao-multiplicador">
+                          Multiplicador usado: <strong>{formatarMultiplicador(formacaoCalc.multiplicador)}</strong>
+                        </p>
+                        {custoInformado == null || partesReais == null ? (
+                          <p className="modal-field-hint">Informe o custo para ver o preço de venda.</p>
+                        ) : (
+                          <>
+                            <ul className="formacao-reais">
+                              <li><span>CMV</span><strong>{formatarMoeda(partesReais.custo)}</strong></li>
+                              <li><span>Imposto</span><strong>{formatarMoeda(partesReais.imposto)}</strong></li>
+                              <li><span>Custos</span><strong>{formatarMoeda(partesReais.custos)}</strong></li>
+                              <li><span>Investimento</span><strong>{formatarMoeda(partesReais.investimento)}</strong></li>
+                              <li><span>Lucro</span><strong>{formatarMoeda(partesReais.lucro)}</strong></li>
+                              {partesReais.folga > 0 && (
+                                <li><span>Folga</span><strong>{formatarMoeda(partesReais.folga)}</strong></li>
+                              )}
+                            </ul>
+                            <p className="formacao-sugerido">
+                              Preço sugerido <strong>{formatarMoeda(vendaSugerida)}</strong>
+                            </p>
+                            <p className="modal-field-hint">
+                              Preço de venda atual: {vendaInformada == null ? '—' : formatarMoeda(vendaInformada)}
+                            </p>
+                            <button type="button" className="produtos-btn-secondary" onClick={aplicarPrecoFormacao}>
+                              Aplicar preço calculado
+                            </button>
+                          </>
+                        )}
+                      </>
+                    )}
+                  </div>
+                )}
               </div>
               <button type="submit" className="modal-submit" disabled={salvando}>
                 {salvando ? 'Salvando...' : produtoEmEdicao ? 'Salvar Alterações' : 'Salvar Produto'}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {modalFormacaoAberto && (
+        <div className="modal-overlay" onClick={() => !salvandoFormacao && !aplicandoEmTodos && setModalFormacaoAberto(false)}>
+          <div className="modal-content modal-formacao" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Formação de Preço</h3>
+              <button
+                type="button"
+                className="modal-close"
+                onClick={() => !salvandoFormacao && !aplicandoEmTodos && setModalFormacaoAberto(false)}
+                aria-label="Fechar"
+                disabled={salvandoFormacao || aplicandoEmTodos}
+              >
+                ×
+              </button>
+            </div>
+            <form onSubmit={handleSalvarFormacao}>
+              <div className="formacao-modal-body">
+                <div className="modal-field">
+                  <label htmlFor="faturamentoMedio">Faturamento médio mensal</label>
+                  <input
+                    id="faturamentoMedio"
+                    type="text"
+                    inputMode="decimal"
+                    value={formacaoRascunho.faturamento_medio}
+                    onChange={(e) => atualizarRascunhoFormacao('faturamento_medio', e.target.value)}
+                  />
+                </div>
+                <div className="modal-field">
+                  <label htmlFor="despesasFixas">Despesas fixas mensais</label>
+                  <input
+                    id="despesasFixas"
+                    type="text"
+                    inputMode="decimal"
+                    value={formacaoRascunho.despesas_fixas_mensais}
+                    onChange={(e) => atualizarRascunhoFormacao('despesas_fixas_mensais', e.target.value)}
+                  />
+                </div>
+                <div className="formacao-percentuais">
+                  <div className="modal-field">
+                    <label htmlFor="impostoSimples">Imposto do Simples Nacional (%)</label>
+                    <input
+                      id="impostoSimples"
+                      type="text"
+                      inputMode="decimal"
+                      value={formacaoRascunho.imposto}
+                      onChange={(e) => atualizarRascunhoFormacao('imposto', e.target.value)}
+                    />
+                  </div>
+                  <div className="modal-field">
+                    <label htmlFor="investimentoPct">Investimento (%)</label>
+                    <input
+                      id="investimentoPct"
+                      type="text"
+                      inputMode="decimal"
+                      value={formacaoRascunho.investimento}
+                      onChange={(e) => atualizarRascunhoFormacao('investimento', e.target.value)}
+                    />
+                  </div>
+                  <div className="modal-field">
+                    <label htmlFor="lucroDesejado">Margem de lucro desejada (%)</label>
+                    <input
+                      id="lucroDesejado"
+                      type="text"
+                      inputMode="decimal"
+                      value={formacaoRascunho.lucro}
+                      onChange={(e) => atualizarRascunhoFormacao('lucro', e.target.value)}
+                    />
+                  </div>
+                </div>
+                <label className="formacao-check">
+                  <input
+                    type="checkbox"
+                    checked={formacaoRascunho.usar_folga}
+                    onChange={(e) => atualizarRascunhoFormacao('usar_folga', e.target.checked)}
+                  />
+                  Usar multiplicador {formatarMultiplicador(MULTIPLICADOR_FOLGA)} (folga para despesas eventuais)
+                </label>
+                {renderAvisoFormacao(formacaoRascunhoCalc)}
+                {renderLinhasComposicao(formacaoRascunhoCalc)}
+              </div>
+              <button
+                type="button"
+                className="formacao-btn-aplicar"
+                onClick={aplicarFormacaoEmTodos}
+                disabled={salvandoFormacao || aplicandoEmTodos || !formacaoRascunhoCalc.ok}
+              >
+                {aplicandoEmTodos ? 'Aplicando...' : 'Aplicar em todos os produtos'}
+              </button>
+              <button type="submit" className="modal-submit" disabled={salvandoFormacao || aplicandoEmTodos || !formacaoRascunhoCalc.ok}>
+                {salvandoFormacao ? 'Salvando...' : 'Salvar'}
               </button>
             </form>
           </div>
@@ -1744,7 +2303,7 @@ ${chunk.join('\n')}
                 )}
                 <div className="modal-etiquetas-filtros-linha">
                   <label className="modal-etiquetas-filtro-artesao">
-                    <span>Artesão</span>
+                    <span>Fornecedor</span>
                     <select
                       value={filtroArtesaoEtiqueta}
                       onChange={(e) => {
@@ -1755,7 +2314,7 @@ ${chunk.join('\n')}
                       <option value="">Todos</option>
                       {artesoes.map((a) => (
                         <option key={a.id} value={String(a.id)}>
-                          {a.nome}
+                          {rotuloNomeFantasia(a.nome_fantasia, a.razao_social, a.nome)}
                         </option>
                       ))}
                     </select>
@@ -1764,7 +2323,7 @@ ${chunk.join('\n')}
                 <div className="modal-etiquetas-input-wrapper">
                   <input
                     type="text"
-                    placeholder="Digite o nome do produto ou leia o código de barras"
+                    placeholder="Nome, nome fantasia ou código de barras"
                     value={buscaEtiqueta}
                     onChange={(e) => setBuscaEtiqueta(e.target.value)}
                     onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), pesquisarProdutoEtiqueta())}
@@ -1805,7 +2364,7 @@ ${chunk.join('\n')}
                             </th>
                             <th>Código</th>
                             <th>Produto</th>
-                            <th>Artesão</th>
+                            <th>Fornecedor</th>
                             <th>Preço</th>
                             <th>Qtd</th>
                             <th></th>
@@ -1838,7 +2397,7 @@ ${chunk.join('\n')}
                                   </td>
                                   <td>{p.codigo_barras}</td>
                                   <td>{p.nome}{p.variacao ? ` (${p.variacao})` : ''}</td>
-                                  <td>{p.artesao_nome || '—'}</td>
+                                  <td>{rotuloNomeFantasia(p.artesao_nome_fantasia, p.artesao_razao_social, p.artesao_nome, '—')}</td>
                                   <td>R$ {p.preco_venda?.toFixed(2).replace('.', ',')}</td>
                                   <td>
                                     <input

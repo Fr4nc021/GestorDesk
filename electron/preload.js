@@ -33,6 +33,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   atualizarValorVariacao: (id, data) => invoke('atualizar-valor-variacao', id, data),
   excluirValorVariacao: (id) => invoke('excluir-valor-variacao', id),
   listarTodosValoresVariacao: () => invoke('listar-todos-valores-variacao'),
+  obterFormacaoPreco: () => invoke('obter-formacao-preco'),
+  salvarFormacaoPreco: (data) => invoke('salvar-formacao-preco', data),
+  aplicarPrecoFormacaoEmTodos: (multiplicador) => invoke('aplicar-preco-formacao-em-todos', multiplicador),
 
   // Vendas
   criarVenda: (data) => invoke('criar-venda', data),
@@ -51,6 +54,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   obterVendaParaEdicao: (id) => invoke('obter-venda-para-edicao', id),
   atualizarVenda: (id, data) => invoke('atualizar-venda', id, data),
   salvarRelatorioPDF: (pdfBase64, filename) => invoke('salvar-relatorio-pdf', pdfBase64, filename),
+  copiarTexto: (texto) => invoke('copiar-texto', texto),
 
   // Estoque
   adicionarEstoque: (produtoId, quantidade, origem) =>
