@@ -4596,6 +4596,16 @@ button.caixa-btn-filtro-periodo {
   padding: 8px 10px;
 }
 
+.relatorios-table-custo-fornecedor {
+  width: max-content;
+  max-width: 100%;
+}
+
+.relatorios-table-custo-fornecedor th,
+.relatorios-table-custo-fornecedor td {
+  padding: 12px 14px;
+}
+
 .relatorios-table th,
 .relatorios-table td {
   padding: 12px 16px;
