@@ -1411,7 +1411,7 @@ export default function Relatorios() {
                 <option value="">Todos os fornecedores</option>
                 {artesoes.filter(artesaoPassaBusca).map(a => (
                   <option key={a.id} value={a.id}>
-                    {rotuloArtesao(a.nome, a.nome_fantasia)}
+                    {rotuloNomeFantasia(a.nome_fantasia, a.razao_social, a.nome)}
                   </option>
                 ))}
               </select>
