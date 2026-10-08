@@ -1162,6 +1162,49 @@
   color: #dc2626;
 }
 
+.modal-content.modal-fornecedor {
+  max-width: 640px;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.modal-fornecedor-secao {
+  font-size: 14px;
+  font-weight: 600;
+  color: #444;
+  margin: 20px 0 12px;
+  padding-top: 4px;
+  border-top: 1px solid #eee;
+}
+
+.modal-fornecedor-secao:first-of-type {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+}
+
+.modal-fornecedor-linha {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.modal-fornecedor-linha-tres {
+  display: grid;
+  grid-template-columns: 1fr 80px;
+  gap: 12px;
+}
+
+.modal-field-cep-status {
+  font-size: 12px;
+  margin-top: 4px;
+  color: #666;
+}
+
+.modal-field-cep-status.erro {
+  color: #c62828;
+}
+
 .artesaos-btn-excluir svg {
   width: 18px;
   height: 18px;

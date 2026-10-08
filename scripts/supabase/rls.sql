@@ -17,7 +17,18 @@ ALTER TABLE public.vendas_itens
 -- Razão social e nome fantasia em artesoes (espelha o SQLite local).
 ALTER TABLE public.artesoes
   ADD COLUMN IF NOT EXISTS razao_social TEXT,
-  ADD COLUMN IF NOT EXISTS nome_fantasia TEXT;
+  ADD COLUMN IF NOT EXISTS nome_fantasia TEXT,
+  ADD COLUMN IF NOT EXISTS tipo_pessoa TEXT,
+  ADD COLUMN IF NOT EXISTS cpf_cnpj TEXT,
+  ADD COLUMN IF NOT EXISTS inscricao_estadual TEXT,
+  ADD COLUMN IF NOT EXISTS email TEXT,
+  ADD COLUMN IF NOT EXISTS cep TEXT,
+  ADD COLUMN IF NOT EXISTS logradouro TEXT,
+  ADD COLUMN IF NOT EXISTS numero TEXT,
+  ADD COLUMN IF NOT EXISTS complemento TEXT,
+  ADD COLUMN IF NOT EXISTS bairro TEXT,
+  ADD COLUMN IF NOT EXISTS cidade TEXT,
+  ADD COLUMN IF NOT EXISTS uf TEXT;
 
 -- Ativar RLS e criar políticas para tabelas sincronizadas
 do $$

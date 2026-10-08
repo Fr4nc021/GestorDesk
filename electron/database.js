@@ -141,6 +141,17 @@ function initDatabase() {
       nome TEXT NOT NULL,
       razao_social TEXT,
       nome_fantasia TEXT,
+      tipo_pessoa TEXT,
+      cpf_cnpj TEXT,
+      inscricao_estadual TEXT,
+      email TEXT,
+      cep TEXT,
+      logradouro TEXT,
+      numero TEXT,
+      complemento TEXT,
+      bairro TEXT,
+      cidade TEXT,
+      uf TEXT,
       telefone_whats TEXT,
       synced INTEGER DEFAULT 0,
       created_at TEXT DEFAULT (datetime('now')),
@@ -367,6 +378,28 @@ try {
   `).run()
 } catch (_) {}
 
+// Dados cadastrais do fornecedor (idempotente).
+try {
+  const colunasFornecedor = [
+    'tipo_pessoa',
+    'cpf_cnpj',
+    'inscricao_estadual',
+    'email',
+    'cep',
+    'logradouro',
+    'numero',
+    'complemento',
+    'bairro',
+    'cidade',
+    'uf',
+  ]
+  for (const coluna of colunasFornecedor) {
+    if (!tabelaTemColuna(db, 'artesoes', coluna)) {
+      db.exec(`ALTER TABLE artesoes ADD COLUMN ${coluna} TEXT`)
+    }
+  }
+} catch (_) {}
+
 // Snapshot de custo unitário no momento da venda (idempotente + backfill).
 try {
   if (!tabelaTemColuna(db, 'vendas_itens', 'preco_custo_unitario')) {
@@ -390,12 +423,65 @@ function markAsSynced(tabela, ids) {
 
 // --- Artesãos ---
 
-function criarArtesao({ nome, telefone_whats = null, razao_social = null, nome_fantasia = null }) {
+function criarArtesao({
+  nome,
+  telefone_whats = null,
+  razao_social = null,
+  nome_fantasia = null,
+  tipo_pessoa = null,
+  cpf_cnpj = null,
+  inscricao_estadual = null,
+  email = null,
+  cep = null,
+  logradouro = null,
+  numero = null,
+  complemento = null,
+  bairro = null,
+  cidade = null,
+  uf = null,
+}) {
   const stmt = db.prepare(`
-    INSERT INTO artesoes (nome, telefone_whats, razao_social, nome_fantasia) VALUES (?, ?, ?, ?)
+    INSERT INTO artesoes (
+      nome, telefone_whats, razao_social, nome_fantasia,
+      tipo_pessoa, cpf_cnpj, inscricao_estadual, email,
+      cep, logradouro, numero, complemento, bairro, cidade, uf
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `)
-  const result = stmt.run(nome, telefone_whats, razao_social, nome_fantasia)
-  return { id: result.lastInsertRowid, nome, telefone_whats, razao_social, nome_fantasia }
+  const result = stmt.run(
+    nome,
+    telefone_whats,
+    razao_social,
+    nome_fantasia,
+    tipo_pessoa,
+    cpf_cnpj,
+    inscricao_estadual,
+    email,
+    cep,
+    logradouro,
+    numero,
+    complemento,
+    bairro,
+    cidade,
+    uf,
+  )
+  return {
+    id: result.lastInsertRowid,
+    nome,
+    telefone_whats,
+    razao_social,
+    nome_fantasia,
+    tipo_pessoa,
+    cpf_cnpj,
+    inscricao_estadual,
+    email,
+    cep,
+    logradouro,
+    numero,
+    complemento,
+    bairro,
+    cidade,
+    uf,
+  }
 }
 
 function listarArtesoes() {
@@ -410,11 +496,64 @@ function listarArtesoes() {
   return stmt.all()
 }
 
-function atualizarArtesao(id, { nome, telefone_whats = null, razao_social = null, nome_fantasia = null }) {
+function atualizarArtesao(
+  id,
+  {
+    nome,
+    telefone_whats = null,
+    razao_social = null,
+    nome_fantasia = null,
+    tipo_pessoa = null,
+    cpf_cnpj = null,
+    inscricao_estadual = null,
+    email = null,
+    cep = null,
+    logradouro = null,
+    numero = null,
+    complemento = null,
+    bairro = null,
+    cidade = null,
+    uf = null,
+  },
+) {
   const stmt = db.prepare(`
-    UPDATE artesoes SET nome = ?, telefone_whats = ?, razao_social = ?, nome_fantasia = ?, sync_status = 'pending' WHERE id = ?
+    UPDATE artesoes SET
+      nome = ?,
+      telefone_whats = ?,
+      razao_social = ?,
+      nome_fantasia = ?,
+      tipo_pessoa = ?,
+      cpf_cnpj = ?,
+      inscricao_estadual = ?,
+      email = ?,
+      cep = ?,
+      logradouro = ?,
+      numero = ?,
+      complemento = ?,
+      bairro = ?,
+      cidade = ?,
+      uf = ?,
+      sync_status = 'pending'
+    WHERE id = ?
   `)
-  stmt.run(nome, telefone_whats, razao_social, nome_fantasia, id)
+  stmt.run(
+    nome,
+    telefone_whats,
+    razao_social,
+    nome_fantasia,
+    tipo_pessoa,
+    cpf_cnpj,
+    inscricao_estadual,
+    email,
+    cep,
+    logradouro,
+    numero,
+    complemento,
+    bairro,
+    cidade,
+    uf,
+    id,
+  )
   return { id }
 }
 
