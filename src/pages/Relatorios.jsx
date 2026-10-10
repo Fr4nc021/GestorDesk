@@ -4,6 +4,11 @@ import { jsPDF } from 'jspdf'
 import { recoverInputFocus } from '../utils/focusRecovery'
 import { rotuloArtesao, rotuloNomeFantasia, textoInclui } from '../utils/artesao'
 import {
+  calcularPeriodoPadraoRelatorio,
+  criarRelatoriosPeriodoPadrao,
+  normalizarRelatoriosPeriodoPadrao,
+} from '../utils/relatoriosPeriodo'
+import {
   XAxis,
   YAxis,
   CartesianGrid,
@@ -271,11 +276,14 @@ function GraficoVendasPorDiaRelatorio({ dadosGrafico, gradientId }) {
 export default function Relatorios() {
   const navigate = useNavigate()
   const hoje = hojeISO()
+  const periodoPadraoRef = useRef(criarRelatoriosPeriodoPadrao())
+  const ignorarPeriodoPadraoRef = useRef(false)
   const [aba, setAba] = useState(TAB_GERAL)
+  const abaRef = useRef(TAB_GERAL)
+  abaRef.current = aba
   const [dataInicio, setDataInicio] = useState(() => {
-    const d = new Date()
-    d.setMonth(d.getMonth() - 1)
-    return d.toLocaleDateString('sv-SE', { timeZone: TZ_BRASILIA })
+    const periodo = calcularPeriodoPadraoRelatorio(TAB_GERAL, criarRelatoriosPeriodoPadrao(), hojeISO())
+    return periodo.dataInicio
   })
   const [dataFim, setDataFim] = useState(hoje)
   const [artesaoId, setArtesaoId] = useState(null)
@@ -323,6 +331,48 @@ export default function Relatorios() {
     return textoInclui(termo, artesao.nome, artesao.nome_fantasia)
   }
 
+  function aplicarPeriodoPadraoDaAba(abaId) {
+    const { dataInicio: ini, dataFim: fim } = calcularPeriodoPadraoRelatorio(
+      abaId,
+      periodoPadraoRef.current,
+      hoje
+    )
+    setDataInicio(ini)
+    setDataFim(fim)
+  }
+
+  function mudarAbaRelatorio(abaId) {
+    setAba(abaId)
+    aplicarPeriodoPadraoDaAba(abaId)
+  }
+
+  useEffect(() => {
+    let cancelled = false
+    async function carregarPeriodoPadrao() {
+      if (!window.electronAPI?.obterRelatoriosPeriodoPadrao) return
+      try {
+        const cfg = await window.electronAPI.obterRelatoriosPeriodoPadrao()
+        if (cancelled) return
+        periodoPadraoRef.current = normalizarRelatoriosPeriodoPadrao(cfg)
+        if (!ignorarPeriodoPadraoRef.current) {
+          const { dataInicio: ini, dataFim: fim } = calcularPeriodoPadraoRelatorio(
+            abaRef.current,
+            periodoPadraoRef.current,
+            hojeISO()
+          )
+          setDataInicio(ini)
+          setDataFim(fim)
+        }
+      } catch (err) {
+        console.error('[Relatórios] Erro ao carregar período padrão:', err)
+      }
+    }
+    void carregarPeriodoPadrao()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   const carregarListaVendasModalArtesao = useCallback(async (inicioPeriodo, fimPeriodo, idArtesao) => {
     if (!window.electronAPI?.listarVendasPorPeriodoEArtesao) return
     setVendasArtesaoCarregando(true)
@@ -366,6 +416,7 @@ export default function Relatorios() {
     } catch {
       void 0
     }
+    ignorarPeriodoPadraoRef.current = true
     if (data.aba) setAba(data.aba)
     if (data.dataInicio) setDataInicio(data.dataInicio)
     if (data.dataFim) setDataFim(data.dataFim)
@@ -1360,7 +1411,7 @@ export default function Relatorios() {
             key={t.id}
             type="button"
             className={`relatorios-tab ${aba === t.id ? 'active' : ''}`}
-            onClick={() => setAba(t.id)}
+            onClick={() => mudarAbaRelatorio(t.id)}
           >
             {t.label}
           </button>

@@ -36,6 +36,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   obterFormacaoPreco: () => invoke('obter-formacao-preco'),
   salvarFormacaoPreco: (data) => invoke('salvar-formacao-preco', data),
   aplicarPrecoFormacaoEmTodos: (multiplicador) => invoke('aplicar-preco-formacao-em-todos', multiplicador),
+  obterRelatoriosPeriodoPadrao: () => invoke('obter-relatorios-periodo-padrao'),
+  salvarRelatoriosPeriodoPadrao: (data) => invoke('salvar-relatorios-periodo-padrao', data),
 
   // Vendas
   criarVenda: (data) => invoke('criar-venda', data),

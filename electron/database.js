@@ -1670,6 +1670,64 @@ function salvarFormacaoPreco(data) {
   return obterFormacaoPreco()
 }
 
+const RELATORIOS_PERIODO_CHAVE = 'relatorios_periodo_padrao'
+
+const RELATORIOS_ABAS_PERIODO_IDS = ['geral', 'artesao', 'lucro', 'mais_vendidos', 'produtos', 'valor']
+
+function itemRelatorioPeriodoPadraoDb() {
+  return { modo: 'mes_anterior', dias: 30 }
+}
+
+function relatoriosPeriodoPadraoInicialDb() {
+  return Object.fromEntries(RELATORIOS_ABAS_PERIODO_IDS.map((id) => [id, itemRelatorioPeriodoPadraoDb()]))
+}
+
+function normalizarModoRelatorioDb(modo) {
+  if (modo === 'inicio_mes' || modo === 'dias_atras' || modo === 'mes_anterior') return modo
+  return 'mes_anterior'
+}
+
+function normalizarDiasRelatorioDb(dias) {
+  const n = parseInt(String(dias ?? ''), 10)
+  if (!Number.isFinite(n) || n < 0) return 30
+  return Math.min(n, 3660)
+}
+
+function normalizarRelatoriosPeriodoPadraoDb(raw) {
+  const base = relatoriosPeriodoPadraoInicialDb()
+  if (!raw || typeof raw !== 'object') return base
+  for (const id of RELATORIOS_ABAS_PERIODO_IDS) {
+    const item = raw[id]
+    if (!item || typeof item !== 'object') continue
+    base[id] = {
+      modo: normalizarModoRelatorioDb(item.modo),
+      dias: normalizarDiasRelatorioDb(item.dias),
+    }
+  }
+  return base
+}
+
+function obterRelatoriosPeriodoPadrao() {
+  garantirFormacaoPrecoPadrao()
+  const row = db.prepare('SELECT valor FROM configuracoes WHERE chave = ?').get(RELATORIOS_PERIODO_CHAVE)
+  if (!row?.valor) return relatoriosPeriodoPadraoInicialDb()
+  try {
+    return normalizarRelatoriosPeriodoPadraoDb(JSON.parse(row.valor))
+  } catch {
+    return relatoriosPeriodoPadraoInicialDb()
+  }
+}
+
+function salvarRelatoriosPeriodoPadrao(data) {
+  garantirFormacaoPrecoPadrao()
+  const normalizado = normalizarRelatoriosPeriodoPadraoDb(data)
+  db.prepare(`
+    INSERT INTO configuracoes (chave, valor) VALUES (?, ?)
+    ON CONFLICT(chave) DO UPDATE SET valor = excluded.valor
+  `).run(RELATORIOS_PERIODO_CHAVE, JSON.stringify(normalizado))
+  return normalizado
+}
+
 function aplicarPrecoFormacaoEmTodos(multiplicador) {
   const mult = Number(multiplicador)
   if (!Number.isFinite(mult) || mult <= 0) throw new Error('Multiplicador inválido.')
@@ -1760,4 +1818,6 @@ module.exports = {
   obterFormacaoPreco,
   salvarFormacaoPreco,
   aplicarPrecoFormacaoEmTodos,
+  obterRelatoriosPeriodoPadrao,
+  salvarRelatoriosPeriodoPadrao,
 }
