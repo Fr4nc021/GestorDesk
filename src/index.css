@@ -268,6 +268,58 @@
   color: #dc2626;
 }
 
+.fiscal-secao {
+  font-size: 13px;
+  font-weight: 700;
+  color: #444;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin: 18px 0 8px;
+}
+
+.fiscal-form .fiscal-secao:first-child {
+  margin-top: 0;
+}
+
+.fiscal-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 0 16px;
+}
+
+.fiscal-produto-st {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: #333;
+  margin-bottom: 12px;
+  cursor: pointer;
+}
+
+.produto-tag-proprio {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: #ecfdf5;
+  color: #047857;
+  font-size: 11px;
+  font-weight: 600;
+  vertical-align: middle;
+}
+
+.fiscal-mostrar-csc {
+  margin-top: 6px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: #555;
+  font-size: 12px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
 .usuarios-local-lista {
   display: flex;
   flex-direction: column;
@@ -1244,7 +1296,7 @@
 
 .modal-fornecedor-linha-tres {
   display: grid;
-  grid-template-columns: 1fr 80px;
+  grid-template-columns: 1fr 80px 110px;
   gap: 12px;
 }
 

@@ -19,5 +19,6 @@ export async function buscarCep(cep) {
     bairro: data.bairro || '',
     cidade: data.localidade || '',
     uf: data.uf || '',
+    ibge: data.ibge || '',
   }
 }

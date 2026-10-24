@@ -381,6 +381,11 @@ export default function PDV() {
           },
         ]
 
+    // Com várias formas, o que passa do total volta como troco.
+    const trocoVenda = formasSelecionadas.length > 1
+      ? Math.max(pagamentos.reduce((acc, pg) => acc + pg.valor, 0) - total, 0)
+      : troco
+
     try {
       const payload = {
         itens: itens.map((i) => ({
@@ -391,6 +396,8 @@ export default function PDV() {
         forma_pagamento: formaPrincipal,
         valor_total: total,
         pagamentos,
+        desconto: Math.max(subtotal - total, 0),
+        troco: trocoVenda,
       }
       if (vendaEdicaoId != null) {
         await window.electronAPI.atualizarVenda(vendaEdicaoId, payload)

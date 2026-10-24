@@ -92,6 +92,8 @@ function limparFormularioFornecedor(setters) {
 
     setUf,
 
+    setCodigoMunicipio,
+
     setTelefoneWhatsapp,
 
     setRegiaoTelefone,
@@ -127,6 +129,8 @@ function limparFormularioFornecedor(setters) {
   setCidade('')
 
   setUf('')
+
+  setCodigoMunicipio('')
 
   setTelefoneWhatsapp('')
 
@@ -182,6 +186,8 @@ export default function Artesaos() {
 
   const [uf, setUf] = useState('')
 
+  const [codigoMunicipio, setCodigoMunicipio] = useState('')
+
   const [cepCarregando, setCepCarregando] = useState(false)
 
   const [cepErro, setCepErro] = useState('')
@@ -221,6 +227,8 @@ export default function Artesaos() {
     setCidade,
 
     setUf,
+
+    setCodigoMunicipio,
 
     setTelefoneWhatsapp,
 
@@ -331,6 +339,8 @@ export default function Artesaos() {
     setCidade(artesao.cidade || '')
 
     setUf(artesao.uf || '')
+
+    setCodigoMunicipio(artesao.codigo_municipio || '')
 
     setCepErro('')
 
@@ -444,6 +454,8 @@ export default function Artesaos() {
 
     setCep(formatarCep(e.target.value))
 
+    setCodigoMunicipio('')
+
     setCepErro('')
 
   }
@@ -481,6 +493,8 @@ export default function Artesaos() {
       setCidade(endereco.cidade)
 
       setUf(endereco.uf)
+
+      setCodigoMunicipio(endereco.ibge)
 
     } catch (err) {
 
@@ -567,6 +581,8 @@ export default function Artesaos() {
         cidade: cidade.trim() || null,
 
         uf: uf || null,
+
+        codigo_municipio: codigoMunicipio.replace(/\D/g, '') || null,
 
       }
 
@@ -1211,6 +1227,30 @@ export default function Artesaos() {
                     ))}
 
                   </select>
+
+                </div>
+
+                <div className="modal-field">
+
+                  <label htmlFor="codigoMunicipio">Código IBGE</label>
+
+                  <input
+
+                    id="codigoMunicipio"
+
+                    type="text"
+
+                    inputMode="numeric"
+
+                    maxLength={7}
+
+                    value={codigoMunicipio}
+
+                    onChange={(e) => setCodigoMunicipio(e.target.value.replace(/\D/g, ''))}
+
+                    placeholder="Preenchido pelo CEP"
+
+                  />
 
                 </div>
 

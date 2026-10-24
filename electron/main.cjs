@@ -123,6 +123,8 @@ const {
   aplicarPrecoFormacaoEmTodos,
   obterRelatoriosPeriodoPadrao,
   salvarRelatoriosPeriodoPadrao,
+  obterConfigFiscal,
+  salvarConfigFiscal,
 } = require('./database')
 
 // CLI: criar usuário e sair — node electron/main.cjs não funciona; use: npx electron . criar-usuario LOGIN SENHA
@@ -233,6 +235,8 @@ ipcMain.handle('salvar-formacao-preco', (_, data) => salvarFormacaoPreco(data))
 ipcMain.handle('aplicar-preco-formacao-em-todos', (_, multiplicador) => aplicarPrecoFormacaoEmTodos(multiplicador))
 ipcMain.handle('obter-relatorios-periodo-padrao', () => obterRelatoriosPeriodoPadrao())
 ipcMain.handle('salvar-relatorios-periodo-padrao', (_, data) => salvarRelatoriosPeriodoPadrao(data))
+ipcMain.handle('obter-config-fiscal', () => obterConfigFiscal())
+ipcMain.handle('salvar-config-fiscal', (_, data) => salvarConfigFiscal(data))
 
 ipcMain.handle('criar-venda', (_, data) => criarVenda(data))
 ipcMain.handle('listar-vendas', () => listarVendas())

@@ -408,6 +408,60 @@ try {
   backfillPrecoCustoUnitarioVendasItens()
 } catch (_) {}
 
+// --- Fiscal (NFC-e / NF-e) ---
+// Regras do manual do contador: produto consignado vende com CFOP 5115, próprio com 5102.
+// Peças cadastradas antes desta versão eram todas consignadas, por isso o padrão.
+
+const TIPOS_POSSE = ['consignado', 'proprio']
+
+// Dados fiscais do produto (idempotente).
+try {
+  const colunasFiscaisProduto = [
+    ['tipo_posse', "TEXT DEFAULT 'consignado'"],
+    ['ncm', 'TEXT'],
+    ['cest', 'TEXT'],
+    ['unidade', "TEXT DEFAULT 'UN'"],
+    ['origem', "TEXT DEFAULT '0'"],
+    ['icms_st', 'INTEGER DEFAULT 0'],
+  ]
+  for (const [coluna, tipo] of colunasFiscaisProduto) {
+    if (!tabelaTemColuna(db, 'produtos', coluna)) {
+      db.exec(`ALTER TABLE produtos ADD COLUMN ${coluna} ${tipo}`)
+    }
+  }
+} catch (_) {}
+
+// Código IBGE do município do fornecedor, exigido nas notas de devolução (idempotente).
+try {
+  if (!tabelaTemColuna(db, 'artesoes', 'codigo_municipio')) {
+    db.exec(`ALTER TABLE artesoes ADD COLUMN codigo_municipio TEXT`)
+  }
+} catch (_) {}
+
+// Desconto e troco gravados na venda; a NFC-e exige o desconto rateado por item (idempotente).
+// Na primeira vez, o desconto das vendas antigas é deduzido de subtotal - valor_total.
+try {
+  if (!tabelaTemColuna(db, 'vendas', 'desconto')) {
+    db.exec(`ALTER TABLE vendas ADD COLUMN desconto REAL DEFAULT 0`)
+    db.exec(`
+      UPDATE vendas
+      SET desconto = ROUND((
+        SELECT COALESCE(SUM(vi.preco_unitario * vi.quantidade), 0)
+        FROM vendas_itens vi
+        WHERE vi.venda_id = vendas.id AND vi.deleted_at IS NULL
+      ) - valor_total, 2)
+      WHERE ROUND((
+        SELECT COALESCE(SUM(vi.preco_unitario * vi.quantidade), 0)
+        FROM vendas_itens vi
+        WHERE vi.venda_id = vendas.id AND vi.deleted_at IS NULL
+      ) - valor_total, 2) > 0
+    `)
+  }
+  if (!tabelaTemColuna(db, 'vendas', 'troco')) {
+    db.exec(`ALTER TABLE vendas ADD COLUMN troco REAL DEFAULT 0`)
+  }
+} catch (_) {}
+
 function getPendingRecordsForSync(tabela) {
   if (!tabelaTemColuna(db, tabela, 'sync_status')) {
     return db.prepare(`SELECT * FROM ${tabela}`).all()
@@ -439,13 +493,14 @@ function criarArtesao({
   bairro = null,
   cidade = null,
   uf = null,
+  codigo_municipio = null,
 }) {
   const stmt = db.prepare(`
     INSERT INTO artesoes (
       nome, telefone_whats, razao_social, nome_fantasia,
       tipo_pessoa, cpf_cnpj, inscricao_estadual, email,
-      cep, logradouro, numero, complemento, bairro, cidade, uf
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      cep, logradouro, numero, complemento, bairro, cidade, uf, codigo_municipio
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `)
   const result = stmt.run(
     nome,
@@ -463,6 +518,7 @@ function criarArtesao({
     bairro,
     cidade,
     uf,
+    codigo_municipio,
   )
   return {
     id: result.lastInsertRowid,
@@ -481,6 +537,7 @@ function criarArtesao({
     bairro,
     cidade,
     uf,
+    codigo_municipio,
   }
 }
 
@@ -514,6 +571,7 @@ function atualizarArtesao(
     bairro = null,
     cidade = null,
     uf = null,
+    codigo_municipio = null,
   },
 ) {
   const stmt = db.prepare(`
@@ -533,6 +591,7 @@ function atualizarArtesao(
       bairro = ?,
       cidade = ?,
       uf = ?,
+      codigo_municipio = ?,
       sync_status = 'pending'
     WHERE id = ?
   `)
@@ -552,6 +611,7 @@ function atualizarArtesao(
     bairro,
     cidade,
     uf,
+    codigo_municipio,
     id,
   )
   return { id }
@@ -594,7 +654,38 @@ function arredondarPrecosVendaExistentes() {
   gravar()
 }
 
-function criarProduto({ nome, variacao = null, preco_custo = 0, preco_venda = 0, estoque = 0, artesao_id }) {
+/** Normaliza os campos fiscais do produto; campos ausentes ficam `undefined` (não alteram no update). */
+function normalizarFiscalProduto(dados = {}) {
+  const fiscal = {}
+  if (dados.tipo_posse !== undefined) {
+    if (!TIPOS_POSSE.includes(dados.tipo_posse)) throw new Error('Tipo de produto inválido.')
+    fiscal.tipo_posse = dados.tipo_posse
+  }
+  if (dados.ncm !== undefined) {
+    const ncm = String(dados.ncm ?? '').replace(/\D/g, '')
+    if (ncm && ncm.length !== 8) throw new Error('O NCM deve ter 8 dígitos.')
+    fiscal.ncm = ncm || null
+  }
+  if (dados.cest !== undefined) {
+    const cest = String(dados.cest ?? '').replace(/\D/g, '')
+    if (cest && cest.length !== 7) throw new Error('O CEST deve ter 7 dígitos.')
+    fiscal.cest = cest || null
+  }
+  if (dados.unidade !== undefined) {
+    fiscal.unidade = String(dados.unidade ?? '').trim().toUpperCase().slice(0, 6) || 'UN'
+  }
+  if (dados.origem !== undefined) {
+    const origem = String(dados.origem ?? '0').trim()
+    if (!/^[0-8]$/.test(origem)) throw new Error('Origem da mercadoria inválida.')
+    fiscal.origem = origem
+  }
+  if (dados.icms_st !== undefined) {
+    fiscal.icms_st = dados.icms_st ? 1 : 0
+  }
+  return fiscal
+}
+
+function criarProduto({ nome, variacao = null, preco_custo = 0, preco_venda = 0, estoque = 0, artesao_id, ...resto }) {
   let codigo_barras = gerarCodigoBarras()
   const checkStmt = db.prepare('SELECT id FROM produtos WHERE codigo_barras = ?')
 
@@ -602,12 +693,39 @@ function criarProduto({ nome, variacao = null, preco_custo = 0, preco_venda = 0,
     codigo_barras = gerarCodigoBarras()
   }
 
+  const fiscal = {
+    tipo_posse: 'consignado',
+    ncm: null,
+    cest: null,
+    unidade: 'UN',
+    origem: '0',
+    icms_st: 0,
+    ...normalizarFiscalProduto(resto),
+  }
+
   const stmt = db.prepare(`
-    INSERT INTO produtos (nome, variacao, preco_custo, preco_venda, estoque, codigo_barras, artesao_id)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO produtos (
+      nome, variacao, preco_custo, preco_venda, estoque, codigo_barras, artesao_id,
+      tipo_posse, ncm, cest, unidade, origem, icms_st
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `)
   const venda = arredondarPrecoVenda(preco_venda)
-  const result = stmt.run(nome, variacao, preco_custo, venda, estoque, codigo_barras, artesao_id)
+  const result = stmt.run(
+    nome,
+    variacao,
+    preco_custo,
+    venda,
+    estoque,
+    codigo_barras,
+    artesao_id,
+    fiscal.tipo_posse,
+    fiscal.ncm,
+    fiscal.cest,
+    fiscal.unidade,
+    fiscal.origem,
+    fiscal.icms_st,
+  )
   return {
     id: result.lastInsertRowid,
     nome,
@@ -617,6 +735,7 @@ function criarProduto({ nome, variacao = null, preco_custo = 0, preco_venda = 0,
     estoque,
     codigo_barras,
     artesao_id,
+    ...fiscal,
   }
 }
 
@@ -632,13 +751,16 @@ function listarProdutos() {
   return stmt.all()
 }
 
-function atualizarProduto(id, { nome, variacao = null, preco_custo = 0, preco_venda = 0, estoque = 0, artesao_id }) {
+function atualizarProduto(id, { nome, variacao = null, preco_custo = 0, preco_venda = 0, estoque = 0, artesao_id, ...resto }) {
   const venda = arredondarPrecoVenda(preco_venda)
+  const fiscal = normalizarFiscalProduto(resto)
+  const colunasFiscais = Object.keys(fiscal)
+  const setFiscal = colunasFiscais.map((c) => `, ${c} = ?`).join('')
   const stmt = db.prepare(`
-    UPDATE produtos SET nome = ?, variacao = ?, preco_custo = ?, preco_venda = ?, estoque = ?, artesao_id = ?, sync_status = 'pending'
+    UPDATE produtos SET nome = ?, variacao = ?, preco_custo = ?, preco_venda = ?, estoque = ?, artesao_id = ?${setFiscal}, sync_status = 'pending'
     WHERE id = ?
   `)
-  stmt.run(nome, variacao, preco_custo, venda, estoque, artesao_id, id)
+  stmt.run(nome, variacao, preco_custo, venda, estoque, artesao_id, ...colunasFiscais.map((c) => fiscal[c]), id)
   return { id }
 }
 
@@ -821,12 +943,20 @@ function assertUmaLinhaProdutoEstoque(result, produtoId, contexto) {
   }
 }
 
-function criarVenda({ itens, forma_pagamento, valor_total: valorTotalInformado, pagamentos }) {
+/** Valor em R$ não negativo com 2 casas (desconto, troco). */
+function valorMonetario(valor) {
+  const n = Number(valor)
+  if (!Number.isFinite(n) || n <= 0) return 0
+  return Math.round(n * 100) / 100
+}
+
+function criarVenda({ itens, forma_pagamento, valor_total: valorTotalInformado, pagamentos, desconto = 0, troco = 0 }) {
   const subtotalItens = itens.reduce((acc, item) => acc + item.quantidade * item.preco_unitario, 0)
   const valor_total = valorTotalInformado != null ? valorTotalInformado : subtotalItens
 
   const insertVenda = db.prepare(`
-    INSERT INTO vendas (data, valor_total, forma_pagamento) VALUES (datetime('now', 'localtime'), ?, ?)
+    INSERT INTO vendas (data, valor_total, forma_pagamento, desconto, troco)
+    VALUES (datetime('now', 'localtime'), ?, ?, ?, ?)
   `)
   const insertItem = db.prepare(`
     INSERT INTO vendas_itens (venda_id, produto_id, quantidade, preco_unitario, preco_custo_unitario)
@@ -845,7 +975,7 @@ function criarVenda({ itens, forma_pagamento, valor_total: valorTotalInformado, 
   `)
 
   const criarVendaComItens = db.transaction(() => {
-    const result = insertVenda.run(valor_total, forma_pagamento)
+    const result = insertVenda.run(valor_total, forma_pagamento, valorMonetario(desconto), valorMonetario(troco))
     const vendaId = result.lastInsertRowid
 
     for (const item of itens) {
@@ -1107,7 +1237,7 @@ function excluirVenda(id) {
 function obterVendaParaEdicao(vendaId) {
   const v = db
     .prepare(
-      `SELECT id, data, valor_total, forma_pagamento FROM vendas WHERE id = ? AND deleted_at IS NULL`,
+      `SELECT id, data, valor_total, forma_pagamento, desconto, troco FROM vendas WHERE id = ? AND deleted_at IS NULL`,
     )
     .get(vendaId)
   if (!v) return null
@@ -1139,7 +1269,10 @@ function obterVendaParaEdicao(vendaId) {
  * Atualiza itens e pagamentos da venda, mantendo `data` e o id originais.
  * Ajusta estoque: devolve quantidades antigas e baixa as novas.
  */
-function atualizarVenda(vendaId, { itens, forma_pagamento, valor_total: valorTotalInformado, pagamentos }) {
+function atualizarVenda(
+  vendaId,
+  { itens, forma_pagamento, valor_total: valorTotalInformado, pagamentos, desconto = 0, troco = 0 },
+) {
   const vendaRow = db.prepare('SELECT id, data FROM vendas WHERE id = ? AND deleted_at IS NULL').get(vendaId)
   if (!vendaRow) throw new Error('Venda não encontrada.')
 
@@ -1175,7 +1308,7 @@ function atualizarVenda(vendaId, { itens, forma_pagamento, valor_total: valorTot
     VALUES (?, ?, ?)
   `)
   const updateVenda = db.prepare(`
-    UPDATE vendas SET valor_total = ?, forma_pagamento = ?, sync_status = 'pending' WHERE id = ?
+    UPDATE vendas SET valor_total = ?, forma_pagamento = ?, desconto = ?, troco = ?, sync_status = 'pending' WHERE id = ?
   `)
   const getItensAtivos = db.prepare(
     'SELECT produto_id, quantidade FROM vendas_itens WHERE venda_id = ? AND deleted_at IS NULL',
@@ -1218,7 +1351,7 @@ function atualizarVenda(vendaId, { itens, forma_pagamento, valor_total: valorTot
       insertPagamento.run(vendaId, pg.forma, pg.valor != null ? pg.valor : 0)
     }
 
-    updateVenda.run(valor_total, forma_pagamento, vendaId)
+    updateVenda.run(valor_total, forma_pagamento, valorMonetario(desconto), valorMonetario(troco), vendaId)
   })
 
   tx()
@@ -1751,6 +1884,115 @@ function aplicarPrecoFormacaoEmTodos(multiplicador) {
   return { atualizados: produtos.length }
 }
 
+// --- Configuração fiscal do emitente ---
+// Fica em `configuracoes` (chaves fiscal_*), local deste computador.
+
+const CONFIG_FISCAL_PADRAO = {
+  cnpj: '',
+  inscricao_estadual: '',
+  razao_social: '',
+  nome_fantasia: '',
+  cep: '',
+  logradouro: '',
+  numero: '',
+  complemento: '',
+  bairro: '',
+  municipio: '',
+  codigo_municipio: '',
+  uf: '',
+  telefone: '',
+  email: '',
+  crt: '1',
+  ambiente: '2',
+  serie_nfce: '1',
+  proximo_numero_nfce: '1',
+  serie_nfe: '1',
+  proximo_numero_nfe: '1',
+  csc_id: '',
+  csc: '',
+}
+
+const CONFIG_FISCAL_PREFIXO = 'fiscal_'
+
+function obterConfigFiscal() {
+  garantirFormacaoPrecoPadrao()
+  const rows = db
+    .prepare(`SELECT chave, valor FROM configuracoes WHERE chave LIKE '${CONFIG_FISCAL_PREFIXO}%'`)
+    .all()
+  const salvo = Object.fromEntries(rows.map((r) => [r.chave.slice(CONFIG_FISCAL_PREFIXO.length), r.valor]))
+  const config = {}
+  for (const [campo, padrao] of Object.entries(CONFIG_FISCAL_PADRAO)) {
+    config[campo] = salvo[campo] ?? padrao
+  }
+  return config
+}
+
+function somenteDigitos(valor) {
+  return String(valor ?? '').replace(/\D/g, '')
+}
+
+function inteiroPositivoConfig(valor, nome) {
+  const n = parseInt(somenteDigitos(valor), 10)
+  if (!Number.isFinite(n) || n < 1) throw new Error(`Informe ${nome}.`)
+  return String(n)
+}
+
+function salvarConfigFiscal(data) {
+  garantirFormacaoPrecoPadrao()
+  const texto = (campo) => String(data?.[campo] ?? '').trim()
+
+  const cnpj = somenteDigitos(data?.cnpj)
+  if (cnpj && cnpj.length !== 14) throw new Error('O CNPJ deve ter 14 dígitos.')
+  const cep = somenteDigitos(data?.cep)
+  if (cep && cep.length !== 8) throw new Error('O CEP deve ter 8 dígitos.')
+  const codigoMunicipio = somenteDigitos(data?.codigo_municipio)
+  if (codigoMunicipio && codigoMunicipio.length !== 7) {
+    throw new Error('O código IBGE do município deve ter 7 dígitos.')
+  }
+  const uf = texto('uf').toUpperCase()
+  if (uf && !/^[A-Z]{2}$/.test(uf)) throw new Error('UF inválida.')
+  const crt = texto('crt') || '1'
+  if (!['1', '2', '3', '4'].includes(crt)) throw new Error('Regime tributário (CRT) inválido.')
+  const ambiente = texto('ambiente') || '2'
+  if (!['1', '2'].includes(ambiente)) throw new Error('Ambiente inválido.')
+
+  const registro = {
+    cnpj,
+    inscricao_estadual: somenteDigitos(data?.inscricao_estadual),
+    razao_social: texto('razao_social'),
+    nome_fantasia: texto('nome_fantasia'),
+    cep,
+    logradouro: texto('logradouro'),
+    numero: texto('numero'),
+    complemento: texto('complemento'),
+    bairro: texto('bairro'),
+    municipio: texto('municipio'),
+    codigo_municipio: codigoMunicipio,
+    uf,
+    telefone: somenteDigitos(data?.telefone),
+    email: texto('email'),
+    crt,
+    ambiente,
+    serie_nfce: inteiroPositivoConfig(data?.serie_nfce, 'a série da NFC-e'),
+    proximo_numero_nfce: inteiroPositivoConfig(data?.proximo_numero_nfce, 'o próximo número da NFC-e'),
+    serie_nfe: inteiroPositivoConfig(data?.serie_nfe, 'a série da NF-e'),
+    proximo_numero_nfe: inteiroPositivoConfig(data?.proximo_numero_nfe, 'o próximo número da NF-e'),
+    csc_id: somenteDigitos(data?.csc_id),
+    csc: texto('csc'),
+  }
+
+  const upsert = db.prepare(`
+    INSERT INTO configuracoes (chave, valor) VALUES (?, ?)
+    ON CONFLICT(chave) DO UPDATE SET valor = excluded.valor
+  `)
+  db.transaction(() => {
+    for (const [campo, valor] of Object.entries(registro)) {
+      upsert.run(CONFIG_FISCAL_PREFIXO + campo, valor)
+    }
+  })()
+  return obterConfigFiscal()
+}
+
 function criarUsuario(login, senha) {
   const loginTrim = String(login).trim()
   if (!loginTrim || !senha) throw new Error('Login e senha são obrigatórios.')
@@ -1820,4 +2062,6 @@ module.exports = {
   aplicarPrecoFormacaoEmTodos,
   obterRelatoriosPeriodoPadrao,
   salvarRelatoriosPeriodoPadrao,
+  obterConfigFiscal,
+  salvarConfigFiscal,
 }

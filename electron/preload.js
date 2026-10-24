@@ -39,6 +39,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   obterRelatoriosPeriodoPadrao: () => invoke('obter-relatorios-periodo-padrao'),
   salvarRelatoriosPeriodoPadrao: (data) => invoke('salvar-relatorios-periodo-padrao', data),
 
+  // Fiscal (emitente da NFC-e / NF-e)
+  obterConfigFiscal: () => invoke('obter-config-fiscal'),
+  salvarConfigFiscal: (data) => invoke('salvar-config-fiscal', data),
+
   // Vendas
   criarVenda: (data) => invoke('criar-venda', data),
   listarVendas: () => invoke('listar-vendas'),
