@@ -147,6 +147,9 @@ const {
   listarNotasEntrada,
   listarItensNotaEntrada,
   excluirNotaEntrada,
+  registrarDevolucaoArtesao,
+  listarDevolucoesArtesao,
+  cancelarDevolucaoArtesao,
 } = require('./database')
 
 // CLI: criar usuário e sair — node electron/main.cjs não funciona; use: npx electron . criar-usuario LOGIN SENHA
@@ -265,6 +268,9 @@ ipcMain.handle('importar-nota-entrada', (_, data) => importarNotaEntrada(data))
 ipcMain.handle('listar-notas-entrada', () => listarNotasEntrada())
 ipcMain.handle('listar-itens-nota-entrada', (_, notaId) => listarItensNotaEntrada(notaId))
 ipcMain.handle('excluir-nota-entrada', (_, id) => excluirNotaEntrada(id))
+ipcMain.handle('registrar-devolucao-artesao', (_, dados) => registrarDevolucaoArtesao(dados))
+ipcMain.handle('listar-devolucoes-artesao', (_, notaEntradaId) => listarDevolucoesArtesao(notaEntradaId ?? null))
+ipcMain.handle('cancelar-devolucao-artesao', (_, id) => cancelarDevolucaoArtesao(id))
 
 ipcMain.handle('criar-venda', (_, data) => criarVenda(data))
 ipcMain.handle('listar-vendas', () => listarVendas())

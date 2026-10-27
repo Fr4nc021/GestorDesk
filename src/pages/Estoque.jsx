@@ -28,6 +28,8 @@ const ORIGENS_MOVIMENTACAO = {
   estorno: 'Estorno',
   nfe_entrada: 'Nota de entrada',
   estorno_nfe: 'Estorno de nota',
+  devolucao_artesao: 'Devolução ao artesão',
+  estorno_devolucao: 'Estorno de devolução',
 }
 
 function nomeProdutoComVariacao(produto) {

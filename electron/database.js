@@ -503,7 +503,41 @@ db.exec(`
     FOREIGN KEY (nota_id) REFERENCES notas_entrada(id),
     FOREIGN KEY (produto_id) REFERENCES produtos(id)
   );
+
+  CREATE TABLE IF NOT EXISTS devolucoes_artesao (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nota_entrada_id INTEGER NOT NULL,
+    artesao_id INTEGER,
+    data TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    valor_total REAL NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'aguardando_nf',
+    observacao TEXT,
+    created_at TEXT DEFAULT (datetime('now', 'localtime')),
+    deleted_at TEXT,
+    FOREIGN KEY (nota_entrada_id) REFERENCES notas_entrada(id),
+    FOREIGN KEY (artesao_id) REFERENCES artesoes(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS devolucoes_artesao_itens (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    devolucao_id INTEGER NOT NULL,
+    nota_item_id INTEGER NOT NULL,
+    produto_id INTEGER NOT NULL,
+    quantidade INTEGER NOT NULL,
+    valor_unitario REAL NOT NULL DEFAULT 0,
+    FOREIGN KEY (devolucao_id) REFERENCES devolucoes_artesao(id),
+    FOREIGN KEY (nota_item_id) REFERENCES notas_entrada_itens(id),
+    FOREIGN KEY (produto_id) REFERENCES produtos(id)
+  );
 `)
+try {
+  if (!tabelaTemColuna(db, 'notas_entrada', 'acerto_inicio')) {
+    db.exec(`ALTER TABLE notas_entrada ADD COLUMN acerto_inicio TEXT`)
+  }
+  if (!tabelaTemColuna(db, 'notas_entrada', 'acerto_fim')) {
+    db.exec(`ALTER TABLE notas_entrada ADD COLUMN acerto_fim TEXT`)
+  }
+} catch (_) {}
 
 function getPendingRecordsForSync(tabela) {
   if (!tabelaTemColuna(db, tabela, 'sync_status')) {
@@ -1977,8 +2011,9 @@ function importarNotaEntrada({ nota, itens, artesao_id = null, novo_artesao = nu
   const insertNota = db.prepare(`
     INSERT INTO notas_entrada (
       chave, modelo, serie, numero, data_emissao, natureza_operacao, cfop, tipo,
-      emitente_cpf_cnpj, emitente_nome, artesao_id, valor_total, movimentou_estoque, xml
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      emitente_cpf_cnpj, emitente_nome, artesao_id, valor_total, movimentou_estoque, xml,
+      acerto_inicio, acerto_fim
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `)
   const insertItem = db.prepare(`
     INSERT INTO notas_entrada_itens (
@@ -2018,6 +2053,8 @@ function importarNotaEntrada({ nota, itens, artesao_id = null, novo_artesao = nu
       Number(nota.valor_total) || 0,
       regra.movimentaEstoque ? 1 : 0,
       xml,
+      nota.tipo === 'faturamento_consignacao' ? nota.acerto_inicio || null : null,
+      nota.tipo === 'faturamento_consignacao' ? nota.acerto_fim || null : null,
     ).lastInsertRowid
 
     let produtosCriados = 0
@@ -2089,6 +2126,10 @@ function listarNotasEntrada() {
   return db.prepare(`
     SELECT n.id, n.chave, n.serie, n.numero, n.data_emissao, n.cfop, n.tipo, n.valor_total,
            n.movimentou_estoque, n.emitente_nome, n.emitente_cpf_cnpj, n.artesao_id, n.created_at,
+           n.acerto_inicio, n.acerto_fim,
+           (SELECT COALESCE(SUM(di.quantidade), 0) FROM devolucoes_artesao_itens di
+              JOIN devolucoes_artesao d ON d.id = di.devolucao_id AND d.deleted_at IS NULL
+              WHERE d.nota_entrada_id = n.id) as unidades_devolvidas,
            a.razao_social as artesao_razao_social, a.nome_fantasia as artesao_nome_fantasia, a.nome as artesao_nome,
            (SELECT COUNT(*) FROM notas_entrada_itens i WHERE i.nota_id = n.id) as qtd_itens,
            (SELECT COALESCE(SUM(i.quantidade_estoque), 0) FROM notas_entrada_itens i WHERE i.nota_id = n.id) as unidades_estoque
@@ -2101,7 +2142,10 @@ function listarNotasEntrada() {
 
 function listarItensNotaEntrada(notaId) {
   return db.prepare(`
-    SELECT i.*, p.nome as produto_nome, p.variacao as produto_variacao
+    SELECT i.*, p.nome as produto_nome, p.variacao as produto_variacao, p.estoque as produto_estoque,
+           (SELECT COALESCE(SUM(di.quantidade), 0) FROM devolucoes_artesao_itens di
+              JOIN devolucoes_artesao d ON d.id = di.devolucao_id AND d.deleted_at IS NULL
+              WHERE di.nota_item_id = i.id) as quantidade_devolvida
     FROM notas_entrada_itens i
     LEFT JOIN produtos p ON p.id = i.produto_id
     WHERE i.nota_id = ?
@@ -2113,6 +2157,10 @@ function listarItensNotaEntrada(notaId) {
 function excluirNotaEntrada(id) {
   const nota = db.prepare('SELECT id FROM notas_entrada WHERE id = ? AND deleted_at IS NULL').get(id)
   if (!nota) throw new Error('Nota não encontrada.')
+  const devolucao = db
+    .prepare('SELECT id FROM devolucoes_artesao WHERE nota_entrada_id = ? AND deleted_at IS NULL LIMIT 1')
+    .get(id)
+  if (devolucao) throw new Error('Não é possível excluir: esta nota tem devolução registrada. Cancele a devolução antes.')
   const itens = db
     .prepare('SELECT produto_id, quantidade_estoque FROM notas_entrada_itens WHERE nota_id = ? AND quantidade_estoque > 0')
     .all(id)
@@ -2139,6 +2187,121 @@ function excluirNotaEntrada(id) {
       insertMov.run(item.produto_id, item.quantidade_estoque)
     }
     db.prepare("UPDATE notas_entrada SET deleted_at = datetime('now', 'localtime') WHERE id = ?").run(id)
+  })()
+  return { id }
+}
+
+// --- Devolução de peças consignadas ao artesão (base da NF-e 5918, emitida pela loja) ---
+
+/**
+ * Registra a devolução de peças de uma nota de remessa e tira do estoque.
+ * @param {{ nota_entrada_id: number, itens: Array<{ nota_item_id: number, quantidade: number }>, observacao?: string }} dados
+ */
+function registrarDevolucaoArtesao({ nota_entrada_id, itens, observacao = null }) {
+  const nota = db
+    .prepare('SELECT id, tipo, artesao_id FROM notas_entrada WHERE id = ? AND deleted_at IS NULL')
+    .get(nota_entrada_id)
+  if (!nota) throw new Error('Nota não encontrada.')
+  if (nota.tipo !== 'remessa_consignacao') throw new Error('Só é possível devolver peças de uma nota de remessa em consignação.')
+  const pedidos = (Array.isArray(itens) ? itens : [])
+    .map((i) => ({ nota_item_id: Number(i.nota_item_id), quantidade: Math.round(Number(i.quantidade) || 0) }))
+    .filter((i) => i.quantidade > 0)
+  if (pedidos.length === 0) throw new Error('Informe a quantidade de pelo menos uma peça.')
+
+  const getItem = db.prepare(`
+    SELECT i.id, i.produto_id, i.quantidade_estoque, i.valor_unitario, p.nome, p.estoque,
+           (SELECT COALESCE(SUM(di.quantidade), 0) FROM devolucoes_artesao_itens di
+              JOIN devolucoes_artesao d ON d.id = di.devolucao_id AND d.deleted_at IS NULL
+              WHERE di.nota_item_id = i.id) as devolvida
+    FROM notas_entrada_itens i
+    JOIN produtos p ON p.id = i.produto_id
+    WHERE i.id = ? AND i.nota_id = ?
+  `)
+  const insertDevolucao = db.prepare(`
+    INSERT INTO devolucoes_artesao (nota_entrada_id, artesao_id, valor_total, observacao) VALUES (?, ?, ?, ?)
+  `)
+  const insertItem = db.prepare(`
+    INSERT INTO devolucoes_artesao_itens (devolucao_id, nota_item_id, produto_id, quantidade, valor_unitario)
+    VALUES (?, ?, ?, ?, ?)
+  `)
+  const updateEstoque = db.prepare(`UPDATE produtos SET estoque = estoque - ?, sync_status = 'pending' WHERE id = ?`)
+  const insertMov = db.prepare(`
+    INSERT INTO movimentacoes_estoque (produto_id, tipo, quantidade, origem, data)
+    VALUES (?, 'saida', ?, 'devolucao_artesao', datetime('now', 'localtime'))
+  `)
+
+  return db.transaction(() => {
+    const linhas = pedidos.map((pedido) => {
+      const item = getItem.get(pedido.nota_item_id, nota.id)
+      if (!item) throw new Error('Item da nota não encontrado ou sem produto vinculado.')
+      const restante = item.quantidade_estoque - item.devolvida
+      if (pedido.quantidade > restante) {
+        throw new Error(`"${item.nome}": só ${restante} peça(s) desta nota ainda podem ser devolvidas.`)
+      }
+      if (pedido.quantidade > Number(item.estoque)) {
+        throw new Error(`"${item.nome}": o estoque atual é ${item.estoque}.`)
+      }
+      return { ...pedido, produto_id: item.produto_id, valor_unitario: Number(item.valor_unitario) || 0 }
+    })
+    const valorTotal = Math.round(linhas.reduce((acc, l) => acc + l.quantidade * l.valor_unitario, 0) * 100) / 100
+    const devolucaoId = insertDevolucao.run(nota.id, nota.artesao_id, valorTotal, observacao || null).lastInsertRowid
+    for (const linha of linhas) {
+      insertItem.run(devolucaoId, linha.nota_item_id, linha.produto_id, linha.quantidade, linha.valor_unitario)
+      assertUmaLinhaProdutoEstoque(
+        updateEstoque.run(linha.quantidade, linha.produto_id),
+        linha.produto_id,
+        'Devolução ao artesão',
+      )
+      insertMov.run(linha.produto_id, linha.quantidade)
+    }
+    return { id: devolucaoId, valor_total: valorTotal }
+  })()
+}
+
+function listarDevolucoesArtesao(notaEntradaId = null) {
+  const filtro = notaEntradaId ? 'AND d.nota_entrada_id = ?' : ''
+  const params = notaEntradaId ? [notaEntradaId] : []
+  const devolucoes = db.prepare(`
+    SELECT d.*, n.numero as nota_numero, n.serie as nota_serie, n.chave as nota_chave,
+           a.razao_social as artesao_razao_social, a.nome_fantasia as artesao_nome_fantasia, a.nome as artesao_nome
+    FROM devolucoes_artesao d
+    JOIN notas_entrada n ON n.id = d.nota_entrada_id
+    LEFT JOIN artesoes a ON a.id = d.artesao_id
+    WHERE d.deleted_at IS NULL ${filtro}
+    ORDER BY d.data DESC, d.id DESC
+  `).all(...params)
+  const getItens = db.prepare(`
+    SELECT di.*, i.descricao, i.ncm, i.unidade, p.nome as produto_nome, p.variacao as produto_variacao
+    FROM devolucoes_artesao_itens di
+    JOIN notas_entrada_itens i ON i.id = di.nota_item_id
+    LEFT JOIN produtos p ON p.id = di.produto_id
+    WHERE di.devolucao_id = ?
+    ORDER BY di.id
+  `)
+  return devolucoes.map((d) => ({ ...d, itens: getItens.all(d.id) }))
+}
+
+/** Cancela uma devolução que ainda não teve NF-e emitida e devolve as peças ao estoque. */
+function cancelarDevolucaoArtesao(id) {
+  const devolucao = db.prepare('SELECT id, status FROM devolucoes_artesao WHERE id = ? AND deleted_at IS NULL').get(id)
+  if (!devolucao) throw new Error('Devolução não encontrada.')
+  if (devolucao.status !== 'aguardando_nf') throw new Error('Esta devolução já tem nota fiscal emitida.')
+  const itens = db.prepare('SELECT produto_id, quantidade FROM devolucoes_artesao_itens WHERE devolucao_id = ?').all(id)
+  const updateEstoque = db.prepare(`UPDATE produtos SET estoque = estoque + ?, sync_status = 'pending' WHERE id = ?`)
+  const insertMov = db.prepare(`
+    INSERT INTO movimentacoes_estoque (produto_id, tipo, quantidade, origem, data)
+    VALUES (?, 'entrada', ?, 'estorno_devolucao', datetime('now', 'localtime'))
+  `)
+  db.transaction(() => {
+    for (const item of itens) {
+      assertUmaLinhaProdutoEstoque(
+        updateEstoque.run(item.quantidade, item.produto_id),
+        item.produto_id,
+        'Cancelamento de devolução',
+      )
+      insertMov.run(item.produto_id, item.quantidade)
+    }
+    db.prepare("UPDATE devolucoes_artesao SET deleted_at = datetime('now', 'localtime') WHERE id = ?").run(id)
   })()
   return { id }
 }
@@ -2329,4 +2492,7 @@ module.exports = {
   listarNotasEntrada,
   listarItensNotaEntrada,
   excluirNotaEntrada,
+  registrarDevolucaoArtesao,
+  listarDevolucoesArtesao,
+  cancelarDevolucaoArtesao,
 }

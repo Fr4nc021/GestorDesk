@@ -12,6 +12,27 @@ function formatarData(iso) {
   return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' })
 }
 
+function dataIso(ano, mes, dia) {
+  return `${ano}-${String(mes).padStart(2, '0')}-${String(dia).padStart(2, '0')}`
+}
+
+/** Mês das vendas que a nota de acerto paga: o anterior se ela saiu até o dia 15, senão o próprio mês. */
+function periodoAcertoPadrao(dataEmissao) {
+  const base = dataEmissao ? new Date(dataEmissao) : new Date()
+  const d = Number.isNaN(base.getTime()) ? new Date() : base
+  let ano = d.getFullYear()
+  let mes = d.getMonth() + 1
+  if (d.getDate() <= 15) {
+    mes -= 1
+    if (mes === 0) {
+      mes = 12
+      ano -= 1
+    }
+  }
+  const ultimoDia = new Date(ano, mes, 0).getDate()
+  return { inicio: dataIso(ano, mes, 1), fim: dataIso(ano, mes, ultimoDia) }
+}
+
 function formatarQuantidade(n) {
   return Number(n || 0).toLocaleString('pt-BR', { maximumFractionDigits: 4 })
 }
@@ -68,8 +89,16 @@ export default function NotasEntrada() {
   const [importando, setImportando] = useState(false)
   const [erroPrevia, setErroPrevia] = useState('')
 
+  const [acertoPeriodo, setAcertoPeriodo] = useState({ inicio: '', fim: '' })
+  const [acertoConferencia, setAcertoConferencia] = useState(null)
+
   const [notaDetalhe, setNotaDetalhe] = useState(null)
   const [itensDetalhe, setItensDetalhe] = useState([])
+  const [devolucoesDetalhe, setDevolucoesDetalhe] = useState([])
+
+  const [devolucao, setDevolucao] = useState(null)
+  const [salvandoDevolucao, setSalvandoDevolucao] = useState(false)
+  const [erroDevolucao, setErroDevolucao] = useState('')
   const [mensagem, setMensagem] = useState({ tipo: '', texto: '' })
   const inputArquivoRef = useRef(null)
 
@@ -147,6 +176,7 @@ export default function NotasEntrada() {
     setPrevia({ nota, xml, artesaoEncontrado: artesao })
     setArtesaoEscolhido(artesao ? String(artesao.id) : 'novo')
     setErroPrevia('')
+    setAcertoPeriodo(periodoAcertoPadrao(nota.data_emissao))
     setItensPrevia(
       nota.itens.map((item) => {
         const mesmoNome = produtosDoArtesao.find(
@@ -173,6 +203,26 @@ export default function NotasEntrada() {
     setItensPrevia((prev) => prev.map((item, i) => (i === indice ? { ...item, [campo]: valor } : item)))
     setErroPrevia('')
   }
+
+  const ehAcerto = previa?.nota.tipo === 'faturamento_consignacao'
+  const chaveConferencia = `${artesaoEscolhido}|${acertoPeriodo.inicio}|${acertoPeriodo.fim}`
+  const conferenciaAtual = acertoConferencia?.chave === chaveConferencia ? acertoConferencia : null
+
+  useEffect(() => {
+    const artesaoId = Number(artesaoEscolhido)
+    if (!ehAcerto || !artesaoId || !acertoPeriodo.inicio || !acertoPeriodo.fim) return
+    if (!window.electronAPI?.obterRelatorioCustoVendasPeriodo) return
+    let cancelado = false
+    window.electronAPI
+      .obterRelatorioCustoVendasPeriodo(acertoPeriodo.inicio, acertoPeriodo.fim, artesaoId)
+      .then((rel) => {
+        if (!cancelado) setAcertoConferencia({ chave: chaveConferencia, totalCusto: Number(rel?.totalCusto) || 0 })
+      })
+      .catch((err) => console.error('[Notas de entrada] Erro ao conferir acerto:', err))
+    return () => {
+      cancelado = true
+    }
+  }, [ehAcerto, artesaoEscolhido, acertoPeriodo.inicio, acertoPeriodo.fim, chaveConferencia])
 
   const produtosParaVincular = useMemo(() => {
     const id = Number(artesaoEscolhido)
@@ -215,6 +265,8 @@ export default function NotasEntrada() {
           emitente_cpf_cnpj: nota.emitente.cpf_cnpj,
           emitente_nome: nota.emitente.razao_social,
           valor_total: nota.valor_total,
+          acerto_inicio: ehAcerto ? acertoPeriodo.inicio : null,
+          acerto_fim: ehAcerto ? acertoPeriodo.fim : null,
         },
         artesao_id: artesaoEscolhido !== 'novo' ? Number(artesaoEscolhido) : null,
         novo_artesao: artesaoEscolhido === 'novo' ? novoArtesaoDoEmitente(nota.emitente) : null,
@@ -253,10 +305,109 @@ export default function NotasEntrada() {
   async function abrirDetalhe(nota) {
     setNotaDetalhe(nota)
     setItensDetalhe([])
+    setDevolucoesDetalhe([])
     try {
-      setItensDetalhe(await window.electronAPI.listarItensNotaEntrada(nota.id))
+      const [itens, devolucoes] = await Promise.all([
+        window.electronAPI.listarItensNotaEntrada(nota.id),
+        nota.tipo === 'remessa_consignacao' ? window.electronAPI.listarDevolucoesArtesao?.(nota.id) : [],
+      ])
+      setItensDetalhe(itens || [])
+      setDevolucoesDetalhe(devolucoes || [])
     } catch (err) {
       console.error('[Notas de entrada] Erro ao carregar itens:', err)
+    }
+  }
+
+  async function abrirDevolucao(nota) {
+    setMensagem({ tipo: '', texto: '' })
+    setErroDevolucao('')
+    try {
+      const itens = await window.electronAPI.listarItensNotaEntrada(nota.id)
+      const linhas = (itens || [])
+        .filter((item) => item.produto_id && item.quantidade_estoque > 0)
+        .map((item) => {
+          const restante = item.quantidade_estoque - Number(item.quantidade_devolvida || 0)
+          return {
+            ...item,
+            maximo: Math.max(0, Math.min(restante, Number(item.produto_estoque) || 0)),
+            restante,
+            quantidade: '',
+          }
+        })
+      if (linhas.every((l) => l.maximo === 0)) {
+        setMensagem({ tipo: 'error', texto: `Não há peças da nota nº ${nota.numero} no estoque para devolver.` })
+        return
+      }
+      setDevolucao({ nota, linhas, observacao: '' })
+    } catch (err) {
+      setMensagem({ tipo: 'error', texto: err?.message || 'Erro ao carregar os itens da nota.' })
+    }
+  }
+
+  function atualizarQuantidadeDevolucao(indice, valor) {
+    setDevolucao((prev) => ({
+      ...prev,
+      linhas: prev.linhas.map((l, i) => (i === indice ? { ...l, quantidade: valor.replace(/\D/g, '') } : l)),
+    }))
+    setErroDevolucao('')
+  }
+
+  function devolverTudo() {
+    setDevolucao((prev) => ({
+      ...prev,
+      linhas: prev.linhas.map((l) => ({ ...l, quantidade: l.maximo > 0 ? String(l.maximo) : '' })),
+    }))
+    setErroDevolucao('')
+  }
+
+  const totalDevolucao = devolucao
+    ? devolucao.linhas.reduce((acc, l) => acc + (Number(l.quantidade) || 0) * Number(l.valor_unitario || 0), 0)
+    : 0
+
+  async function confirmarDevolucao() {
+    if (!devolucao) return
+    const itens = devolucao.linhas
+      .filter((l) => Number(l.quantidade) > 0)
+      .map((l) => ({ nota_item_id: l.id, quantidade: Number(l.quantidade) }))
+    const acimaDoMaximo = devolucao.linhas.find((l) => Number(l.quantidade) > l.maximo)
+    if (acimaDoMaximo) {
+      setErroDevolucao(`"${acimaDoMaximo.produto_nome}": no máximo ${acimaDoMaximo.maximo} peça(s).`)
+      return
+    }
+    if (itens.length === 0) {
+      setErroDevolucao('Informe a quantidade de pelo menos uma peça.')
+      return
+    }
+    setSalvandoDevolucao(true)
+    try {
+      const resultado = await window.electronAPI.registrarDevolucaoArtesao({
+        nota_entrada_id: devolucao.nota.id,
+        itens,
+        observacao: devolucao.observacao.trim() || null,
+      })
+      const unidades = itens.reduce((acc, i) => acc + i.quantidade, 0)
+      setDevolucao(null)
+      await Promise.all([carregarNotas(), carregarCadastros()])
+      setMensagem({
+        tipo: 'success',
+        texto: `Devolução registrada: ${unidades} peça(s), ${formatarMoeda(resultado.valor_total)}. As peças saíram do estoque e a nota fiscal de devolução (CFOP 5918) fica pendente.`,
+      })
+    } catch (err) {
+      setErroDevolucao(err?.message || 'Erro ao registrar a devolução.')
+    } finally {
+      setSalvandoDevolucao(false)
+    }
+  }
+
+  async function cancelarDevolucao(dev) {
+    if (!window.confirm('Cancelar esta devolução? As peças voltam para o estoque.')) return
+    try {
+      await window.electronAPI.cancelarDevolucaoArtesao(dev.id)
+      await Promise.all([carregarNotas(), carregarCadastros()])
+      if (notaDetalhe) await abrirDetalhe(notaDetalhe)
+      setMensagem({ tipo: 'success', texto: 'Devolução cancelada. As peças voltaram para o estoque.' })
+    } catch (err) {
+      setMensagem({ tipo: 'error', texto: err?.message || 'Erro ao cancelar a devolução.' })
     }
   }
 
@@ -349,6 +500,15 @@ export default function NotasEntrada() {
                   <td>
                     {nota.qtd_itens}
                     {nota.movimentou_estoque ? ` (${nota.unidades_estoque} no estoque)` : ''}
+                    {nota.unidades_devolvidas > 0 && (
+                      <span className="notas-entrada-cfop">{nota.unidades_devolvidas} devolvida(s)</span>
+                    )}
+                    {nota.acerto_inicio && (
+                      <span className="notas-entrada-cfop">
+                        Vendas de {formatarData(`${nota.acerto_inicio}T12:00:00`)} a{' '}
+                        {formatarData(`${nota.acerto_fim}T12:00:00`)}
+                      </span>
+                    )}
                   </td>
                   <td>{formatarMoeda(nota.valor_total)}</td>
                   <td>
@@ -356,6 +516,11 @@ export default function NotasEntrada() {
                       <button type="button" className="produtos-btn-quiet" onClick={() => abrirDetalhe(nota)}>
                         Ver itens
                       </button>
+                      {nota.tipo === 'remessa_consignacao' && (
+                        <button type="button" className="produtos-btn-quiet" onClick={() => abrirDevolucao(nota)}>
+                          Devolver peças
+                        </button>
+                      )}
                       <button type="button" className="produtos-btn-quiet" onClick={() => excluirNota(nota)}>
                         Excluir
                       </button>
@@ -424,6 +589,46 @@ export default function NotasEntrada() {
                   ? 'Nota de acerto: as peças já saíram na venda, então o estoque não muda. A nota fica registrada para o acerto com o artesão.'
                   : 'Esta operação não dá entrada no estoque. A nota só fica registrada.'}
               </p>
+            )}
+
+            {ehAcerto && (
+              <div className="notas-entrada-acerto">
+                <div className="notas-entrada-acerto-periodo">
+                  <span>Vendas que esta nota paga</span>
+                  <input
+                    type="date"
+                    value={acertoPeriodo.inicio}
+                    onChange={(e) => setAcertoPeriodo((p) => ({ ...p, inicio: e.target.value }))}
+                    aria-label="Início do período"
+                  />
+                  <span>a</span>
+                  <input
+                    type="date"
+                    value={acertoPeriodo.fim}
+                    onChange={(e) => setAcertoPeriodo((p) => ({ ...p, fim: e.target.value }))}
+                    aria-label="Fim do período"
+                  />
+                </div>
+                {!Number(artesaoEscolhido) ? (
+                  <p className="modal-field-hint">Escolha o fornecedor para conferir o valor com as vendas.</p>
+                ) : conferenciaAtual ? (
+                  (() => {
+                    const diferenca = Number(previa.nota.valor_total) - conferenciaAtual.totalCusto
+                    const confere = Math.abs(diferenca) < 0.01
+                    return (
+                      <p className={`config-feedback ${confere ? 'success' : 'error'}`}>
+                        Custo das peças vendidas no período: {formatarMoeda(conferenciaAtual.totalCusto)}. Valor da
+                        nota: {formatarMoeda(previa.nota.valor_total)}.{' '}
+                        {confere
+                          ? 'Os valores conferem.'
+                          : `Diferença de ${formatarMoeda(Math.abs(diferenca))} (nota ${diferenca > 0 ? 'maior' : 'menor'} que o relatório). Confira antes de pagar.`}
+                      </p>
+                    )
+                  })()
+                ) : (
+                  <p className="modal-field-hint">Conferindo com as vendas...</p>
+                )}
+              </div>
             )}
 
             <div className="modal-field">
@@ -576,6 +781,123 @@ export default function NotasEntrada() {
                   ))}
                 </tbody>
               </table>
+            </div>
+            {devolucoesDetalhe.length > 0 && (
+              <div className="notas-entrada-devolucoes">
+                <h4>Devoluções ao artesão</h4>
+                {devolucoesDetalhe.map((dev) => (
+                  <div key={dev.id} className="notas-entrada-devolucao">
+                    <div>
+                      <strong>
+                        {formatarData(dev.data)} · {formatarMoeda(dev.valor_total)}
+                      </strong>
+                      <small>
+                        {dev.itens
+                          .map((i) => `${i.quantidade}× ${i.produto_nome || i.descricao}`)
+                          .join(', ')}
+                      </small>
+                      <small>
+                        {dev.status === 'aguardando_nf' ? 'NF-e de devolução (5918) pendente' : 'NF-e emitida'}
+                      </small>
+                    </div>
+                    {dev.status === 'aguardando_nf' && (
+                      <button type="button" className="produtos-btn-quiet" onClick={() => cancelarDevolucao(dev)}>
+                        Cancelar
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {devolucao && (
+        <div className="modal-overlay" onClick={() => !salvandoDevolucao && setDevolucao(null)}>
+          <div className="modal-content notas-entrada-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Devolver peças da nota nº {devolucao.nota.numero}</h3>
+              <button
+                type="button"
+                className="modal-close"
+                onClick={() => !salvandoDevolucao && setDevolucao(null)}
+                aria-label="Fechar"
+                disabled={salvandoDevolucao}
+              >
+                ×
+              </button>
+            </div>
+            <p className="modal-field-hint">
+              As peças saem do estoque agora. A nota fiscal de devolução (CFOP 5918, referenciando esta remessa) fica
+              pendente até a emissão de NF-e estar ligada.
+            </p>
+            <div className="notas-entrada-itens">
+              <table className="pdv-products-table">
+                <thead>
+                  <tr>
+                    <th>Produto</th>
+                    <th>Recebidas</th>
+                    <th>Já devolvidas</th>
+                    <th>Em estoque</th>
+                    <th>Custo</th>
+                    <th>Devolver</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {devolucao.linhas.map((linha, indice) => (
+                    <tr key={linha.id}>
+                      <td>
+                        {linha.produto_nome}
+                        {linha.produto_variacao ? ` (${linha.produto_variacao})` : ''}
+                      </td>
+                      <td>{linha.quantidade_estoque}</td>
+                      <td>{linha.quantidade_devolvida || 0}</td>
+                      <td>{linha.produto_estoque}</td>
+                      <td>{formatarMoeda(linha.valor_unitario)}</td>
+                      <td>
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          className="notas-entrada-qtd"
+                          value={linha.quantidade}
+                          onChange={(e) => atualizarQuantidadeDevolucao(indice, e.target.value)}
+                          placeholder={linha.maximo > 0 ? `até ${linha.maximo}` : '—'}
+                          disabled={linha.maximo === 0}
+                          aria-label={`Quantidade a devolver de ${linha.produto_nome}`}
+                        />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="modal-field">
+              <label htmlFor="obsDevolucao">Observação</label>
+              <input
+                id="obsDevolucao"
+                type="text"
+                value={devolucao.observacao}
+                onChange={(e) => setDevolucao((prev) => ({ ...prev, observacao: e.target.value }))}
+                placeholder="Opcional"
+              />
+            </div>
+            <p className="modal-field-hint">Valor da devolução: {formatarMoeda(totalDevolucao)}</p>
+
+            {erroDevolucao && <p className="config-feedback error">{erroDevolucao}</p>}
+
+            <div className="estoque-modal-acoes">
+              <button type="button" className="modal-btn-cancelar" onClick={devolverTudo} disabled={salvandoDevolucao}>
+                Devolver tudo
+              </button>
+              <button
+                type="button"
+                className="modal-submit"
+                onClick={confirmarDevolucao}
+                disabled={salvandoDevolucao}
+              >
+                {salvandoDevolucao ? 'Salvando...' : 'Registrar devolução'}
+              </button>
             </div>
           </div>
         </div>
