@@ -2409,6 +2409,81 @@ button.caixa-btn-filtro-periodo {
   margin: 0 0 32px 0;
 }
 
+.notas-emitidas-filtro {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: #555;
+}
+
+.notas-emitidas-filtro input {
+  padding: 8px 10px;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  font-size: 13px;
+  background: #fff;
+}
+
+.notas-emitidas-situacao {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  background: #f0f0f0;
+  color: #555;
+}
+
+.notas-emitidas-situacao.ok {
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.notas-emitidas-situacao.alerta {
+  background: #fffbeb;
+  color: #b45309;
+}
+
+.notas-emitidas-situacao.erro {
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.fiscal-emitir-nfce {
+  margin-top: 16px;
+}
+
+.pdv-modal-cpf {
+  margin: 0 0 20px;
+  text-align: left;
+}
+
+.pdv-modal-cpf label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 13px;
+  color: #555;
+}
+
+.pdv-modal-cpf input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #e0e0e0;
+  border-radius: 10px;
+  font-size: 15px;
+  box-sizing: border-box;
+}
+
+.pdv-modal-cupom {
+  max-width: 440px;
+  text-align: center;
+}
+
+.pdv-modal-cupom .pdv-modal-actions {
+  margin-top: 20px;
+}
+
 .pdv-modal-dinheiro {
   margin: -24px 0 24px 0;
   padding: 16px 18px 14px;

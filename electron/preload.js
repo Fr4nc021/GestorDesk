@@ -54,6 +54,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   listarDevolucoesArtesao: (notaEntradaId) => invoke('listar-devolucoes-artesao', notaEntradaId),
   cancelarDevolucaoArtesao: (id) => invoke('cancelar-devolucao-artesao', id),
 
+  // NFC-e (Focus NFe)
+  emitirNfceVenda: (vendaId, opcoes) => invoke('emitir-nfce-venda', vendaId, opcoes),
+  cancelarNfce: (notaId, justificativa) => invoke('cancelar-nfce', notaId, justificativa),
+  listarNotasFiscais: (filtros) => invoke('listar-notas-fiscais', filtros),
+  imprimirNfce: (notaId) => invoke('imprimir-nfce', notaId),
+
   // Vendas
   criarVenda: (data) => invoke('criar-venda', data),
   listarVendas: () => invoke('listar-vendas'),

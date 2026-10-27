@@ -150,7 +150,9 @@ const {
   registrarDevolucaoArtesao,
   listarDevolucoesArtesao,
   cancelarDevolucaoArtesao,
+  listarNotasFiscais,
 } = require('./database')
+const { emitirNfceDaVenda, cancelarNfce, urlDanfe } = require('./services/nfceService')
 
 // CLI: criar usuário e sair — node electron/main.cjs não funciona; use: npx electron . criar-usuario LOGIN SENHA
 if (process.argv[2] === 'criar-usuario' && process.argv[3] && process.argv[4]) {
@@ -271,6 +273,24 @@ ipcMain.handle('excluir-nota-entrada', (_, id) => excluirNotaEntrada(id))
 ipcMain.handle('registrar-devolucao-artesao', (_, dados) => registrarDevolucaoArtesao(dados))
 ipcMain.handle('listar-devolucoes-artesao', (_, notaEntradaId) => listarDevolucoesArtesao(notaEntradaId ?? null))
 ipcMain.handle('cancelar-devolucao-artesao', (_, id) => cancelarDevolucaoArtesao(id))
+ipcMain.handle('emitir-nfce-venda', (_, vendaId, opcoes) => emitirNfceDaVenda(vendaId, opcoes || {}))
+ipcMain.handle('cancelar-nfce', (_, notaId, justificativa) => cancelarNfce(notaId, justificativa))
+ipcMain.handle('listar-notas-fiscais', (_, filtros) => listarNotasFiscais(filtros || {}))
+ipcMain.handle('imprimir-nfce', async (event, notaId) => {
+  const url = urlDanfe(notaId)
+  const pai = BrowserWindow.fromWebContents(event.sender)
+  const janela = new BrowserWindow({
+    parent: pai || undefined,
+    width: 420,
+    height: 760,
+    title: 'Cupom fiscal',
+    autoHideMenuBar: true,
+    webPreferences: { contextIsolation: true, nodeIntegration: false },
+  })
+  await janela.loadURL(url)
+  janela.webContents.print({ silent: false, printBackground: true }, () => {})
+  return { ok: true }
+})
 
 ipcMain.handle('criar-venda', (_, data) => criarVenda(data))
 ipcMain.handle('listar-vendas', () => listarVendas())

@@ -530,6 +530,35 @@ db.exec(`
     FOREIGN KEY (produto_id) REFERENCES produtos(id)
   );
 `)
+// NFC-e emitidas pela loja (Focus NFe). Uma linha por tentativa de envio; ficam só neste computador.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS notas_fiscais (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    venda_id INTEGER,
+    modelo TEXT NOT NULL DEFAULT '65',
+    ref TEXT NOT NULL UNIQUE,
+    ambiente TEXT NOT NULL,
+    status TEXT NOT NULL,
+    numero TEXT,
+    serie TEXT,
+    chave TEXT,
+    protocolo TEXT,
+    mensagem TEXT,
+    valor_total REAL NOT NULL DEFAULT 0,
+    caminho_danfe TEXT,
+    caminho_xml TEXT,
+    url_qrcode TEXT,
+    xml TEXT,
+    requisicao TEXT,
+    resposta TEXT,
+    cancelada_em TEXT,
+    justificativa_cancelamento TEXT,
+    created_at TEXT DEFAULT (datetime('now', 'localtime')),
+    updated_at TEXT DEFAULT (datetime('now', 'localtime')),
+    FOREIGN KEY (venda_id) REFERENCES vendas(id)
+  );
+`)
+
 try {
   if (!tabelaTemColuna(db, 'notas_entrada', 'acerto_inicio')) {
     db.exec(`ALTER TABLE notas_entrada ADD COLUMN acerto_inicio TEXT`)
@@ -1273,6 +1302,7 @@ function listarVendasPorPeriodoEArtesao(dataInicio, dataFim, artesaoId = null) {
 }
 
 function excluirVenda(id) {
+  exigirVendaSemNfceAutorizada(id, 'excluir a venda')
   const updateEstoque = db.prepare(`
     UPDATE produtos SET estoque = estoque + ?, sync_status = 'pending' WHERE id = ?
   `)
@@ -1352,6 +1382,7 @@ function atualizarVenda(
 ) {
   const vendaRow = db.prepare('SELECT id, data FROM vendas WHERE id = ? AND deleted_at IS NULL').get(vendaId)
   if (!vendaRow) throw new Error('Venda não encontrada.')
+  exigirVendaSemNfceAutorizada(vendaId, 'alterar a venda')
 
   const subtotalItens = itens.reduce((acc, item) => acc + item.quantidade * item.preco_unitario, 0)
   const valor_total = valorTotalInformado != null ? valorTotalInformado : subtotalItens
@@ -2306,6 +2337,96 @@ function cancelarDevolucaoArtesao(id) {
   return { id }
 }
 
+// --- NFC-e emitidas (Focus NFe) ---
+
+/** Venda com os dados fiscais de cada produto, para montar a NFC-e. */
+function obterVendaParaNfce(vendaId) {
+  const venda = db.prepare('SELECT * FROM vendas WHERE id = ? AND deleted_at IS NULL').get(vendaId)
+  if (!venda) throw new Error('Venda não encontrada.')
+  const itens = db.prepare(`
+    SELECT vi.produto_id, vi.quantidade, vi.preco_unitario,
+           p.nome, p.variacao, p.codigo_barras, p.ncm, p.cest, p.origem, p.tipo_posse, p.icms_st, p.unidade
+    FROM vendas_itens vi
+    JOIN produtos p ON p.id = vi.produto_id
+    WHERE vi.venda_id = ? AND vi.deleted_at IS NULL
+    ORDER BY vi.id
+  `).all(vendaId)
+  const pagamentos = db
+    .prepare('SELECT forma_pagamento, valor FROM vendas_pagamentos WHERE venda_id = ? AND deleted_at IS NULL ORDER BY id')
+    .all(vendaId)
+  return { venda, itens, pagamentos }
+}
+
+const CAMPOS_NOTA_FISCAL = [
+  'status', 'numero', 'serie', 'chave', 'protocolo', 'mensagem', 'caminho_danfe', 'caminho_xml', 'url_qrcode',
+  'xml', 'resposta', 'cancelada_em', 'justificativa_cancelamento',
+]
+
+function criarNotaFiscal({ venda_id, ref, ambiente, valor_total, requisicao }) {
+  const id = db.prepare(`
+    INSERT INTO notas_fiscais (venda_id, ref, ambiente, status, valor_total, requisicao)
+    VALUES (?, ?, ?, 'enviando', ?, ?)
+  `).run(venda_id ?? null, ref, String(ambiente), Number(valor_total) || 0, requisicao ? JSON.stringify(requisicao) : null)
+    .lastInsertRowid
+  return obterNotaFiscal(id)
+}
+
+function atualizarNotaFiscal(id, dados) {
+  const campos = CAMPOS_NOTA_FISCAL.filter((c) => dados[c] !== undefined)
+  if (campos.length > 0) {
+    const sets = campos.map((c) => `${c} = ?`).join(', ')
+    const valores = campos.map((c) => (c === 'resposta' && dados[c] && typeof dados[c] !== 'string' ? JSON.stringify(dados[c]) : dados[c]))
+    db.prepare(`UPDATE notas_fiscais SET ${sets}, updated_at = datetime('now', 'localtime') WHERE id = ?`).run(...valores, id)
+  }
+  return obterNotaFiscal(id)
+}
+
+function obterNotaFiscal(id) {
+  return db.prepare('SELECT * FROM notas_fiscais WHERE id = ?').get(id) || null
+}
+
+/** Última tentativa de NFC-e da venda (a que vale). */
+function ultimaNotaFiscalDaVenda(vendaId) {
+  return db.prepare('SELECT * FROM notas_fiscais WHERE venda_id = ? ORDER BY id DESC LIMIT 1').get(vendaId) || null
+}
+
+function contarTentativasNotaFiscal(vendaId) {
+  return db.prepare('SELECT COUNT(*) as n FROM notas_fiscais WHERE venda_id = ?').get(vendaId).n
+}
+
+/** Lista as vendas com a situação da NFC-e (a última tentativa de cada uma). */
+function listarNotasFiscais({ dataInicio, dataFim } = {}) {
+  const filtros = []
+  const params = []
+  if (dataInicio) {
+    filtros.push('date(n.created_at) >= date(?)')
+    params.push(dataInicio)
+  }
+  if (dataFim) {
+    filtros.push('date(n.created_at) <= date(?)')
+    params.push(dataFim)
+  }
+  const where = filtros.length ? `AND ${filtros.join(' AND ')}` : ''
+  return db.prepare(`
+    SELECT n.id, n.venda_id, n.modelo, n.ref, n.ambiente, n.status, n.numero, n.serie, n.chave, n.mensagem,
+           n.valor_total, n.caminho_danfe, n.cancelada_em, n.created_at, n.updated_at,
+           v.data as venda_data, v.deleted_at as venda_excluida_em,
+           (SELECT COUNT(*) FROM notas_fiscais t WHERE t.venda_id = n.venda_id) as tentativas
+    FROM notas_fiscais n
+    LEFT JOIN vendas v ON v.id = n.venda_id
+    WHERE n.id = (SELECT MAX(t.id) FROM notas_fiscais t WHERE t.venda_id = n.venda_id) ${where}
+    ORDER BY n.created_at DESC, n.id DESC
+  `).all(...params)
+}
+
+/** Impede alterar ou excluir uma venda que já tem cupom fiscal autorizado. */
+function exigirVendaSemNfceAutorizada(vendaId, acao) {
+  const nota = ultimaNotaFiscalDaVenda(vendaId)
+  if (nota && nota.status === 'autorizado') {
+    throw new Error(`Esta venda tem cupom fiscal autorizado (nº ${nota.numero}). Cancele o cupom em Notas emitidas antes de ${acao}.`)
+  }
+}
+
 // --- Configuração fiscal do emitente ---
 // Fica em `configuracoes` (chaves fiscal_*), local deste computador.
 
@@ -2332,6 +2453,9 @@ const CONFIG_FISCAL_PADRAO = {
   proximo_numero_nfe: '1',
   csc_id: '',
   csc: '',
+  emitir_nfce: '0',
+  focus_token_homologacao: '',
+  focus_token_producao: '',
 }
 
 const CONFIG_FISCAL_PREFIXO = 'fiscal_'
@@ -2401,6 +2525,16 @@ function salvarConfigFiscal(data) {
     proximo_numero_nfe: inteiroPositivoConfig(data?.proximo_numero_nfe, 'o próximo número da NF-e'),
     csc_id: somenteDigitos(data?.csc_id),
     csc: texto('csc'),
+    emitir_nfce: data?.emitir_nfce === '1' || data?.emitir_nfce === true ? '1' : '0',
+    focus_token_homologacao: texto('focus_token_homologacao'),
+    focus_token_producao: texto('focus_token_producao'),
+  }
+  if (registro.emitir_nfce === '1') {
+    if (cnpj.length !== 14) throw new Error('Para emitir NFC-e, informe o CNPJ da loja.')
+    const tokenAmbiente = ambiente === '1' ? registro.focus_token_producao : registro.focus_token_homologacao
+    if (!tokenAmbiente) {
+      throw new Error(`Para emitir NFC-e, informe o token de ${ambiente === '1' ? 'produção' : 'homologação'} da Focus NFe.`)
+    }
   }
 
   const upsert = db.prepare(`
@@ -2495,4 +2629,11 @@ module.exports = {
   registrarDevolucaoArtesao,
   listarDevolucoesArtesao,
   cancelarDevolucaoArtesao,
+  obterVendaParaNfce,
+  criarNotaFiscal,
+  atualizarNotaFiscal,
+  obterNotaFiscal,
+  ultimaNotaFiscalDaVenda,
+  contarTentativasNotaFiscal,
+  listarNotasFiscais,
 }

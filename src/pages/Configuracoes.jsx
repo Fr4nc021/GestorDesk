@@ -44,6 +44,9 @@ const CONFIG_FISCAL_VAZIA = {
   proximo_numero_nfe: '1',
   csc_id: '',
   csc: '',
+  emitir_nfce: '0',
+  focus_token_homologacao: '',
+  focus_token_producao: '',
 }
 
 function configFiscalParaForm(config) {
@@ -73,6 +76,7 @@ export default function Configuracoes() {
   const [feedbackFiscal, setFeedbackFiscal] = useState({ tipo: '', texto: '' })
   const [cepFiscalStatus, setCepFiscalStatus] = useState('')
   const [mostrarCsc, setMostrarCsc] = useState(false)
+  const [mostrarTokens, setMostrarTokens] = useState(false)
 
   useEffect(() => {
     carregarUsuarios()
@@ -409,6 +413,42 @@ export default function Configuracoes() {
                   </button>
                 </div>
               </div>
+
+              <p className="fiscal-secao">Emissor de notas (Focus NFe)</p>
+              <p className="config-card-sub">
+                Os tokens ficam no painel da Focus NFe (Painel API › Tokens). O certificado digital e o CSC são
+                cadastrados lá, no cadastro da empresa.
+              </p>
+              <div className="fiscal-grid">
+                {['focus_token_homologacao', 'focus_token_producao'].map((campo) => (
+                  <div className="modal-field" key={campo}>
+                    <label htmlFor={`fiscal-${campo}`}>
+                      {campo === 'focus_token_producao' ? 'Token de produção' : 'Token de homologação'}
+                    </label>
+                    <input
+                      id={`fiscal-${campo}`}
+                      type={mostrarTokens ? 'text' : 'password'}
+                      value={fiscal[campo]}
+                      onChange={(e) => atualizarFiscal(campo, e.target.value)}
+                      autoComplete="off"
+                    />
+                  </div>
+                ))}
+              </div>
+              <button type="button" className="fiscal-mostrar-csc" onClick={() => setMostrarTokens((v) => !v)}>
+                {mostrarTokens ? 'Ocultar tokens' : 'Mostrar tokens'}
+              </button>
+              <label className="fiscal-produto-st fiscal-emitir-nfce">
+                <input
+                  type="checkbox"
+                  checked={fiscal.emitir_nfce === '1'}
+                  onChange={(e) => atualizarFiscal('emitir_nfce', e.target.checked ? '1' : '0')}
+                />
+                Emitir NFC-e ao finalizar cada venda no PDV
+              </label>
+              {fiscal.emitir_nfce === '1' && fiscal.ambiente === '2' && (
+                <p className="config-card-sub">Ambiente de homologação: os cupons saem sem valor fiscal.</p>
+              )}
 
               <div className="sync-action-row config-save-row">
                 <button type="submit" className="btn-sync-manual" disabled={salvandoFiscal}>

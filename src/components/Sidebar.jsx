@@ -13,6 +13,7 @@ const sidebarNavItems = [
   { to: '/app/artesaos', label: 'Fornecedores', icon: artesaosIcon },
   { to: '/app/estoque', label: 'Estoque', icon: estoqueIcon },
   { to: '/app/notas-entrada', label: 'Notas de entrada', icon: estoqueIcon },
+  { to: '/app/notas-emitidas', label: 'Notas emitidas', icon: pdvIcon },
   { to: '/app/caixa', label: 'Caixa', icon: pdvIcon },
   { to: '/app/relatorios', label: 'Relatórios', icon: relatoriosIcon },
   { to: '/app/configuracoes', label: 'Configurações', icon: relatoriosIcon },
