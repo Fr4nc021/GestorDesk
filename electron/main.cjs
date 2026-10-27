@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, clipboard } = require('electron')
+const { app, BrowserWindow, ipcMain, dialog, clipboard, shell } = require('electron')
 const path = require('path')
 const fs = require('fs')
 
@@ -152,7 +152,13 @@ const {
   cancelarDevolucaoArtesao,
   listarNotasFiscais,
 } = require('./database')
-const { emitirNfceDaVenda, cancelarNfce, urlDanfe } = require('./services/nfceService')
+const {
+  emitirNfceDaVenda,
+  emitirNfeDevolucao,
+  atualizarSituacaoNota,
+  cancelarNota,
+  urlDanfe,
+} = require('./services/nfceService')
 
 // CLI: criar usuário e sair — node electron/main.cjs não funciona; use: npx electron . criar-usuario LOGIN SENHA
 if (process.argv[2] === 'criar-usuario' && process.argv[3] && process.argv[4]) {
@@ -274,10 +280,17 @@ ipcMain.handle('registrar-devolucao-artesao', (_, dados) => registrarDevolucaoAr
 ipcMain.handle('listar-devolucoes-artesao', (_, notaEntradaId) => listarDevolucoesArtesao(notaEntradaId ?? null))
 ipcMain.handle('cancelar-devolucao-artesao', (_, id) => cancelarDevolucaoArtesao(id))
 ipcMain.handle('emitir-nfce-venda', (_, vendaId, opcoes) => emitirNfceDaVenda(vendaId, opcoes || {}))
-ipcMain.handle('cancelar-nfce', (_, notaId, justificativa) => cancelarNfce(notaId, justificativa))
+ipcMain.handle('emitir-nfe-devolucao', (_, devolucaoId) => emitirNfeDevolucao(devolucaoId))
+ipcMain.handle('atualizar-situacao-nota', (_, notaId) => atualizarSituacaoNota(notaId))
+ipcMain.handle('cancelar-nfce', (_, notaId, justificativa) => cancelarNota(notaId, justificativa))
 ipcMain.handle('listar-notas-fiscais', (_, filtros) => listarNotasFiscais(filtros || {}))
 ipcMain.handle('imprimir-nfce', async (event, notaId) => {
-  const url = urlDanfe(notaId)
+  const { url, modelo } = urlDanfe(notaId)
+  // DANFE da NF-e é PDF: abre no visualizador do computador.
+  if (modelo === '55') {
+    await shell.openExternal(url)
+    return { ok: true }
+  }
   const pai = BrowserWindow.fromWebContents(event.sender)
   const janela = new BrowserWindow({
     parent: pai || undefined,

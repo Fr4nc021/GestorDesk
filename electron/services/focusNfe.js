@@ -170,6 +170,96 @@ function montarNfce({ venda, itens, pagamentos, config, cpf = '' }) {
   return nota
 }
 
+/**
+ * NF-e de devolução ao artesão das peças recebidas em consignação (CFOP 5918), conforme o manual do contador:
+ * CSOSN 400, PIS/COFINS 49, referenciando a chave da nota de remessa.
+ * @param {object} dados - { devolucao, itens, chaveRemessa, artesao, config }
+ */
+function montarNfeDevolucao({ devolucao, itens, chaveRemessa, artesao, config }) {
+  const cnpj = somenteDigitos(config.cnpj)
+  if (cnpj.length !== 14) throw new Error('Cadastre o CNPJ da loja em Configurações › Fiscal.')
+  if (!Array.isArray(itens) || itens.length === 0) throw new Error('A devolução não tem itens.')
+  const chave = somenteDigitos(chaveRemessa)
+  if (chave.length !== 44) throw new Error('A nota de remessa não tem chave de acesso válida.')
+  if (!artesao) throw new Error('A devolução não tem fornecedor.')
+
+  const documento = somenteDigitos(artesao.cpf_cnpj)
+  if (documento.length !== 11 && documento.length !== 14) {
+    throw new Error('Cadastre o CPF ou CNPJ do fornecedor antes de emitir a nota.')
+  }
+  const faltando = [
+    ['logradouro', 'endereço'],
+    ['numero', 'número'],
+    ['bairro', 'bairro'],
+    ['cidade', 'cidade'],
+    ['uf', 'UF'],
+    ['cep', 'CEP'],
+  ].filter(([campo]) => !String(artesao[campo] || '').trim())
+  if (faltando.length > 0) {
+    throw new Error(`Complete o cadastro do fornecedor: ${faltando.map(([, nome]) => nome).join(', ')}.`)
+  }
+  const semNcm = itens.filter((i) => somenteDigitos(i.ncm).length !== 8)
+  if (semNcm.length > 0) {
+    throw new Error(`Item sem NCM: ${semNcm.map((i) => i.descricao || i.produto_nome).slice(0, 5).join(', ')}.`)
+  }
+
+  const inscricao = somenteDigitos(artesao.inscricao_estadual)
+  const nota = {
+    cnpj_emitente: cnpj,
+    data_emissao: agoraBrasilia(),
+    natureza_operacao: 'DEVOLUCAO DE MERCADORIA RECEBIDA EM CONSIGNACAO',
+    tipo_documento: '1',
+    finalidade_emissao: '4',
+    local_destino: String(artesao.uf || '').toUpperCase() === String(config.uf || 'RS').toUpperCase() ? '1' : '2',
+    consumidor_final: '0',
+    presenca_comprador: '9',
+    modalidade_frete: '9',
+    notas_referenciadas: [{ chave_nfe: chave }],
+    nome_destinatario: String(artesao.razao_social || artesao.nome || '').slice(0, 60),
+    logradouro_destinatario: artesao.logradouro,
+    numero_destinatario: artesao.numero,
+    bairro_destinatario: artesao.bairro,
+    municipio_destinatario: artesao.cidade,
+    uf_destinatario: String(artesao.uf).toUpperCase(),
+    cep_destinatario: somenteDigitos(artesao.cep),
+    pais_destinatario: 'Brasil',
+    indicador_inscricao_estadual_destinatario: inscricao ? '1' : '9',
+    formas_pagamento: [{ forma_pagamento: '90', valor_pagamento: '0.00' }],
+    items: itens.map((item, indice) => {
+      const unidade = String(item.unidade || 'UN').trim().toUpperCase() || 'UN'
+      const linha = {
+        numero_item: String(indice + 1),
+        codigo_produto: String(item.codigo || item.codigo_barras || item.produto_id),
+        descricao: String(item.descricao || item.produto_nome || '').slice(0, 120),
+        codigo_ncm: somenteDigitos(item.ncm),
+        cfop: '5918',
+        unidade_comercial: unidade,
+        unidade_tributavel: unidade,
+        quantidade_comercial: Number(item.quantidade).toFixed(4),
+        quantidade_tributavel: Number(item.quantidade).toFixed(4),
+        valor_unitario_comercial: Number(item.valor_unitario).toFixed(2),
+        valor_unitario_tributavel: Number(item.valor_unitario).toFixed(2),
+        valor_bruto: dinheiro(centavos(item.quantidade * item.valor_unitario)),
+        icms_origem: String(item.origem ?? '0'),
+        icms_situacao_tributaria: '400',
+        pis_situacao_tributaria: '49',
+        cofins_situacao_tributaria: '49',
+      }
+      const cest = somenteDigitos(item.cest)
+      if (cest.length === 7) linha.cest = cest
+      return linha
+    }),
+  }
+  if (documento.length === 14) nota.cnpj_destinatario = documento
+  else nota.cpf_destinatario = documento
+  if (inscricao) nota.inscricao_estadual_destinatario = inscricao
+  if (artesao.complemento) nota.complemento_destinatario = artesao.complemento
+  const telefone = somenteDigitos(artesao.telefone_whats)
+  if (telefone.length >= 10) nota.telefone_destinatario = telefone
+  if (devolucao.observacao) nota.informacoes_adicionais_contribuinte = String(devolucao.observacao).slice(0, 500)
+  return nota
+}
+
 function tokenDoAmbiente(config) {
   const ambiente = String(config.ambiente) === '1' ? 1 : 2
   const token = String((ambiente === 1 ? config.focus_token_producao : config.focus_token_homologacao) || '').trim()
@@ -229,6 +319,18 @@ function cancelarNfce(config, ref, justificativa) {
   return requisicao(config, 'DELETE', `/v2/nfce/${encodeURIComponent(ref)}`, { justificativa })
 }
 
+function emitirNfe(config, ref, nota) {
+  return requisicao(config, 'POST', `/v2/nfe?ref=${encodeURIComponent(ref)}`, nota)
+}
+
+function consultarNfe(config, ref) {
+  return requisicao(config, 'GET', `/v2/nfe/${encodeURIComponent(ref)}`)
+}
+
+function cancelarNfe(config, ref, justificativa) {
+  return requisicao(config, 'DELETE', `/v2/nfe/${encodeURIComponent(ref)}`, { justificativa })
+}
+
 /** Link completo de um caminho devolvido pela Focus (DANFCe, XML). */
 function urlCompleta(config, caminho) {
   if (!caminho) return null
@@ -264,6 +366,10 @@ module.exports = {
   emitirNfce,
   consultarNfce,
   cancelarNfce,
+  montarNfeDevolucao,
+  emitirNfe,
+  consultarNfe,
+  cancelarNfe,
   baixarArquivo,
   urlCompleta,
   mensagemDaResposta,

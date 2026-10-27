@@ -13,7 +13,15 @@ const SITUACOES = {
   denegado: { label: 'Denegado', classe: 'erro' },
 }
 
-const STATUS_REENVIAR = ['erro_conexao', 'erro_autorizacao', 'erro_validacao', 'enviando', 'processando_autorizacao']
+const STATUS_REENVIAR = ['erro_conexao', 'erro_autorizacao', 'erro_validacao', 'enviando']
+
+function rotuloOrigem(nota) {
+  if (nota.devolucao_id) {
+    const artesao = nota.artesao_nome_fantasia || nota.artesao_razao_social || nota.artesao_nome
+    return `Devolução${artesao ? ` · ${artesao}` : ''}`
+  }
+  return `Venda #${nota.venda_id}`
+}
 
 function hojeIso() {
   const d = new Date()
@@ -62,15 +70,32 @@ export default function NotasEmitidas() {
     setProcessandoId(nota.id)
     setMensagem({ tipo: '', texto: '' })
     try {
-      const resultado = await window.electronAPI.emitirNfceVenda(nota.venda_id, {})
+      const resultado = nota.devolucao_id
+        ? await window.electronAPI.emitirNfeDevolucao(nota.devolucao_id)
+        : await window.electronAPI.emitirNfceVenda(nota.venda_id, {})
+      const nome = nota.devolucao_id ? 'NF-e' : 'Cupom'
       setMensagem(
         resultado?.status === 'autorizado'
-          ? { tipo: 'success', texto: `Cupom nº ${resultado.numero} autorizado.` }
-          : { tipo: 'error', texto: resultado?.mensagem || 'O cupom não foi autorizado.' },
+          ? { tipo: 'success', texto: `${nome} nº ${resultado.numero} autorizado.` }
+          : resultado?.status === 'processando_autorizacao'
+            ? { tipo: 'success', texto: 'Nota em processamento na SEFAZ. Atualize a situação em instantes.' }
+            : { tipo: 'error', texto: resultado?.mensagem || 'A nota não foi autorizada.' },
       )
       await carregar()
     } catch (err) {
       setMensagem({ tipo: 'error', texto: mensagemErro(err, 'Erro ao emitir o cupom.') })
+    } finally {
+      setProcessandoId(null)
+    }
+  }
+
+  async function atualizarSituacao(nota) {
+    setProcessandoId(nota.id)
+    try {
+      await window.electronAPI.atualizarSituacaoNota(nota.id)
+      await carregar()
+    } catch (err) {
+      setMensagem({ tipo: 'error', texto: mensagemErro(err, 'Erro ao consultar a nota.') })
     } finally {
       setProcessandoId(null)
     }
@@ -93,7 +118,7 @@ export default function NotasEmitidas() {
     setCancelamento((prev) => ({ ...prev, salvando: true, erro: '' }))
     try {
       await window.electronAPI.cancelarNfce(cancelamento.nota.id, cancelamento.justificativa)
-      setMensagem({ tipo: 'success', texto: `Cupom nº ${cancelamento.nota.numero} cancelado.` })
+      setMensagem({ tipo: 'success', texto: `Nota nº ${cancelamento.nota.numero} cancelada.` })
       setCancelamento(null)
       await carregar()
     } catch (err) {
@@ -107,7 +132,8 @@ export default function NotasEmitidas() {
         <div className="produtos-header-left">
           <h2 className="dashboard-heading">Notas emitidas</h2>
           <p className="dashboard-subtitle">
-            Cupons fiscais (NFC-e) das vendas do PDV. Reenvie os que deram erro, reimprima ou cancele.
+            Cupons fiscais (NFC-e) das vendas e NF-e de devolução ao artesão. Reenvie as que deram erro, reimprima
+            ou cancele.
           </p>
         </div>
         <div className="notas-emitidas-filtro">
@@ -124,8 +150,8 @@ export default function NotasEmitidas() {
           <thead>
             <tr>
               <th>Data</th>
-              <th>Venda</th>
-              <th>Cupom</th>
+              <th>Origem</th>
+              <th>Nota</th>
               <th>Valor</th>
               <th>Situação</th>
               <th>Ações</th>
@@ -146,9 +172,10 @@ export default function NotasEmitidas() {
                 return (
                   <tr key={nota.id}>
                     <td>{formatarDataHora(nota.venda_data || nota.created_at)}</td>
-                    <td>#{nota.venda_id}</td>
+                    <td>{rotuloOrigem(nota)}</td>
                     <td>
-                      {nota.numero ? `${nota.numero} / ${nota.serie}` : '—'}
+                      {nota.modelo === '55' ? 'NF-e ' : 'NFC-e '}
+                      {nota.numero ? `${nota.numero} / ${nota.serie}` : ''}
                       {nota.ambiente === '2' && <span className="notas-entrada-cfop">Homologação</span>}
                     </td>
                     <td>{formatarMoeda(nota.valor_total)}</td>
@@ -174,7 +201,17 @@ export default function NotasEmitidas() {
                             </button>
                           </>
                         )}
-                        {STATUS_REENVIAR.includes(nota.status) && !nota.venda_excluida_em && (
+                        {nota.status === 'processando_autorizacao' && (
+                          <button
+                            type="button"
+                            className="produtos-btn-quiet"
+                            onClick={() => atualizarSituacao(nota)}
+                            disabled={processandoId === nota.id}
+                          >
+                            Atualizar situação
+                          </button>
+                        )}
+                        {STATUS_REENVIAR.includes(nota.status) && !nota.venda_excluida_em && !nota.devolucao_excluida_em && (
                           <button
                             type="button"
                             className="produtos-btn-quiet"
@@ -198,7 +235,9 @@ export default function NotasEmitidas() {
         <div className="modal-overlay" onClick={() => !cancelamento.salvando && setCancelamento(null)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h3>Cancelar cupom nº {cancelamento.nota.numero}</h3>
+              <h3>
+                Cancelar {cancelamento.nota.modelo === '55' ? 'NF-e' : 'cupom'} nº {cancelamento.nota.numero}
+              </h3>
               <button
                 type="button"
                 className="modal-close"

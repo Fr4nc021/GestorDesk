@@ -4,6 +4,7 @@ import { formatarCpfCnpj } from '../utils/documento'
 import { calcularFormacao, formatarMoeda, precoSugerido } from '../utils/formacaoPreco'
 import { formatarNcm } from '../utils/fiscal'
 import { TIPOS_NOTA_ENTRADA, lerNfeXml } from '../utils/nfeXml'
+import { mensagemErro } from '../utils/erros'
 
 function formatarData(iso) {
   if (!iso) return '—'
@@ -99,6 +100,7 @@ export default function NotasEntrada() {
   const [devolucao, setDevolucao] = useState(null)
   const [salvandoDevolucao, setSalvandoDevolucao] = useState(false)
   const [erroDevolucao, setErroDevolucao] = useState('')
+  const [emitindoDevolucaoId, setEmitindoDevolucaoId] = useState(null)
   const [mensagem, setMensagem] = useState({ tipo: '', texto: '' })
   const inputArquivoRef = useRef(null)
 
@@ -396,6 +398,34 @@ export default function NotasEntrada() {
       setErroDevolucao(err?.message || 'Erro ao registrar a devolução.')
     } finally {
       setSalvandoDevolucao(false)
+    }
+  }
+
+  async function emitirNotaDevolucao(dev) {
+    setEmitindoDevolucaoId(dev.id)
+    setMensagem({ tipo: '', texto: '' })
+    try {
+      const nota = await window.electronAPI.emitirNfeDevolucao(dev.id)
+      if (nota?.status === 'autorizado') {
+        setMensagem({ tipo: 'success', texto: `NF-e de devolução nº ${nota.numero} autorizada.` })
+      } else if (nota?.status === 'processando_autorizacao') {
+        setMensagem({ tipo: 'success', texto: 'NF-e enviada e ainda em processamento na SEFAZ. Confira em Notas emitidas.' })
+      } else {
+        setMensagem({ tipo: 'error', texto: nota?.mensagem || 'A NF-e não foi autorizada.' })
+      }
+      if (notaDetalhe) await abrirDetalhe(notaDetalhe)
+    } catch (err) {
+      setMensagem({ tipo: 'error', texto: mensagemErro(err, 'Erro ao emitir a NF-e de devolução.') })
+    } finally {
+      setEmitindoDevolucaoId(null)
+    }
+  }
+
+  async function imprimirNotaDevolucao(dev) {
+    try {
+      await window.electronAPI.imprimirNfce(dev.nota_fiscal.id)
+    } catch (err) {
+      setMensagem({ tipo: 'error', texto: mensagemErro(err, 'Não foi possível abrir a nota.') })
     }
   }
 
@@ -797,14 +827,37 @@ export default function NotasEntrada() {
                           .join(', ')}
                       </small>
                       <small>
-                        {dev.status === 'aguardando_nf' ? 'NF-e de devolução (5918) pendente' : 'NF-e emitida'}
+                        {dev.status === 'nf_emitida' && dev.nota_fiscal
+                          ? `NF-e de devolução nº ${dev.nota_fiscal.numero} autorizada`
+                          : dev.nota_fiscal?.status === 'processando_autorizacao'
+                            ? 'NF-e de devolução em processamento'
+                            : dev.nota_fiscal?.mensagem
+                              ? `NF-e não autorizada: ${dev.nota_fiscal.mensagem}`
+                              : 'NF-e de devolução (5918) pendente'}
                       </small>
                     </div>
-                    {dev.status === 'aguardando_nf' && (
-                      <button type="button" className="produtos-btn-quiet" onClick={() => cancelarDevolucao(dev)}>
-                        Cancelar
-                      </button>
-                    )}
+                    <div className="artesaos-acoes">
+                      {dev.status === 'aguardando_nf' && (
+                        <>
+                          <button
+                            type="button"
+                            className="produtos-btn-quiet"
+                            onClick={() => emitirNotaDevolucao(dev)}
+                            disabled={emitindoDevolucaoId === dev.id}
+                          >
+                            {emitindoDevolucaoId === dev.id ? 'Emitindo...' : 'Emitir NF-e'}
+                          </button>
+                          <button type="button" className="produtos-btn-quiet" onClick={() => cancelarDevolucao(dev)}>
+                            Cancelar
+                          </button>
+                        </>
+                      )}
+                      {dev.status === 'nf_emitida' && dev.nota_fiscal?.status === 'autorizado' && (
+                        <button type="button" className="produtos-btn-quiet" onClick={() => imprimirNotaDevolucao(dev)}>
+                          Ver DANFE
+                        </button>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>

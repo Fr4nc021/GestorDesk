@@ -560,6 +560,12 @@ db.exec(`
 `)
 
 try {
+  if (!tabelaTemColuna(db, 'notas_fiscais', 'devolucao_id')) {
+    db.exec(`ALTER TABLE notas_fiscais ADD COLUMN devolucao_id INTEGER REFERENCES devolucoes_artesao(id)`)
+  }
+} catch (_) {}
+
+try {
   if (!tabelaTemColuna(db, 'notas_entrada', 'acerto_inicio')) {
     db.exec(`ALTER TABLE notas_entrada ADD COLUMN acerto_inicio TEXT`)
   }
@@ -2309,7 +2315,16 @@ function listarDevolucoesArtesao(notaEntradaId = null) {
     WHERE di.devolucao_id = ?
     ORDER BY di.id
   `)
-  return devolucoes.map((d) => ({ ...d, itens: getItens.all(d.id) }))
+  return devolucoes.map((d) => {
+    const nota = ultimaNotaFiscalDaDevolucao(d.id)
+    return {
+      ...d,
+      itens: getItens.all(d.id),
+      nota_fiscal: nota
+        ? { id: nota.id, status: nota.status, numero: nota.numero, serie: nota.serie, mensagem: nota.mensagem }
+        : null,
+    }
+  })
 }
 
 /** Cancela uma devolução que ainda não teve NF-e emitida e devolve as peças ao estoque. */
@@ -2317,6 +2332,10 @@ function cancelarDevolucaoArtesao(id) {
   const devolucao = db.prepare('SELECT id, status FROM devolucoes_artesao WHERE id = ? AND deleted_at IS NULL').get(id)
   if (!devolucao) throw new Error('Devolução não encontrada.')
   if (devolucao.status !== 'aguardando_nf') throw new Error('Esta devolução já tem nota fiscal emitida.')
+  const notaFiscal = ultimaNotaFiscalDaDevolucao(id)
+  if (notaFiscal && ['enviando', 'processando_autorizacao', 'autorizado'].includes(notaFiscal.status)) {
+    throw new Error('A NF-e desta devolução está em processamento ou autorizada. Confira em Notas emitidas.')
+  }
   const itens = db.prepare('SELECT produto_id, quantidade FROM devolucoes_artesao_itens WHERE devolucao_id = ?').all(id)
   const updateEstoque = db.prepare(`UPDATE produtos SET estoque = estoque + ?, sync_status = 'pending' WHERE id = ?`)
   const insertMov = db.prepare(`
@@ -2362,12 +2381,19 @@ const CAMPOS_NOTA_FISCAL = [
   'xml', 'resposta', 'cancelada_em', 'justificativa_cancelamento',
 ]
 
-function criarNotaFiscal({ venda_id, ref, ambiente, valor_total, requisicao }) {
+function criarNotaFiscal({ venda_id = null, devolucao_id = null, modelo = '65', ref, ambiente, valor_total, requisicao }) {
   const id = db.prepare(`
-    INSERT INTO notas_fiscais (venda_id, ref, ambiente, status, valor_total, requisicao)
-    VALUES (?, ?, ?, 'enviando', ?, ?)
-  `).run(venda_id ?? null, ref, String(ambiente), Number(valor_total) || 0, requisicao ? JSON.stringify(requisicao) : null)
-    .lastInsertRowid
+    INSERT INTO notas_fiscais (venda_id, devolucao_id, modelo, ref, ambiente, status, valor_total, requisicao)
+    VALUES (?, ?, ?, ?, ?, 'enviando', ?, ?)
+  `).run(
+    venda_id,
+    devolucao_id,
+    modelo,
+    ref,
+    String(ambiente),
+    Number(valor_total) || 0,
+    requisicao ? JSON.stringify(requisicao) : null,
+  ).lastInsertRowid
   return obterNotaFiscal(id)
 }
 
@@ -2394,6 +2420,39 @@ function contarTentativasNotaFiscal(vendaId) {
   return db.prepare('SELECT COUNT(*) as n FROM notas_fiscais WHERE venda_id = ?').get(vendaId).n
 }
 
+/** Última tentativa de NF-e de uma devolução ao artesão. */
+function ultimaNotaFiscalDaDevolucao(devolucaoId) {
+  return db.prepare('SELECT * FROM notas_fiscais WHERE devolucao_id = ? ORDER BY id DESC LIMIT 1').get(devolucaoId) || null
+}
+
+function contarTentativasNotaFiscalDevolucao(devolucaoId) {
+  return db.prepare('SELECT COUNT(*) as n FROM notas_fiscais WHERE devolucao_id = ?').get(devolucaoId).n
+}
+
+/** Devolução com itens, chave da remessa e cadastro do artesão, para montar a NF-e 5918. */
+function obterDevolucaoParaNfe(devolucaoId) {
+  const devolucao = db.prepare('SELECT * FROM devolucoes_artesao WHERE id = ? AND deleted_at IS NULL').get(devolucaoId)
+  if (!devolucao) throw new Error('Devolução não encontrada.')
+  const remessa = db.prepare('SELECT chave FROM notas_entrada WHERE id = ?').get(devolucao.nota_entrada_id)
+  const artesao = devolucao.artesao_id ? db.prepare('SELECT * FROM artesoes WHERE id = ?').get(devolucao.artesao_id) : null
+  const itens = db.prepare(`
+    SELECT di.produto_id, di.quantidade, di.valor_unitario,
+           i.codigo, i.descricao, i.ncm, i.cest, i.unidade,
+           p.nome as produto_nome, p.codigo_barras, p.origem
+    FROM devolucoes_artesao_itens di
+    JOIN notas_entrada_itens i ON i.id = di.nota_item_id
+    LEFT JOIN produtos p ON p.id = di.produto_id
+    WHERE di.devolucao_id = ?
+    ORDER BY di.id
+  `).all(devolucaoId)
+  return { devolucao, itens, chaveRemessa: remessa?.chave, artesao }
+}
+
+/** Status da devolução acompanha a NF-e: 'nf_emitida' trava o cancelamento da devolução. */
+function definirStatusDevolucao(devolucaoId, status) {
+  db.prepare('UPDATE devolucoes_artesao SET status = ? WHERE id = ?').run(status, devolucaoId)
+}
+
 /** Lista as vendas com a situação da NFC-e (a última tentativa de cada uma). */
 function listarNotasFiscais({ dataInicio, dataFim } = {}) {
   const filtros = []
@@ -2408,13 +2467,18 @@ function listarNotasFiscais({ dataInicio, dataFim } = {}) {
   }
   const where = filtros.length ? `AND ${filtros.join(' AND ')}` : ''
   return db.prepare(`
-    SELECT n.id, n.venda_id, n.modelo, n.ref, n.ambiente, n.status, n.numero, n.serie, n.chave, n.mensagem,
-           n.valor_total, n.caminho_danfe, n.cancelada_em, n.created_at, n.updated_at,
-           v.data as venda_data, v.deleted_at as venda_excluida_em,
-           (SELECT COUNT(*) FROM notas_fiscais t WHERE t.venda_id = n.venda_id) as tentativas
+    SELECT n.id, n.venda_id, n.devolucao_id, n.modelo, n.ref, n.ambiente, n.status, n.numero, n.serie, n.chave,
+           n.mensagem, n.valor_total, n.caminho_danfe, n.cancelada_em, n.created_at, n.updated_at,
+           v.data as venda_data, v.deleted_at as venda_excluida_em, d.deleted_at as devolucao_excluida_em,
+           a.razao_social as artesao_razao_social, a.nome_fantasia as artesao_nome_fantasia, a.nome as artesao_nome,
+           (SELECT COUNT(*) FROM notas_fiscais t
+              WHERE t.venda_id IS n.venda_id AND t.devolucao_id IS n.devolucao_id) as tentativas
     FROM notas_fiscais n
     LEFT JOIN vendas v ON v.id = n.venda_id
-    WHERE n.id = (SELECT MAX(t.id) FROM notas_fiscais t WHERE t.venda_id = n.venda_id) ${where}
+    LEFT JOIN devolucoes_artesao d ON d.id = n.devolucao_id
+    LEFT JOIN artesoes a ON a.id = d.artesao_id
+    WHERE n.id = (SELECT MAX(t.id) FROM notas_fiscais t
+                    WHERE t.venda_id IS n.venda_id AND t.devolucao_id IS n.devolucao_id) ${where}
     ORDER BY n.created_at DESC, n.id DESC
   `).all(...params)
 }
@@ -2636,4 +2700,8 @@ module.exports = {
   ultimaNotaFiscalDaVenda,
   contarTentativasNotaFiscal,
   listarNotasFiscais,
+  ultimaNotaFiscalDaDevolucao,
+  contarTentativasNotaFiscalDevolucao,
+  obterDevolucaoParaNfe,
+  definirStatusDevolucao,
 }

@@ -56,6 +56,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // NFC-e (Focus NFe)
   emitirNfceVenda: (vendaId, opcoes) => invoke('emitir-nfce-venda', vendaId, opcoes),
+  emitirNfeDevolucao: (devolucaoId) => invoke('emitir-nfe-devolucao', devolucaoId),
+  atualizarSituacaoNota: (notaId) => invoke('atualizar-situacao-nota', notaId),
   cancelarNfce: (notaId, justificativa) => invoke('cancelar-nfce', notaId, justificativa),
   listarNotasFiscais: (filtros) => invoke('listar-notas-fiscais', filtros),
   imprimirNfce: (notaId) => invoke('imprimir-nfce', notaId),
