@@ -8,6 +8,7 @@ import Artesaos from './pages/Artesaos'
 import Estoque from './pages/Estoque'
 import Caixa from './pages/Caixa'
 import Configuracoes from './pages/Configuracoes'
+import NotasEntrada from './pages/NotasEntrada'
 import Layout from './Layout'
 
 function obterUsuarioLogado() {
@@ -54,6 +55,7 @@ export default function App() {
           <Route path="pdv" element={<PDV />} />
           <Route path="artesaos" element={<Artesaos />} />
           <Route path="estoque" element={<Estoque />} />
+          <Route path="notas-entrada" element={<NotasEntrada />} />
           <Route path="caixa" element={<Caixa />} />
           <Route path="relatorios" element={<Relatorios />} />
           <Route path="configuracoes" element={<Configuracoes />} />

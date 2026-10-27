@@ -251,6 +251,11 @@ async function syncWithSupabase() {
   const log = (msg) => console.log(`[Sync] ${msg}`)
   const logError = (msg, err) => console.error(`[Sync] ${msg}`, err?.message || err)
 
+  if (process.env.GESTORDESK_SYNC_DESATIVADO === '1') {
+    log('Sincronização desativada (modo de testes).')
+    return { success: false, error: 'Sincronização desativada no modo de testes' }
+  }
+
   log('Início da sincronização.')
 
   const temInternet = await hasInternetConnection()

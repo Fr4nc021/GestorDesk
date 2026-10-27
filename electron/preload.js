@@ -43,6 +43,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   obterConfigFiscal: () => invoke('obter-config-fiscal'),
   salvarConfigFiscal: (data) => invoke('salvar-config-fiscal', data),
 
+  // Notas de entrada (XML de NF-e do fornecedor)
+  buscarArtesaoPorDocumento: (documento) => invoke('buscar-artesao-por-documento', documento),
+  buscarNotaEntradaPorChave: (chave) => invoke('buscar-nota-entrada-por-chave', chave),
+  importarNotaEntrada: (data) => invoke('importar-nota-entrada', data),
+  listarNotasEntrada: () => invoke('listar-notas-entrada'),
+  listarItensNotaEntrada: (notaId) => invoke('listar-itens-nota-entrada', notaId),
+  excluirNotaEntrada: (id) => invoke('excluir-nota-entrada', id),
+
   // Vendas
   criarVenda: (data) => invoke('criar-venda', data),
   listarVendas: () => invoke('listar-vendas'),

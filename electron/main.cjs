@@ -58,10 +58,26 @@ loadEnv()
 
 // Banco sempre em userData (dev e instalado): atualizar o app nao troca esse arquivo.
 // Sobrescreva com GESTORDESK_DB_PATH no ambiente se precisar de outro caminho.
+// Em desenvolvimento (npm start) o app usa uma cópia de testes do banco e não sincroniza com o
+// Supabase, para que testes nunca cheguem ao banco oficial da loja. GESTORDESK_SYNC_DEV=1 libera.
 {
   const userDataDir = app.getPath('userData')
   if (!process.env.GESTORDESK_DB_PATH) {
-    process.env.GESTORDESK_DB_PATH = path.join(userDataDir, 'database.db')
+    const bancoOficial = path.join(userDataDir, 'database.db')
+    if (app.isPackaged) {
+      process.env.GESTORDESK_DB_PATH = bancoOficial
+    } else {
+      const bancoTeste = path.join(userDataDir, 'database-teste.db')
+      if (!fs.existsSync(bancoTeste) && fs.existsSync(bancoOficial)) {
+        fs.copyFileSync(bancoOficial, bancoTeste)
+        console.log(`[DB] Cópia de testes criada: ${bancoTeste}`)
+      }
+      process.env.GESTORDESK_DB_PATH = bancoTeste
+    }
+  }
+  if (!app.isPackaged && process.env.GESTORDESK_SYNC_DEV !== '1') {
+    process.env.GESTORDESK_SYNC_DESATIVADO = '1'
+    console.log('[Sync] Desativado em desenvolvimento (banco de testes). Use GESTORDESK_SYNC_DEV=1 para ligar.')
   }
   if (!process.env.GESTORDESK_USER_DATA_DIR) {
     process.env.GESTORDESK_USER_DATA_DIR = userDataDir
@@ -125,6 +141,12 @@ const {
   salvarRelatoriosPeriodoPadrao,
   obterConfigFiscal,
   salvarConfigFiscal,
+  buscarArtesaoPorDocumento,
+  buscarNotaEntradaPorChave,
+  importarNotaEntrada,
+  listarNotasEntrada,
+  listarItensNotaEntrada,
+  excluirNotaEntrada,
 } = require('./database')
 
 // CLI: criar usuário e sair — node electron/main.cjs não funciona; use: npx electron . criar-usuario LOGIN SENHA
@@ -237,6 +259,12 @@ ipcMain.handle('obter-relatorios-periodo-padrao', () => obterRelatoriosPeriodoPa
 ipcMain.handle('salvar-relatorios-periodo-padrao', (_, data) => salvarRelatoriosPeriodoPadrao(data))
 ipcMain.handle('obter-config-fiscal', () => obterConfigFiscal())
 ipcMain.handle('salvar-config-fiscal', (_, data) => salvarConfigFiscal(data))
+ipcMain.handle('buscar-artesao-por-documento', (_, documento) => buscarArtesaoPorDocumento(documento))
+ipcMain.handle('buscar-nota-entrada-por-chave', (_, chave) => buscarNotaEntradaPorChave(chave))
+ipcMain.handle('importar-nota-entrada', (_, data) => importarNotaEntrada(data))
+ipcMain.handle('listar-notas-entrada', () => listarNotasEntrada())
+ipcMain.handle('listar-itens-nota-entrada', (_, notaId) => listarItensNotaEntrada(notaId))
+ipcMain.handle('excluir-nota-entrada', (_, id) => excluirNotaEntrada(id))
 
 ipcMain.handle('criar-venda', (_, data) => criarVenda(data))
 ipcMain.handle('listar-vendas', () => listarVendas())

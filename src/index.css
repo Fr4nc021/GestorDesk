@@ -309,6 +309,79 @@
   vertical-align: middle;
 }
 
+.notas-entrada-cfop {
+  display: block;
+  font-size: 12px;
+  color: #757575;
+}
+
+.notas-entrada-modal {
+  max-width: 980px;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.notas-entrada-resumo {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.notas-entrada-resumo > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px 14px;
+  border: 1px solid #e0e0e0;
+  border-radius: 12px;
+}
+
+.notas-entrada-resumo span {
+  font-size: 12px;
+  color: #757575;
+}
+
+.notas-entrada-resumo small {
+  font-size: 12px;
+  color: #555;
+}
+
+.notas-entrada-itens {
+  border: 1px solid #e0e0e0;
+  border-radius: 12px;
+  overflow: hidden;
+  margin-bottom: 12px;
+}
+
+.notas-entrada-acao select,
+.notas-entrada-acao input {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  font-size: 13px;
+  background: #fff;
+}
+
+.notas-entrada-acao {
+  min-width: 260px;
+}
+
+.notas-entrada-acao > * + * {
+  margin-top: 6px;
+}
+
+.notas-entrada-novo {
+  display: grid;
+  grid-template-columns: 1fr 110px;
+  gap: 6px;
+}
+
+.notas-entrada-chave {
+  word-break: break-all;
+}
+
 .fiscal-mostrar-csc {
   margin-top: 6px;
   padding: 0;

@@ -462,6 +462,49 @@ try {
   }
 } catch (_) {}
 
+// Notas de entrada (XML de NF-e do fornecedor). Ficam só neste computador por enquanto.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS notas_entrada (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chave TEXT NOT NULL UNIQUE,
+    modelo TEXT,
+    serie TEXT,
+    numero TEXT,
+    data_emissao TEXT,
+    natureza_operacao TEXT,
+    cfop TEXT,
+    tipo TEXT NOT NULL,
+    emitente_cpf_cnpj TEXT,
+    emitente_nome TEXT,
+    artesao_id INTEGER,
+    valor_total REAL NOT NULL DEFAULT 0,
+    movimentou_estoque INTEGER NOT NULL DEFAULT 0,
+    xml TEXT NOT NULL,
+    created_at TEXT DEFAULT (datetime('now', 'localtime')),
+    deleted_at TEXT,
+    FOREIGN KEY (artesao_id) REFERENCES artesoes(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS notas_entrada_itens (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nota_id INTEGER NOT NULL,
+    numero_item INTEGER,
+    codigo TEXT,
+    descricao TEXT,
+    ncm TEXT,
+    cest TEXT,
+    cfop TEXT,
+    unidade TEXT,
+    quantidade REAL NOT NULL DEFAULT 0,
+    valor_unitario REAL NOT NULL DEFAULT 0,
+    valor_total REAL NOT NULL DEFAULT 0,
+    produto_id INTEGER,
+    quantidade_estoque INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY (nota_id) REFERENCES notas_entrada(id),
+    FOREIGN KEY (produto_id) REFERENCES produtos(id)
+  );
+`)
+
 function getPendingRecordsForSync(tabela) {
   if (!tabelaTemColuna(db, tabela, 'sync_status')) {
     return db.prepare(`SELECT * FROM ${tabela}`).all()
@@ -1884,6 +1927,222 @@ function aplicarPrecoFormacaoEmTodos(multiplicador) {
   return { atualizados: produtos.length }
 }
 
+// --- Notas de entrada (XML de NF-e do fornecedor) ---
+
+const TIPOS_NOTA_ENTRADA = {
+  remessa_consignacao: { movimentaEstoque: true, tipoPosse: 'consignado' },
+  faturamento_consignacao: { movimentaEstoque: false, tipoPosse: 'consignado' },
+  compra: { movimentaEstoque: true, tipoPosse: 'proprio' },
+  compra_st: { movimentaEstoque: true, tipoPosse: 'proprio' },
+  outra: { movimentaEstoque: false, tipoPosse: 'consignado' },
+}
+
+function buscarArtesaoPorDocumento(documento) {
+  const digitos = String(documento ?? '').replace(/\D/g, '')
+  if (!digitos) return null
+  return (
+    db
+      .prepare(`
+        SELECT * FROM artesoes
+        WHERE deleted_at IS NULL
+          AND REPLACE(REPLACE(REPLACE(COALESCE(cpf_cnpj, ''), '.', ''), '/', ''), '-', '') = ?
+        ORDER BY id
+        LIMIT 1
+      `)
+      .get(digitos) || null
+  )
+}
+
+function buscarNotaEntradaPorChave(chave) {
+  return (
+    db
+      .prepare('SELECT id, numero, data_emissao, created_at FROM notas_entrada WHERE chave = ? AND deleted_at IS NULL')
+      .get(String(chave ?? '').replace(/\D/g, '')) || null
+  )
+}
+
+/**
+ * Grava a nota e, se for remessa ou compra, cadastra/vincula os produtos e dá entrada no estoque.
+ * @param {object} dados - { nota, itens, artesao_id, novo_artesao, xml }
+ *   itens[i].acao: 'criar' | 'vincular' | 'ignorar'; 'criar' usa nome e preco_venda; 'vincular' usa produto_id.
+ */
+function importarNotaEntrada({ nota, itens, artesao_id = null, novo_artesao = null, xml }) {
+  const chave = String(nota?.chave ?? '').replace(/\D/g, '')
+  if (chave.length !== 44) throw new Error('Chave de acesso inválida.')
+  if (!xml) throw new Error('XML da nota não informado.')
+  const regra = TIPOS_NOTA_ENTRADA[nota.tipo]
+  if (!regra) throw new Error('Tipo de nota inválido.')
+  if (!Array.isArray(itens) || itens.length === 0) throw new Error('A nota não tem itens.')
+
+  const insertNota = db.prepare(`
+    INSERT INTO notas_entrada (
+      chave, modelo, serie, numero, data_emissao, natureza_operacao, cfop, tipo,
+      emitente_cpf_cnpj, emitente_nome, artesao_id, valor_total, movimentou_estoque, xml
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `)
+  const insertItem = db.prepare(`
+    INSERT INTO notas_entrada_itens (
+      nota_id, numero_item, codigo, descricao, ncm, cest, cfop, unidade,
+      quantidade, valor_unitario, valor_total, produto_id, quantidade_estoque
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `)
+  const getProduto = db.prepare('SELECT * FROM produtos WHERE id = ? AND deleted_at IS NULL')
+  const updateFiscalProduto = db.prepare(`
+    UPDATE produtos SET ncm = COALESCE(?, ncm), cest = COALESCE(?, cest), tipo_posse = ?, sync_status = 'pending'
+    WHERE id = ?
+  `)
+
+  return db.transaction(() => {
+    if (buscarNotaEntradaPorChave(chave)) throw new Error('Esta nota já foi importada.')
+
+    let artesaoId = artesao_id ? Number(artesao_id) : null
+    if (!artesaoId && novo_artesao) {
+      artesaoId = Number(criarArtesao(novo_artesao).id)
+    }
+    if (!artesaoId && itens.some((i) => i.acao === 'criar')) {
+      throw new Error('Selecione o fornecedor para cadastrar as peças.')
+    }
+
+    const notaId = insertNota.run(
+      chave,
+      nota.modelo || '55',
+      nota.serie || null,
+      nota.numero || null,
+      nota.data_emissao || null,
+      nota.natureza_operacao || null,
+      nota.cfop || null,
+      nota.tipo,
+      String(nota.emitente_cpf_cnpj ?? '').replace(/\D/g, '') || null,
+      nota.emitente_nome || null,
+      artesaoId,
+      Number(nota.valor_total) || 0,
+      regra.movimentaEstoque ? 1 : 0,
+      xml,
+    ).lastInsertRowid
+
+    let produtosCriados = 0
+    let unidadesEntrada = 0
+    for (const item of itens) {
+      const quantidadeEstoque = Math.round(Number(item.quantidade) || 0)
+      const ncm = String(item.ncm ?? '').replace(/\D/g, '')
+      const cest = String(item.cest ?? '').replace(/\D/g, '')
+      let produtoId = null
+
+      if (item.acao === 'criar') {
+        const nome = String(item.nome || item.descricao || '').trim()
+        if (!nome) throw new Error(`Item ${item.numero_item}: informe o nome do produto.`)
+        produtoId = Number(
+          criarProduto({
+            nome,
+            preco_custo: Number(item.valor_unitario) || 0,
+            preco_venda: Number(item.preco_venda) || 0,
+            estoque: 0,
+            artesao_id: artesaoId,
+            tipo_posse: regra.tipoPosse,
+            ncm: ncm.length === 8 ? ncm : '',
+            cest: cest.length === 7 ? cest : '',
+            unidade: item.unidade || 'UN',
+          }).id,
+        )
+        produtosCriados += 1
+      } else if (item.acao === 'vincular') {
+        produtoId = Number(item.produto_id)
+        if (!getProduto.get(produtoId)) throw new Error(`Item ${item.numero_item}: produto não encontrado.`)
+        if (regra.movimentaEstoque) {
+          updateFiscalProduto.run(
+            ncm.length === 8 ? ncm : null,
+            cest.length === 7 ? cest : null,
+            regra.tipoPosse,
+            produtoId,
+          )
+        }
+      }
+
+      const entraNoEstoque = regra.movimentaEstoque && produtoId && quantidadeEstoque > 0
+      if (entraNoEstoque) {
+        adicionarEstoque(produtoId, quantidadeEstoque, 'nfe_entrada')
+        unidadesEntrada += quantidadeEstoque
+      }
+
+      insertItem.run(
+        notaId,
+        item.numero_item || null,
+        item.codigo || null,
+        item.descricao || null,
+        ncm || null,
+        cest || null,
+        item.cfop || null,
+        item.unidade || null,
+        Number(item.quantidade) || 0,
+        Number(item.valor_unitario) || 0,
+        Number(item.valor_total) || 0,
+        produtoId,
+        entraNoEstoque ? quantidadeEstoque : 0,
+      )
+    }
+
+    return { id: notaId, artesao_id: artesaoId, produtosCriados, unidadesEntrada }
+  })()
+}
+
+function listarNotasEntrada() {
+  return db.prepare(`
+    SELECT n.id, n.chave, n.serie, n.numero, n.data_emissao, n.cfop, n.tipo, n.valor_total,
+           n.movimentou_estoque, n.emitente_nome, n.emitente_cpf_cnpj, n.artesao_id, n.created_at,
+           a.razao_social as artesao_razao_social, a.nome_fantasia as artesao_nome_fantasia, a.nome as artesao_nome,
+           (SELECT COUNT(*) FROM notas_entrada_itens i WHERE i.nota_id = n.id) as qtd_itens,
+           (SELECT COALESCE(SUM(i.quantidade_estoque), 0) FROM notas_entrada_itens i WHERE i.nota_id = n.id) as unidades_estoque
+    FROM notas_entrada n
+    LEFT JOIN artesoes a ON a.id = n.artesao_id
+    WHERE n.deleted_at IS NULL
+    ORDER BY COALESCE(n.data_emissao, n.created_at) DESC, n.id DESC
+  `).all()
+}
+
+function listarItensNotaEntrada(notaId) {
+  return db.prepare(`
+    SELECT i.*, p.nome as produto_nome, p.variacao as produto_variacao
+    FROM notas_entrada_itens i
+    LEFT JOIN produtos p ON p.id = i.produto_id
+    WHERE i.nota_id = ?
+    ORDER BY i.numero_item, i.id
+  `).all(notaId)
+}
+
+/** Exclui a importação e retira do estoque o que ela tinha lançado. Os produtos criados continuam cadastrados. */
+function excluirNotaEntrada(id) {
+  const nota = db.prepare('SELECT id FROM notas_entrada WHERE id = ? AND deleted_at IS NULL').get(id)
+  if (!nota) throw new Error('Nota não encontrada.')
+  const itens = db
+    .prepare('SELECT produto_id, quantidade_estoque FROM notas_entrada_itens WHERE nota_id = ? AND quantidade_estoque > 0')
+    .all(id)
+  const getEstoque = db.prepare('SELECT nome, estoque FROM produtos WHERE id = ?')
+  const updateEstoque = db.prepare(`UPDATE produtos SET estoque = estoque - ?, sync_status = 'pending' WHERE id = ?`)
+  const insertMov = db.prepare(`
+    INSERT INTO movimentacoes_estoque (produto_id, tipo, quantidade, origem, data)
+    VALUES (?, 'saida', ?, 'estorno_nfe', datetime('now', 'localtime'))
+  `)
+
+  db.transaction(() => {
+    for (const item of itens) {
+      const produto = getEstoque.get(item.produto_id)
+      if (produto && Number(produto.estoque) < item.quantidade_estoque) {
+        throw new Error(
+          `Não é possível excluir: "${produto.nome}" já tem peças vendidas desta nota (estoque ${produto.estoque}).`,
+        )
+      }
+      assertUmaLinhaProdutoEstoque(
+        updateEstoque.run(item.quantidade_estoque, item.produto_id),
+        item.produto_id,
+        'Estorno de estoque (exclusão de nota de entrada)',
+      )
+      insertMov.run(item.produto_id, item.quantidade_estoque)
+    }
+    db.prepare("UPDATE notas_entrada SET deleted_at = datetime('now', 'localtime') WHERE id = ?").run(id)
+  })()
+  return { id }
+}
+
 // --- Configuração fiscal do emitente ---
 // Fica em `configuracoes` (chaves fiscal_*), local deste computador.
 
@@ -2064,4 +2323,10 @@ module.exports = {
   salvarRelatoriosPeriodoPadrao,
   obterConfigFiscal,
   salvarConfigFiscal,
+  buscarArtesaoPorDocumento,
+  buscarNotaEntradaPorChave,
+  importarNotaEntrada,
+  listarNotasEntrada,
+  listarItensNotaEntrada,
+  excluirNotaEntrada,
 }
