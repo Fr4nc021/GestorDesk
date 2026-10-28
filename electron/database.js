@@ -2003,8 +2003,8 @@ function aplicarPrecoFormacaoEmTodos(multiplicador) {
 const TIPOS_NOTA_ENTRADA = {
   remessa_consignacao: { movimentaEstoque: true, tipoPosse: 'consignado' },
   faturamento_consignacao: { movimentaEstoque: false, tipoPosse: 'consignado' },
-  compra: { movimentaEstoque: true, tipoPosse: 'proprio' },
-  compra_st: { movimentaEstoque: true, tipoPosse: 'proprio' },
+  compra: { movimentaEstoque: true, tipoPosse: 'proprio', icmsSt: false },
+  compra_st: { movimentaEstoque: true, tipoPosse: 'proprio', icmsSt: true },
   outra: { movimentaEstoque: false, tipoPosse: 'consignado' },
 }
 
@@ -2060,7 +2060,8 @@ function importarNotaEntrada({ nota, itens, artesao_id = null, novo_artesao = nu
   `)
   const getProduto = db.prepare('SELECT * FROM produtos WHERE id = ? AND deleted_at IS NULL')
   const updateFiscalProduto = db.prepare(`
-    UPDATE produtos SET ncm = COALESCE(?, ncm), cest = COALESCE(?, cest), tipo_posse = ?, sync_status = 'pending'
+    UPDATE produtos SET ncm = COALESCE(?, ncm), cest = COALESCE(?, cest), tipo_posse = ?,
+      icms_st = COALESCE(?, icms_st), sync_status = 'pending'
     WHERE id = ?
   `)
 
@@ -2113,6 +2114,7 @@ function importarNotaEntrada({ nota, itens, artesao_id = null, novo_artesao = nu
             estoque: 0,
             artesao_id: artesaoId,
             tipo_posse: regra.tipoPosse,
+            icms_st: Boolean(regra.icmsSt),
             ncm: ncm.length === 8 ? ncm : '',
             cest: cest.length === 7 ? cest : '',
             unidade: item.unidade || 'UN',
@@ -2127,12 +2129,15 @@ function importarNotaEntrada({ nota, itens, artesao_id = null, novo_artesao = nu
             ncm.length === 8 ? ncm : null,
             cest.length === 7 ? cest : null,
             regra.tipoPosse,
+            regra.icmsSt === undefined ? null : regra.icmsSt ? 1 : 0,
             produtoId,
           )
         }
       }
 
-      const entraNoEstoque = regra.movimentaEstoque && produtoId && quantidadeEstoque > 0
+      // Peça que já estava no estoque antes da importação (cadastrada no sistema antigo): só vincula, não soma.
+      const somarEstoque = item.acao === 'criar' || item.somar_estoque !== false
+      const entraNoEstoque = regra.movimentaEstoque && produtoId && quantidadeEstoque > 0 && somarEstoque
       if (entraNoEstoque) {
         adicionarEstoque(produtoId, quantidadeEstoque, 'nfe_entrada')
         unidadesEntrada += quantidadeEstoque

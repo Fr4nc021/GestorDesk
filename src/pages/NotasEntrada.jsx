@@ -194,6 +194,8 @@ export default function NotasEntrada() {
           ...item,
           acao,
           produto_id: mesmoNome ? String(mesmoNome.id) : '',
+          // Se o produto já tem estoque, provavelmente são as mesmas peças: por padrão não soma de novo.
+          somar_estoque: !mesmoNome || Number(mesmoNome.estoque || 0) <= 0,
           nome: item.descricao,
           preco_venda: precoParaInput(sugerido ?? item.valor_unitario),
         }
@@ -285,6 +287,7 @@ export default function NotasEntrada() {
           valor_total: item.valor_total,
           acao: item.acao,
           produto_id: item.acao === 'vincular' ? Number(item.produto_id) : null,
+          somar_estoque: item.acao === 'criar' || item.somar_estoque,
           nome: item.nome,
           preco_venda: parsePreco(item.preco_venda),
         })),
@@ -736,9 +739,20 @@ export default function NotasEntrada() {
                               <option key={p.id} value={p.id}>
                                 {p.nome}
                                 {p.variacao ? ` (${p.variacao})` : ''}
+                                {` · estoque ${p.estoque ?? 0}`}
                               </option>
                             ))}
                           </select>
+                        )}
+                        {item.acao === 'vincular' && regraPrevia.movimentaEstoque && (
+                          <label className="notas-entrada-somar">
+                            <input
+                              type="checkbox"
+                              checked={item.somar_estoque}
+                              onChange={(e) => atualizarItem(indice, 'somar_estoque', e.target.checked)}
+                            />
+                            Somar {formatarQuantidade(item.quantidade)} ao estoque
+                          </label>
                         )}
                       </td>
                     </tr>
@@ -749,7 +763,7 @@ export default function NotasEntrada() {
             {regraPrevia.movimentaEstoque && (
               <p className="modal-field-hint">
                 O preço de venda sugerido usa a Formação de Preço sobre o custo da nota. Produtos vinculados recebem o
-                NCM da nota.
+                NCM da nota. Desmarque "Somar ao estoque" quando as peças já estão contadas no estoque do sistema.
               </p>
             )}
 
