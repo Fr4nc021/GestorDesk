@@ -5,6 +5,7 @@ import { calcularFormacao, formatarMoeda, precoSugerido } from '../utils/formaca
 import { formatarNcm } from '../utils/fiscal'
 import { TIPOS_NOTA_ENTRADA, lerNfeXml } from '../utils/nfeXml'
 import { mensagemErro } from '../utils/erros'
+import { ORIGEM_CASAMENTO, encontrarProduto } from '../utils/casamentoProdutos'
 
 function formatarData(iso) {
   if (!iso) return '—'
@@ -165,11 +166,33 @@ export default function NotasEntrada() {
       }
       const artesao = await window.electronAPI.buscarArtesaoPorDocumento(nota.emitente.cpf_cnpj)
       const cadastros = await carregarCadastros()
-      montarPrevia(nota, xml, artesao, cadastros)
+      const vinculos = artesao ? (await window.electronAPI.listarVinculosNotaEntrada?.(artesao.id)) || [] : []
+      montarPrevia(nota, xml, artesao, { ...cadastros, vinculos })
     } catch (err) {
       console.error('[Notas de entrada] Erro ao ler XML:', err)
       setMensagem({ tipo: 'error', texto: err?.message || 'Não foi possível ler o XML.' })
     }
+  }
+
+  /** Liga cada item da nota a um produto do fornecedor; o que não tiver par seguro fica para a pessoa decidir. */
+  function casarItens(itensNota, regra, produtosDoArtesao, vinculos, mult) {
+    return itensNota.map((item) => {
+      const { produto, origem } = encontrarProduto(item, produtosDoArtesao, vinculos)
+      const sugerido = mult ? precoSugerido(item.valor_unitario, mult) : null
+      let acao = 'ignorar'
+      if (produto) acao = 'vincular'
+      else if (regra.movimentaEstoque) acao = produtosDoArtesao.length > 0 ? 'escolher' : 'criar'
+      return {
+        ...item,
+        acao,
+        origem,
+        produto_id: produto ? String(produto.id) : '',
+        // Se o produto já tem estoque, provavelmente são as mesmas peças: por padrão não soma de novo.
+        somar_estoque: !produto || Number(produto.estoque || 0) <= 0,
+        nome: item.descricao,
+        preco_venda: precoParaInput(sugerido ?? item.valor_unitario),
+      }
+    })
   }
 
   function montarPrevia(nota, xml, artesao, cadastros) {
@@ -179,28 +202,35 @@ export default function NotasEntrada() {
     setArtesaoEscolhido(artesao ? String(artesao.id) : 'novo')
     setErroPrevia('')
     setAcertoPeriodo(periodoAcertoPadrao(nota.data_emissao))
-    setItensPrevia(
-      nota.itens.map((item) => {
-        const mesmoNome = produtosDoArtesao.find(
-          (p) => p.nome.trim().toLowerCase() === item.descricao.trim().toLowerCase(),
-        )
-        const sugerido = cadastros.multiplicador
-          ? precoSugerido(item.valor_unitario, cadastros.multiplicador)
-          : null
-        let acao = 'ignorar'
-        if (regra.movimentaEstoque) acao = mesmoNome ? 'vincular' : 'criar'
-        else if (mesmoNome) acao = 'vincular'
-        return {
-          ...item,
-          acao,
-          produto_id: mesmoNome ? String(mesmoNome.id) : '',
-          // Se o produto já tem estoque, provavelmente são as mesmas peças: por padrão não soma de novo.
-          somar_estoque: !mesmoNome || Number(mesmoNome.estoque || 0) <= 0,
-          nome: item.descricao,
-          preco_venda: precoParaInput(sugerido ?? item.valor_unitario),
-        }
-      }),
+    setItensPrevia(casarItens(nota.itens, regra, produtosDoArtesao, cadastros.vinculos || [], cadastros.multiplicador))
+  }
+
+  /** Trocar o fornecedor refaz a ligação dos itens com os produtos dele. */
+  async function trocarArtesao(valor) {
+    setArtesaoEscolhido(valor)
+    if (!previa) return
+    const id = Number(valor)
+    const regra = TIPOS_NOTA_ENTRADA[previa.nota.tipo]
+    const produtosDoArtesao = id ? produtos.filter((p) => p.artesao_id === id) : []
+    let vinculos = []
+    try {
+      vinculos = id ? (await window.electronAPI.listarVinculosNotaEntrada?.(id)) || [] : []
+    } catch (err) {
+      console.error('[Notas de entrada] Erro ao carregar vínculos:', err)
+    }
+    setItensPrevia(casarItens(previa.nota.itens, regra, produtosDoArtesao, vinculos, multiplicador))
+  }
+
+  function escolherProduto(indice, produtoId) {
+    const produto = produtos.find((p) => String(p.id) === String(produtoId))
+    setItensPrevia((prev) =>
+      prev.map((item, i) =>
+        i === indice
+          ? { ...item, produto_id: produtoId, origem: null, somar_estoque: !produto || Number(produto.estoque || 0) <= 0 }
+          : item,
+      ),
     )
+    setErroPrevia('')
   }
 
   function atualizarItem(indice, campo, valor) {
@@ -240,6 +270,10 @@ export default function NotasEntrada() {
     const regra = TIPOS_NOTA_ENTRADA[nota.tipo]
 
     for (const item of itensPrevia) {
+      if (item.acao === 'escolher') {
+        setErroPrevia(`Item ${item.numero_item} (${item.descricao}): diga se é um produto que já existe ou um novo.`)
+        return
+      }
       if (item.acao === 'vincular' && !item.produto_id) {
         setErroPrevia(`Item ${item.numero_item}: escolha o produto a vincular.`)
         return
@@ -669,7 +703,7 @@ export default function NotasEntrada() {
               <select
                 id="artesaoNota"
                 value={artesaoEscolhido}
-                onChange={(e) => setArtesaoEscolhido(e.target.value)}
+                onChange={(e) => trocarArtesao(e.target.value)}
               >
                 {!previa.artesaoEncontrado && (
                   <option value="novo">Cadastrar {previa.nota.emitente.razao_social} como novo fornecedor</option>
@@ -681,6 +715,19 @@ export default function NotasEntrada() {
                 ))}
               </select>
             </div>
+
+            {(() => {
+              const ligados = itensPrevia.filter((i) => i.acao === 'vincular' && i.origem && i.origem !== 'sugestao').length
+              const conferir = itensPrevia.filter((i) => i.acao === 'escolher' || i.origem === 'sugestao').length
+              const novos = itensPrevia.filter((i) => i.acao === 'criar').length
+              return (
+                <p className="modal-field-hint">
+                  {ligados} item(ns) ligado(s) a produtos que já existem
+                  {conferir > 0 ? `, ${conferir} para conferir` : ''}
+                  {novos > 0 ? `, ${novos} produto(s) novo(s)` : ''}.
+                </p>
+              )
+            })()}
 
             <div className="notas-entrada-itens">
               <table className="pdv-products-table">
@@ -695,7 +742,10 @@ export default function NotasEntrada() {
                 </thead>
                 <tbody>
                   {itensPrevia.map((item, indice) => (
-                    <tr key={item.numero_item || indice}>
+                    <tr
+                      key={item.numero_item || indice}
+                      className={item.acao === 'escolher' || item.origem === 'sugestao' ? 'notas-entrada-conferir' : ''}
+                    >
                       <td>
                         {item.descricao}
                         {item.codigo && <span className="notas-entrada-cfop">Cód. {item.codigo}</span>}
@@ -707,6 +757,7 @@ export default function NotasEntrada() {
                       <td>{formatarMoeda(item.valor_unitario)}</td>
                       <td className="notas-entrada-acao">
                         <select value={item.acao} onChange={(e) => atualizarItem(indice, 'acao', e.target.value)}>
+                          {item.acao === 'escolher' && <option value="escolher">Escolha: já existe ou é novo?</option>}
                           {regraPrevia.movimentaEstoque && <option value="criar">Cadastrar produto novo</option>}
                           <option value="vincular">Vincular a produto existente</option>
                           <option value="ignorar">Não vincular</option>
@@ -732,7 +783,7 @@ export default function NotasEntrada() {
                         {item.acao === 'vincular' && (
                           <select
                             value={item.produto_id}
-                            onChange={(e) => atualizarItem(indice, 'produto_id', e.target.value)}
+                            onChange={(e) => escolherProduto(indice, e.target.value)}
                           >
                             <option value="">Escolha o produto...</option>
                             {produtosParaVincular.map((p) => (
@@ -743,6 +794,9 @@ export default function NotasEntrada() {
                               </option>
                             ))}
                           </select>
+                        )}
+                        {item.acao === 'vincular' && item.origem && (
+                          <span className="notas-entrada-cfop">{ORIGEM_CASAMENTO[item.origem]}</span>
                         )}
                         {item.acao === 'vincular' && regraPrevia.movimentaEstoque && (
                           <label className="notas-entrada-somar">

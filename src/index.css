@@ -378,6 +378,10 @@
   gap: 6px;
 }
 
+.notas-entrada-conferir td {
+  background: #fffbeb;
+}
+
 .notas-entrada-somar {
   display: flex;
   align-items: center;

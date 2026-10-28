@@ -2164,6 +2164,19 @@ function importarNotaEntrada({ nota, itens, artesao_id = null, novo_artesao = nu
   })()
 }
 
+/** Itens de notas anteriores do fornecedor já ligados a um produto (código do item no fornecedor → produto). */
+function listarVinculosNotaEntrada(artesaoId) {
+  if (!artesaoId) return []
+  return db.prepare(`
+    SELECT i.codigo, i.produto_id, MAX(i.id) as ultimo
+    FROM notas_entrada_itens i
+    JOIN notas_entrada n ON n.id = i.nota_id AND n.deleted_at IS NULL
+    JOIN produtos p ON p.id = i.produto_id AND p.deleted_at IS NULL
+    WHERE n.artesao_id = ? AND i.codigo IS NOT NULL AND i.codigo != ''
+    GROUP BY i.codigo
+  `).all(artesaoId).map(({ codigo, produto_id }) => ({ codigo, produto_id }))
+}
+
 function listarNotasEntrada() {
   return db.prepare(`
     SELECT n.id, n.chave, n.serie, n.numero, n.data_emissao, n.cfop, n.tipo, n.valor_total,
@@ -2695,6 +2708,7 @@ module.exports = {
   listarNotasEntrada,
   listarItensNotaEntrada,
   excluirNotaEntrada,
+  listarVinculosNotaEntrada,
   registrarDevolucaoArtesao,
   listarDevolucoesArtesao,
   cancelarDevolucaoArtesao,

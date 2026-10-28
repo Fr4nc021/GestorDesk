@@ -50,6 +50,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   listarNotasEntrada: () => invoke('listar-notas-entrada'),
   listarItensNotaEntrada: (notaId) => invoke('listar-itens-nota-entrada', notaId),
   excluirNotaEntrada: (id) => invoke('excluir-nota-entrada', id),
+  listarVinculosNotaEntrada: (artesaoId) => invoke('listar-vinculos-nota-entrada', artesaoId),
   registrarDevolucaoArtesao: (dados) => invoke('registrar-devolucao-artesao', dados),
   listarDevolucoesArtesao: (notaEntradaId) => invoke('listar-devolucoes-artesao', notaEntradaId),
   cancelarDevolucaoArtesao: (id) => invoke('cancelar-devolucao-artesao', id),
