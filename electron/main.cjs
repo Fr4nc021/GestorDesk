@@ -161,6 +161,7 @@ const {
   cancelarNota,
   urlDanfe,
 } = require('./services/nfceService')
+const { buscarNotasRecebidas, baixarXmlNotaRecebida } = require('./services/notasRecebidasService')
 
 // CLI: criar usuário e sair — node electron/main.cjs não funciona; use: npx electron . criar-usuario LOGIN SENHA
 if (process.argv[2] === 'criar-usuario' && process.argv[3] && process.argv[4]) {
@@ -288,6 +289,8 @@ ipcMain.handle('emitir-nfe-devolucao', (_, devolucaoId) => emitirNfeDevolucao(de
 ipcMain.handle('atualizar-situacao-nota', (_, notaId) => atualizarSituacaoNota(notaId))
 ipcMain.handle('cancelar-nfce', (_, notaId, justificativa) => cancelarNota(notaId, justificativa))
 ipcMain.handle('listar-notas-fiscais', (_, filtros) => listarNotasFiscais(filtros || {}))
+ipcMain.handle('buscar-notas-recebidas', () => buscarNotasRecebidas())
+ipcMain.handle('baixar-xml-nota-recebida', (_, chave) => baixarXmlNotaRecebida(chave))
 ipcMain.handle('imprimir-nfce', async (event, notaId) => {
   const { url, modelo } = urlDanfe(notaId)
   // DANFE da NF-e é PDF: abre no visualizador do computador.

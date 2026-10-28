@@ -80,6 +80,7 @@ function novoArtesaoDoEmitente(emitente) {
 
 export default function NotasEntrada() {
   const [notas, setNotas] = useState([])
+  const [recebidas, setRecebidas] = useState(null)
   const [carregando, setCarregando] = useState(true)
   const [produtos, setProdutos] = useState([])
   const [artesoes, setArtesoes] = useState([])
@@ -158,7 +159,38 @@ export default function NotasEntrada() {
     e.target.value = ''
     if (!arquivo) return
     try {
-      const xml = await arquivo.text()
+      await processarXml(await arquivo.text())
+    } catch (err) {
+      console.error('[Notas de entrada] Erro ao ler XML:', err)
+      setMensagem({ tipo: 'error', texto: err?.message || 'Não foi possível ler o XML.' })
+    }
+  }
+
+  /** Busca na SEFAZ (pela Focus) as notas emitidas para a loja, sem precisar do arquivo. */
+  async function buscarRecebidas() {
+    setMensagem({ tipo: '', texto: '' })
+    setRecebidas({ carregando: true, lista: [], erro: '', baixando: null })
+    try {
+      const lista = await window.electronAPI.buscarNotasRecebidas()
+      setRecebidas({ carregando: false, lista: lista || [], erro: '', baixando: null })
+    } catch (err) {
+      setRecebidas({ carregando: false, lista: [], erro: mensagemErro(err, 'Não foi possível buscar as notas.'), baixando: null })
+    }
+  }
+
+  async function importarRecebida(nota) {
+    setRecebidas((prev) => ({ ...prev, erro: '', baixando: nota.chave }))
+    try {
+      const xml = await window.electronAPI.baixarXmlNotaRecebida(nota.chave)
+      setRecebidas(null)
+      await processarXml(xml)
+    } catch (err) {
+      setRecebidas((prev) => prev && { ...prev, erro: mensagemErro(err, 'Não foi possível baixar a nota.'), baixando: null })
+    }
+  }
+
+  async function processarXml(xml) {
+    try {
       const nota = lerNfeXml(xml)
       const existente = await window.electronAPI.buscarNotaEntradaPorChave(nota.chave)
       if (existente) {
@@ -544,6 +576,9 @@ export default function NotasEntrada() {
           </p>
         </div>
         <div className="produtos-actions">
+          <button type="button" className="produtos-btn-quiet" onClick={buscarRecebidas}>
+            Buscar na SEFAZ
+          </button>
           <button type="button" className="produtos-btn-primary" onClick={escolherArquivo}>
             <span>+</span> Importar XML
           </button>
@@ -888,6 +923,87 @@ export default function NotasEntrada() {
               <button type="button" className="modal-submit" onClick={confirmarImportacao} disabled={importando}>
                 {importando ? 'Importando...' : 'Importar nota'}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {recebidas && (
+        <div className="modal-overlay" onClick={() => !recebidas.baixando && setRecebidas(null)}>
+          <div className="modal-content notas-entrada-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Notas emitidas para a loja</h3>
+              <button
+                type="button"
+                className="modal-close"
+                onClick={() => !recebidas.baixando && setRecebidas(null)}
+                aria-label="Fechar"
+              >
+                ×
+              </button>
+            </div>
+            <p className="modal-field-hint">
+              Notas que a SEFAZ registrou no CNPJ da loja. O XML de uma nota nova é liberado em até 2 horas depois da
+              primeira busca.
+            </p>
+            {recebidas.erro && <p className="config-feedback error">{recebidas.erro}</p>}
+            <div className="notas-entrada-itens">
+              <table className="pdv-products-table">
+                <thead>
+                  <tr>
+                    <th>Emissão</th>
+                    <th>Emitente</th>
+                    <th>Valor</th>
+                    <th>Situação</th>
+                    <th>Ações</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {recebidas.carregando ? (
+                    <tr>
+                      <td colSpan={5}>Buscando na SEFAZ...</td>
+                    </tr>
+                  ) : recebidas.lista.length === 0 ? (
+                    <tr>
+                      <td colSpan={5}>Nenhuma nota encontrada.</td>
+                    </tr>
+                  ) : (
+                    recebidas.lista.map((nota) => {
+                      const cancelada = nota.situacao && nota.situacao !== 'autorizada'
+                      let situacao = 'Pronta para importar'
+                      if (nota.importada) situacao = 'Já importada'
+                      else if (cancelada) situacao = nota.situacao === 'cancelada' ? 'Cancelada' : 'Denegada'
+                      else if (!nota.xml_disponivel) situacao = 'Aguardando liberação do XML'
+                      return (
+                        <tr key={nota.chave}>
+                          <td>{formatarData(nota.data_emissao)}</td>
+                          <td>
+                            {nota.emitente || '—'}
+                            {nota.documento_emitente && (
+                              <span className="notas-entrada-cfop">{formatarCpfCnpj(nota.documento_emitente)}</span>
+                            )}
+                          </td>
+                          <td>{formatarMoeda(nota.valor_total)}</td>
+                          <td>{situacao}</td>
+                          <td>
+                            {!nota.importada && !cancelada && (
+                              <div className="caixa-acoes-cell">
+                                <BotaoAcao
+                                  icone="nota"
+                                  onClick={() => importarRecebida(nota)}
+                                  disabled={Boolean(recebidas.baixando)}
+                                >
+                                  {recebidas.baixando === nota.chave ? 'Baixando...' : 'Importar'}
+                                </BotaoAcao>
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      )
+                    })
+                  )}
+                </tbody>
+              </table>
             </div>
           </div>
         </div>

@@ -342,6 +342,16 @@ function cancelarNfe(config, ref, justificativa) {
   return requisicao(config, 'DELETE', `/v2/nfe/${encodeURIComponent(ref)}`, { justificativa })
 }
 
+/** NF-e emitidas contra o CNPJ da loja (Recebimento de NF-es da Focus). Até 100 por chamada, a partir de `versao`. */
+function listarNfesRecebidas(config, cnpj, versao = 0) {
+  return requisicao(config, 'GET', `/v2/nfes_recebidas?cnpj=${somenteDigitos(cnpj)}&versao=${Number(versao) || 0}`)
+}
+
+/** Ciência da operação: evento não conclusivo, que libera o XML completo da nota na Focus. */
+function manifestarCiencia(config, chave) {
+  return requisicao(config, 'POST', `/v2/nfes_recebidas/${somenteDigitos(chave)}/manifesto`, { tipo: 'ciencia' })
+}
+
 /** Link completo de um caminho devolvido pela Focus (DANFCe, XML). */
 function urlCompleta(config, caminho) {
   if (!caminho) return null
@@ -381,6 +391,8 @@ module.exports = {
   emitirNfe,
   consultarNfe,
   cancelarNfe,
+  listarNfesRecebidas,
+  manifestarCiencia,
   baixarArquivo,
   urlCompleta,
   mensagemDaResposta,

@@ -63,6 +63,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   cancelarNfce: (notaId, justificativa) => invoke('cancelar-nfce', notaId, justificativa),
   listarNotasFiscais: (filtros) => invoke('listar-notas-fiscais', filtros),
   imprimirNfce: (notaId) => invoke('imprimir-nfce', notaId),
+  buscarNotasRecebidas: () => invoke('buscar-notas-recebidas'),
+  baixarXmlNotaRecebida: (chave) => invoke('baixar-xml-nota-recebida', chave),
 
   // Vendas
   criarVenda: (data) => invoke('criar-venda', data),
