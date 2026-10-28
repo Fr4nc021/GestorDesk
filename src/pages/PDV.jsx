@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import codeIcon from '../assets/complements/code.png'
 import ProdutoSearchModal from '../components/ProdutoSearchModal'
@@ -84,12 +84,17 @@ export default function PDV() {
   const [cpfNota, setCpfNota] = useState('')
   const [cupom, setCupom] = useState(null)
 
-  useEffect(() => {
+  // Lido de novo a cada pagamento, para valer na hora uma mudança feita em Configurações.
+  const carregarEmissaoNfce = useCallback(() => {
     window.electronAPI
       ?.obterConfigFiscal?.()
       .then((config) => setEmitirNfce(config?.emitir_nfce === '1'))
       .catch(() => setEmitirNfce(false))
   }, [])
+
+  useEffect(() => {
+    carregarEmissaoNfce()
+  }, [carregarEmissaoNfce])
 
   useEffect(() => {
     if (!toast) return
@@ -334,6 +339,7 @@ export default function PDV() {
       alert('Selecione pelo menos uma forma de pagamento')
       return
     }
+    carregarEmissaoNfce()
     setShowModalPagamento(true)
   }
 
