@@ -1,4 +1,4 @@
-// Mostra os usuários do banco de testes do npm start e cria/atualiza um login nele.
+// Mostra os usuários e a configuração fiscal do banco de testes do npm start e cria/atualiza um login nele.
 // Nunca mexe no banco oficial (database.db).
 // Rode com: npx electron scripts/usuario-teste.cjs LOGIN SENHA
 // Sem LOGIN e SENHA, só lista os usuários.
@@ -39,5 +39,17 @@ if (login && senha) {
 
 const usuarios = db.prepare('SELECT login FROM usuarios ORDER BY id').all()
 console.log(`Usuários no banco de testes: ${usuarios.map((u) => u.login).join(', ') || '(nenhum)'}`)
+const fiscal = Object.fromEntries(
+  db
+    .prepare("SELECT chave, valor FROM configuracoes WHERE chave LIKE 'fiscal_%'")
+    .all()
+    .map((r) => [r.chave, r.valor]),
+)
+const preenchido = (chave) => (fiscal[chave] ? 'preenchido' : 'vazio')
+console.log('Configuração fiscal gravada no banco de testes:')
+console.log(`  Emitir NFC-e: ${fiscal.fiscal_emitir_nfce === '1' ? 'ligado' : 'desligado'}`)
+console.log(`  Ambiente: ${fiscal.fiscal_ambiente === '1' ? 'produção' : 'homologação'}`)
+console.log(`  CNPJ: ${fiscal.fiscal_cnpj || 'vazio'}`)
+console.log(`  Token de homologação: ${preenchido('fiscal_focus_token_homologacao')}`)
 db.close()
 app.exit(0)
