@@ -40,7 +40,8 @@ export const TIPOS_NOTA_ENTRADA = {
 /** CFOP de saída do fornecedor (sem o dígito de UF) → tipo da entrada na loja. */
 export function tipoNotaPorCfop(cfop) {
   const base = String(cfop || '').replace(/\D/g, '').slice(1)
-  if (base === '917') return 'remessa_consignacao'
+  // O MEI pode mandar a remessa com 5.904 em vez de 5.917 (manual do contador).
+  if (base === '917' || base === '904') return 'remessa_consignacao'
   if (base === '113' || base === '114') return 'faturamento_consignacao'
   if (base === '101' || base === '102') return 'compra'
   if (base === '401' || base === '403' || base === '405') return 'compra_st'

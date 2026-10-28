@@ -2460,7 +2460,9 @@ function contarTentativasNotaFiscalDevolucao(devolucaoId) {
 function obterDevolucaoParaNfe(devolucaoId) {
   const devolucao = db.prepare('SELECT * FROM devolucoes_artesao WHERE id = ? AND deleted_at IS NULL').get(devolucaoId)
   if (!devolucao) throw new Error('Devolução não encontrada.')
-  const remessa = db.prepare('SELECT chave FROM notas_entrada WHERE id = ?').get(devolucao.nota_entrada_id)
+  const remessa = db
+    .prepare('SELECT chave, numero, data_emissao FROM notas_entrada WHERE id = ?')
+    .get(devolucao.nota_entrada_id)
   const artesao = devolucao.artesao_id ? db.prepare('SELECT * FROM artesoes WHERE id = ?').get(devolucao.artesao_id) : null
   const itens = db.prepare(`
     SELECT di.produto_id, di.quantidade, di.valor_unitario,
@@ -2472,7 +2474,7 @@ function obterDevolucaoParaNfe(devolucaoId) {
     WHERE di.devolucao_id = ?
     ORDER BY di.id
   `).all(devolucaoId)
-  return { devolucao, itens, chaveRemessa: remessa?.chave, artesao }
+  return { devolucao, itens, chaveRemessa: remessa?.chave, remessa, artesao }
 }
 
 /** Status da devolução acompanha a NF-e: 'nf_emitida' trava o cancelamento da devolução. */

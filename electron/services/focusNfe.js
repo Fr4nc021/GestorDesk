@@ -175,7 +175,7 @@ function montarNfce({ venda, itens, pagamentos, config, cpf = '' }) {
  * CSOSN 400, PIS/COFINS 49, referenciando a chave da nota de remessa.
  * @param {object} dados - { devolucao, itens, chaveRemessa, artesao, config }
  */
-function montarNfeDevolucao({ devolucao, itens, chaveRemessa, artesao, config }) {
+function montarNfeDevolucao({ devolucao, itens, chaveRemessa, remessa, artesao, config }) {
   const cnpj = somenteDigitos(config.cnpj)
   if (cnpj.length !== 14) throw new Error('Cadastre o CNPJ da loja em Configurações › Fiscal.')
   if (!Array.isArray(itens) || itens.length === 0) throw new Error('A devolução não tem itens.')
@@ -257,7 +257,17 @@ function montarNfeDevolucao({ devolucao, itens, chaveRemessa, artesao, config })
   if (artesao.complemento) nota.complemento_destinatario = artesao.complemento
   const telefone = somenteDigitos(artesao.telefone_whats)
   if (telefone.length >= 10) nota.telefone_destinatario = telefone
-  if (devolucao.observacao) nota.informacoes_adicionais_contribuinte = String(devolucao.observacao).slice(0, 500)
+  // Texto pedido pelo manual do contador para a devolução.
+  const dataRemessa = String(remessa?.data_emissao || '').slice(0, 10).split('-').reverse().join('/')
+  const complementar = [
+    `Devolução de mercadoria recebida em consignação mercantil pela NF-e nº ${remessa?.numero || chave.slice(25, 34)}` +
+      `${dataRemessa ? `, de ${dataRemessa}` : ''}, nos termos do Ajuste SINIEF 02/93.`,
+    'Documento emitido por ME/EPP optante pelo Simples Nacional. Não gera direito a crédito fiscal de ICMS e IPI.',
+    devolucao.observacao ? String(devolucao.observacao) : '',
+  ]
+    .filter(Boolean)
+    .join(' ')
+  nota.informacoes_adicionais_contribuinte = complementar.slice(0, 2000)
   return nota
 }
 

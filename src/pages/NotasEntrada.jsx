@@ -169,6 +169,10 @@ export default function NotasEntrada() {
       let artesao = await window.electronAPI.buscarArtesaoPorDocumento(nota.emitente.cpf_cnpj)
       const porNome = artesao ? null : artesaoPeloNome(cadastros.artesoes, nota.emitente.razao_social)
       if (porNome) artesao = porNome
+      // O artesão MEI fatura o acerto com 5.102 em vez de 5.113: se ele já tem peças consignadas aqui, é acerto.
+      const temConsignados =
+        artesao && cadastros.produtos.some((p) => p.artesao_id === artesao.id && p.tipo_posse !== 'proprio')
+      if (nota.tipo === 'compra' && temConsignados) nota.tipo = 'faturamento_consignacao'
       const vinculos = artesao ? (await window.electronAPI.listarVinculosNotaEntrada?.(artesao.id)) || [] : []
       montarPrevia(nota, xml, artesao, { ...cadastros, vinculos }, Boolean(porNome))
     } catch (err) {
@@ -236,6 +240,22 @@ export default function NotasEntrada() {
       console.error('[Notas de entrada] Erro ao carregar vínculos:', err)
     }
     setItensPrevia(casarItens(previa.nota.itens, regra, produtosDoArtesao, vinculos, multiplicador))
+  }
+
+  /** Trocar a operação (ex.: acerto que veio com CFOP de compra) refaz a ligação dos itens. */
+  async function trocarTipo(tipo) {
+    if (!previa) return
+    setPrevia((prev) => ({ ...prev, nota: { ...prev.nota, tipo } }))
+    setAcertoPeriodo(periodoAcertoPadrao(previa.nota.data_emissao))
+    const id = Number(artesaoEscolhido)
+    const produtosDoArtesao = id ? produtos.filter((p) => p.artesao_id === id) : []
+    let vinculos = []
+    try {
+      vinculos = id ? (await window.electronAPI.listarVinculosNotaEntrada?.(id)) || [] : []
+    } catch (err) {
+      console.error('[Notas de entrada] Erro ao carregar vínculos:', err)
+    }
+    setItensPrevia(casarItens(previa.nota.itens, TIPOS_NOTA_ENTRADA[tipo], produtosDoArtesao, vinculos, multiplicador))
   }
 
   function escolherProduto(indice, produtoId) {
@@ -644,7 +664,18 @@ export default function NotasEntrada() {
               </div>
               <div>
                 <span>Operação</span>
-                <strong>{regraPrevia.label}</strong>
+                <select
+                  className="notas-entrada-tipo"
+                  value={previa.nota.tipo}
+                  onChange={(e) => trocarTipo(e.target.value)}
+                  aria-label="Operação da nota"
+                >
+                  {Object.entries(TIPOS_NOTA_ENTRADA).map(([tipo, regra]) => (
+                    <option key={tipo} value={tipo}>
+                      {regra.label}
+                    </option>
+                  ))}
+                </select>
                 <small>
                   CFOP {previa.nota.cfop}
                   {regraPrevia.cfopEntrada ? ` → entrada ${regraPrevia.cfopEntrada}` : ''}

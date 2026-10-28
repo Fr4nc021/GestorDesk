@@ -2270,6 +2270,18 @@ button.caixa-btn-filtro-periodo {
   color: #888;
 }
 
+.notas-entrada-tipo {
+  width: 100%;
+  margin: 2px 0 4px;
+  padding: 4px 6px;
+  font-size: 15px;
+  font-weight: 700;
+  color: inherit;
+  background: transparent;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+}
+
 .caixa-acoes-cell {
   display: flex;
   flex-wrap: wrap;
