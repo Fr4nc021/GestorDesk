@@ -22,6 +22,7 @@ import {
   regraFiscalVenda,
   somenteDigitos,
 } from '../utils/fiscal'
+import ModalNcmLote from '../components/ModalNcmLote'
 import Barcode from 'react-barcode'
 import JsBarcode from 'jsbarcode'
 
@@ -87,6 +88,7 @@ export default function Produtos() {
 
   const [formacao, setFormacao] = useState(FORMACAO_PADRAO)
   const [modalFormacaoAberto, setModalFormacaoAberto] = useState(false)
+  const [modalNcmLoteAberto, setModalNcmLoteAberto] = useState(false)
   const [formacaoRascunho, setFormacaoRascunho] = useState(() => camposDeFormacao(FORMACAO_PADRAO))
   const [salvandoFormacao, setSalvandoFormacao] = useState(false)
   const [aplicandoEmTodos, setAplicandoEmTodos] = useState(false)
@@ -1738,6 +1740,9 @@ ${chunk.join('\n')}
           <button type="button" className="produtos-btn-quiet" onClick={abrirModalFormacao}>
             Formação de Preço
           </button>
+          <button type="button" className="produtos-btn-quiet" onClick={() => setModalNcmLoteAberto(true)}>
+            NCM em lote
+          </button>
           <button type="button" className="produtos-btn-primary" onClick={abrirModal}>
             <span>+</span> Novo Produto
           </button>
@@ -2332,6 +2337,19 @@ ${chunk.join('\n')}
             </form>
           </div>
         </div>
+      )}
+
+      {modalNcmLoteAberto && (
+        <ModalNcmLote
+          produtos={produtos}
+          artesoes={artesoes}
+          onFechar={() => setModalNcmLoteAberto(false)}
+          onAplicado={(total) => {
+            setModalNcmLoteAberto(false)
+            carregarProdutos()
+            mostrarToast(`NCM salvo em ${total} produto(s).`)
+          }}
+        />
       )}
 
       {modalEtiquetasAberto && (

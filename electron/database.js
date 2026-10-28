@@ -863,6 +863,24 @@ function listarProdutos() {
   return stmt.all()
 }
 
+/** Grava o mesmo NCM (e, opcionalmente, o tipo) em vários produtos. Devolve quantos foram alterados. */
+function atualizarFiscalEmLote(ids, { ncm, tipo_posse = null } = {}) {
+  const digitos = String(ncm ?? '').replace(/\D/g, '')
+  if (digitos.length !== 8) throw new Error('O NCM precisa ter 8 números.')
+  if (tipo_posse && !TIPOS_POSSE.includes(tipo_posse)) throw new Error('Tipo de produto inválido.')
+  const lista = [...new Set((ids || []).map(Number).filter((n) => Number.isInteger(n) && n > 0))]
+  if (lista.length === 0) throw new Error('Nenhum produto selecionado.')
+  const stmt = db.prepare(`
+    UPDATE produtos SET ncm = ?, tipo_posse = COALESCE(?, tipo_posse), sync_status = 'pending'
+    WHERE id = ? AND deleted_at IS NULL
+  `)
+  let total = 0
+  db.transaction(() => {
+    for (const id of lista) total += stmt.run(digitos, tipo_posse, id).changes
+  })()
+  return total
+}
+
 function atualizarProduto(id, { nome, variacao = null, preco_custo = 0, preco_venda = 0, estoque = 0, artesao_id, ...resto }) {
   const venda = arredondarPrecoVenda(preco_venda)
   const fiscal = normalizarFiscalProduto(resto)
@@ -2666,6 +2684,7 @@ module.exports = {
   criarProduto,
   listarProdutos,
   atualizarProduto,
+  atualizarFiscalEmLote,
   excluirProduto,
   buscarProdutoPorCodigo,
   refazerCodigoBarras,

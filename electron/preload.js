@@ -20,6 +20,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   criarProduto: (data) => invoke('criar-produto', data),
   listarProdutos: () => invoke('listar-produtos'),
   atualizarProduto: (id, data) => invoke('atualizar-produto', id, data),
+  atualizarFiscalEmLote: (ids, data) => invoke('atualizar-fiscal-em-lote', ids, data),
   excluirProduto: (id) => invoke('excluir-produto', id),
   buscarProdutoPorCodigo: (codigo) => invoke('buscar-produto-por-codigo', codigo),
   refazerCodigoBarras: (id) => invoke('refazer-codigo-barras', id),
