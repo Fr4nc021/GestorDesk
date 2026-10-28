@@ -5,6 +5,7 @@ import { calcularFormacao, formatarMoeda, precoSugerido } from '../utils/formaca
 import { formatarNcm } from '../utils/fiscal'
 import { TIPOS_NOTA_ENTRADA, lerNfeXml } from '../utils/nfeXml'
 import { mensagemErro } from '../utils/erros'
+import BotaoAcao from '../components/BotaoAcao'
 import { ORIGEM_CASAMENTO, encontrarProduto, semelhanca } from '../utils/casamentoProdutos'
 
 function formatarData(iso) {
@@ -595,18 +596,18 @@ export default function NotasEntrada() {
                   </td>
                   <td>{formatarMoeda(nota.valor_total)}</td>
                   <td>
-                    <div className="artesaos-acoes">
-                      <button type="button" className="produtos-btn-quiet" onClick={() => abrirDetalhe(nota)}>
+                    <div className="caixa-acoes-cell">
+                      <BotaoAcao icone="ver" onClick={() => abrirDetalhe(nota)}>
                         Ver itens
-                      </button>
+                      </BotaoAcao>
                       {nota.tipo === 'remessa_consignacao' && (
-                        <button type="button" className="produtos-btn-quiet" onClick={() => abrirDevolucao(nota)}>
+                        <BotaoAcao icone="devolver" onClick={() => abrirDevolucao(nota)}>
                           Devolver peças
-                        </button>
+                        </BotaoAcao>
                       )}
-                      <button type="button" className="produtos-btn-quiet" onClick={() => excluirNota(nota)}>
+                      <BotaoAcao icone="excluir" perigo onClick={() => excluirNota(nota)}>
                         Excluir
-                      </button>
+                      </BotaoAcao>
                     </div>
                   </td>
                 </tr>
@@ -925,26 +926,25 @@ export default function NotasEntrada() {
                               : 'NF-e de devolução (5918) pendente'}
                       </small>
                     </div>
-                    <div className="artesaos-acoes">
+                    <div className="caixa-acoes-cell">
                       {dev.status === 'aguardando_nf' && (
                         <>
-                          <button
-                            type="button"
-                            className="produtos-btn-quiet"
+                          <BotaoAcao
+                            icone="nota"
                             onClick={() => emitirNotaDevolucao(dev)}
                             disabled={emitindoDevolucaoId === dev.id}
                           >
                             {emitindoDevolucaoId === dev.id ? 'Emitindo...' : 'Emitir NF-e'}
-                          </button>
-                          <button type="button" className="produtos-btn-quiet" onClick={() => cancelarDevolucao(dev)}>
+                          </BotaoAcao>
+                          <BotaoAcao icone="cancelar" perigo onClick={() => cancelarDevolucao(dev)}>
                             Cancelar
-                          </button>
+                          </BotaoAcao>
                         </>
                       )}
                       {dev.status === 'nf_emitida' && dev.nota_fiscal?.status === 'autorizado' && (
-                        <button type="button" className="produtos-btn-quiet" onClick={() => imprimirNotaDevolucao(dev)}>
+                        <BotaoAcao icone="imprimir" onClick={() => imprimirNotaDevolucao(dev)}>
                           Ver DANFE
-                        </button>
+                        </BotaoAcao>
                       )}
                     </div>
                   </div>

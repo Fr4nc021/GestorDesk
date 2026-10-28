@@ -2288,8 +2288,15 @@ button.caixa-btn-filtro-periodo {
   font-size: 13px;
   font-weight: 500;
   color: #6b7280;
+  white-space: nowrap;
   cursor: pointer;
   transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.caixa-btn-editar:disabled,
+.caixa-btn-excluir:disabled {
+  opacity: 0.5;
+  cursor: wait;
 }
 
 .caixa-btn-editar:hover {
@@ -2314,6 +2321,7 @@ button.caixa-btn-filtro-periodo {
   font-size: 13px;
   font-weight: 500;
   color: #6b7280;
+  white-space: nowrap;
   cursor: pointer;
   transition: background 0.15s, color 0.15s;
 }

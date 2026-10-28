@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { formatarMoeda } from '../utils/formacaoPreco'
 import { mensagemErro } from '../utils/erros'
+import BotaoAcao from '../components/BotaoAcao'
 
 const SITUACOES = {
   autorizado: { label: 'Autorizado', classe: 'ok' },
@@ -186,40 +187,34 @@ export default function NotasEmitidas() {
                       )}
                     </td>
                     <td>
-                      <div className="artesaos-acoes">
+                      <div className="caixa-acoes-cell">
                         {nota.status === 'autorizado' && (
                           <>
-                            <button type="button" className="produtos-btn-quiet" onClick={() => imprimir(nota)}>
+                            <BotaoAcao icone="imprimir" onClick={() => imprimir(nota)}>
                               Imprimir
-                            </button>
-                            <button
-                              type="button"
-                              className="produtos-btn-quiet"
+                            </BotaoAcao>
+                            <BotaoAcao
+                              icone="cancelar"
+                              perigo
                               onClick={() => setCancelamento({ nota, justificativa: '', erro: '', salvando: false })}
                             >
                               Cancelar
-                            </button>
+                            </BotaoAcao>
                           </>
                         )}
                         {nota.status === 'processando_autorizacao' && (
-                          <button
-                            type="button"
-                            className="produtos-btn-quiet"
+                          <BotaoAcao
+                            icone="atualizar"
                             onClick={() => atualizarSituacao(nota)}
                             disabled={processandoId === nota.id}
                           >
                             Atualizar situação
-                          </button>
+                          </BotaoAcao>
                         )}
                         {STATUS_REENVIAR.includes(nota.status) && !nota.venda_excluida_em && !nota.devolucao_excluida_em && (
-                          <button
-                            type="button"
-                            className="produtos-btn-quiet"
-                            onClick={() => reenviar(nota)}
-                            disabled={processandoId === nota.id}
-                          >
+                          <BotaoAcao icone="atualizar" onClick={() => reenviar(nota)} disabled={processandoId === nota.id}>
                             {processandoId === nota.id ? 'Enviando...' : 'Tentar de novo'}
-                          </button>
+                          </BotaoAcao>
                         )}
                       </div>
                     </td>
