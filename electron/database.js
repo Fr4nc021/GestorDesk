@@ -2072,6 +2072,15 @@ function importarNotaEntrada({ nota, itens, artesao_id = null, novo_artesao = nu
     if (!artesaoId && novo_artesao) {
       artesaoId = Number(criarArtesao(novo_artesao).id)
     }
+    // Fornecedor escolhido sem CPF/CNPJ no cadastro: guarda o da nota, para as próximas notas
+    // serem reconhecidas sozinhas e a NF-e de devolução ter o documento do destinatário.
+    const documentoNota = String(nota.emitente_cpf_cnpj ?? '').replace(/\D/g, '')
+    if (artesaoId && documentoNota) {
+      db.prepare(`
+        UPDATE artesoes SET cpf_cnpj = ?, sync_status = 'pending'
+        WHERE id = ? AND (cpf_cnpj IS NULL OR TRIM(cpf_cnpj) = '')
+      `).run(documentoNota, artesaoId)
+    }
     if (!artesaoId && itens.some((i) => i.acao === 'criar')) {
       throw new Error('Selecione o fornecedor para cadastrar as peças.')
     }

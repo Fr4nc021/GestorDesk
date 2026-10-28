@@ -93,8 +93,11 @@ export default function PDV() {
   }, [])
 
   useEffect(() => {
-    carregarEmissaoNfce()
-  }, [carregarEmissaoNfce])
+    window.electronAPI
+      ?.obterConfigFiscal?.()
+      .then((config) => setEmitirNfce(config?.emitir_nfce === '1'))
+      .catch(() => setEmitirNfce(false))
+  }, [])
 
   useEffect(() => {
     if (!toast) return

@@ -5,7 +5,7 @@ import { calcularFormacao, formatarMoeda, precoSugerido } from '../utils/formaca
 import { formatarNcm } from '../utils/fiscal'
 import { TIPOS_NOTA_ENTRADA, lerNfeXml } from '../utils/nfeXml'
 import { mensagemErro } from '../utils/erros'
-import { ORIGEM_CASAMENTO, encontrarProduto } from '../utils/casamentoProdutos'
+import { ORIGEM_CASAMENTO, encontrarProduto, semelhanca } from '../utils/casamentoProdutos'
 
 function formatarData(iso) {
   if (!iso) return '—'
@@ -140,10 +140,10 @@ export default function NotasEntrada() {
       setArtesoes(listaArtesoes || [])
       setMultiplicador(mult)
       setCnpjLoja(String(fiscal?.cnpj || '').replace(/\D/g, ''))
-      return { produtos: listaProdutos || [], multiplicador: mult }
+      return { produtos: listaProdutos || [], artesoes: listaArtesoes || [], multiplicador: mult }
     } catch (err) {
       console.error('[Notas de entrada] Erro ao carregar cadastros:', err)
-      return { produtos, multiplicador }
+      return { produtos, artesoes, multiplicador }
     }
   }
 
@@ -164,10 +164,12 @@ export default function NotasEntrada() {
         setMensagem({ tipo: 'error', texto: `A nota nº ${nota.numero} já foi importada.` })
         return
       }
-      const artesao = await window.electronAPI.buscarArtesaoPorDocumento(nota.emitente.cpf_cnpj)
       const cadastros = await carregarCadastros()
+      let artesao = await window.electronAPI.buscarArtesaoPorDocumento(nota.emitente.cpf_cnpj)
+      const porNome = artesao ? null : artesaoPeloNome(cadastros.artesoes, nota.emitente.razao_social)
+      if (porNome) artesao = porNome
       const vinculos = artesao ? (await window.electronAPI.listarVinculosNotaEntrada?.(artesao.id)) || [] : []
-      montarPrevia(nota, xml, artesao, { ...cadastros, vinculos })
+      montarPrevia(nota, xml, artesao, { ...cadastros, vinculos }, Boolean(porNome))
     } catch (err) {
       console.error('[Notas de entrada] Erro ao ler XML:', err)
       setMensagem({ tipo: 'error', texto: err?.message || 'Não foi possível ler o XML.' })
@@ -195,10 +197,24 @@ export default function NotasEntrada() {
     })
   }
 
-  function montarPrevia(nota, xml, artesao, cadastros) {
+  /** Fornecedor ainda sem CPF/CNPJ no cadastro, reconhecido pelo nome igual (ordem das palavras não importa). */
+  function artesaoPeloNome(lista, nomeEmitente) {
+    let melhor = null
+    let pontos = 0
+    for (const a of lista || []) {
+      const s = Math.max(semelhanca(a.razao_social, nomeEmitente), semelhanca(a.nome, nomeEmitente))
+      if (s > pontos) {
+        melhor = a
+        pontos = s
+      }
+    }
+    return pontos >= 0.8 ? melhor : null
+  }
+
+  function montarPrevia(nota, xml, artesao, cadastros, artesaoPorNome = false) {
     const regra = TIPOS_NOTA_ENTRADA[nota.tipo]
     const produtosDoArtesao = artesao ? cadastros.produtos.filter((p) => p.artesao_id === artesao.id) : []
-    setPrevia({ nota, xml, artesaoEncontrado: artesao })
+    setPrevia({ nota, xml, artesaoEncontrado: artesao, artesaoPorNome })
     setArtesaoEscolhido(artesao ? String(artesao.id) : 'novo')
     setErroPrevia('')
     setAcertoPeriodo(periodoAcertoPadrao(nota.data_emissao))
@@ -705,7 +721,7 @@ export default function NotasEntrada() {
                 value={artesaoEscolhido}
                 onChange={(e) => trocarArtesao(e.target.value)}
               >
-                {!previa.artesaoEncontrado && (
+                {(!previa.artesaoEncontrado || previa.artesaoPorNome) && (
                   <option value="novo">Cadastrar {previa.nota.emitente.razao_social} como novo fornecedor</option>
                 )}
                 {artesoes.map((a) => (
@@ -714,6 +730,11 @@ export default function NotasEntrada() {
                   </option>
                 ))}
               </select>
+              {previa.artesaoPorNome && String(artesaoEscolhido) === String(previa.artesaoEncontrado.id) && (
+                <p className="modal-field-hint">
+                  Fornecedor reconhecido pelo nome. Confira se é a mesma pessoa; o CPF/CNPJ da nota será salvo no cadastro.
+                </p>
+              )}
             </div>
 
             {(() => {
