@@ -211,7 +211,8 @@ function montarNfeDevolucao({ devolucao, itens, chaveRemessa, artesao, config })
     tipo_documento: '1',
     finalidade_emissao: '4',
     local_destino: String(artesao.uf || '').toUpperCase() === String(config.uf || 'RS').toUpperCase() ? '1' : '2',
-    consumidor_final: '0',
+    // A SEFAZ exige consumidor final quando o destinatário não é contribuinte (sem IE, rejeição 696).
+    consumidor_final: inscricao ? '0' : '1',
     presenca_comprador: '9',
     modalidade_frete: '9',
     notas_referenciadas: [{ chave_nfe: chave }],
