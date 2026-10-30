@@ -135,9 +135,10 @@ function normalizarLinha(row) {
   return out
 }
 
-// Colunas pesadas ou com caminhos deste PC: ficam só no SQLite (o pull preserva o valor local).
+// Colunas pesadas: ficam só no SQLite (o pull preserva o valor local).
+// caminho_danfe/caminho_xml são caminhos na Focus e servem em qualquer PC.
 const COLUNAS_SO_LOCAIS = {
-  notas_fiscais: ['xml', 'requisicao', 'resposta', 'caminho_danfe', 'caminho_xml'],
+  notas_fiscais: ['xml', 'requisicao', 'resposta'],
 }
 
 // Tabela ainda não criada no Supabase não pode travar a sincronização das demais.

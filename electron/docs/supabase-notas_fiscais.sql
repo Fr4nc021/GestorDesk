@@ -1,6 +1,6 @@
 -- Cupons fiscais (NFC-e/NF-e) sincronizados entre os PCs.
 -- Rodar uma vez no SQL Editor do Supabase.
--- xml, requisicao, resposta e caminhos de arquivo ficam só no PC que emitiu.
+-- xml, requisicao e resposta ficam só no PC que emitiu.
 
 create table if not exists public.notas_fiscais (
   id bigint primary key,
@@ -18,6 +18,8 @@ create table if not exists public.notas_fiscais (
   mensagem text,
   valor_total double precision not null default 0,
   url_qrcode text,
+  caminho_danfe text,
+  caminho_xml text,
   cancelada_em text,
   justificativa_cancelamento text,
   autorizada_em text,
@@ -33,3 +35,7 @@ alter table public.notas_fiscais enable row level security;
 drop policy if exists "notas_fiscais autenticados" on public.notas_fiscais;
 create policy "notas_fiscais autenticados" on public.notas_fiscais
   for all to authenticated using (true) with check (true);
+
+-- Para quem já criou a tabela antes da 2.2.4:
+alter table public.notas_fiscais add column if not exists caminho_danfe text;
+alter table public.notas_fiscais add column if not exists caminho_xml text;

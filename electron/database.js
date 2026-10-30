@@ -590,6 +590,11 @@ try {
   if (!tabelaTemColuna(db, 'notas_fiscais', 'deleted_at')) {
     db.exec(`ALTER TABLE notas_fiscais ADD COLUMN deleted_at TEXT`)
   }
+  // 2.2.4: os caminhos do DANFE passaram a subir; reenvia as notas já sincronizadas sem eles.
+  if (db.pragma('user_version', { simple: true }) < 1) {
+    db.exec(`UPDATE notas_fiscais SET sync_status = 'pending' WHERE caminho_danfe IS NOT NULL`)
+    db.pragma('user_version = 1')
+  }
 } catch (_) {}
 
 // Devolução/troca de cliente: NF-e de entrada da loja referenciando o cupom da venda.
