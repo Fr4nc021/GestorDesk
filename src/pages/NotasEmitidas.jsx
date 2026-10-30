@@ -17,9 +17,13 @@ const SITUACOES = {
 const STATUS_REENVIAR = ['erro_conexao', 'erro_autorizacao', 'erro_validacao', 'enviando']
 
 function rotuloOrigem(nota) {
+  if (nota.devolucao_cliente_id) {
+    return `Devolução de cliente · venda #${nota.devolucao_cliente_venda_id}${nota.cliente_nome ? ` · ${nota.cliente_nome}` : ''}`
+  }
   if (nota.devolucao_id) {
     const artesao = nota.artesao_nome_fantasia || nota.artesao_razao_social || nota.artesao_nome
-    return `Devolução${artesao ? ` · ${artesao}` : ''}`
+    const tipo = nota.devolucao_tipo === 'simbolica' ? `Devolução simbólica ${nota.devolucao_cfop || '5919'}` : 'Devolução 5918'
+    return `${tipo}${artesao ? ` · ${artesao}` : ''}`
   }
   return `Venda #${nota.venda_id}`
 }
@@ -40,7 +44,8 @@ function formatarDataHora(texto) {
   return d.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 
-export default function NotasEmitidas() {
+/** Lista de notas emitidas. Dentro de Vendas, mostra só as NF-e de devolução ao artesão. */
+export default function NotasEmitidas({ somenteDevolucoes = false }) {
   const [dataInicio, setDataInicio] = useState(inicioDoMesIso)
   const [dataFim, setDataFim] = useState(hojeIso)
   const [notas, setNotas] = useState([])
@@ -55,13 +60,14 @@ export default function NotasEmitidas() {
       return
     }
     try {
-      setNotas(await window.electronAPI.listarNotasFiscais({ dataInicio, dataFim }))
+      const lista = await window.electronAPI.listarNotasFiscais({ dataInicio, dataFim })
+      setNotas(somenteDevolucoes ? lista.filter((n) => n.devolucao_id || n.devolucao_cliente_id) : lista)
     } catch (err) {
       setMensagem({ tipo: 'error', texto: mensagemErro(err, 'Erro ao carregar as notas.') })
     } finally {
       setCarregando(false)
     }
-  }, [dataInicio, dataFim])
+  }, [dataInicio, dataFim, somenteDevolucoes])
 
   useEffect(() => {
     carregar()
@@ -71,10 +77,12 @@ export default function NotasEmitidas() {
     setProcessandoId(nota.id)
     setMensagem({ tipo: '', texto: '' })
     try {
-      const resultado = nota.devolucao_id
-        ? await window.electronAPI.emitirNfeDevolucao(nota.devolucao_id)
-        : await window.electronAPI.emitirNfceVenda(nota.venda_id, {})
-      const nome = nota.devolucao_id ? 'NF-e' : 'Cupom'
+      const resultado = nota.devolucao_cliente_id
+        ? await window.electronAPI.emitirNfeDevolucaoCliente(nota.devolucao_cliente_id)
+        : nota.devolucao_id
+          ? await window.electronAPI.emitirNfeDevolucao(nota.devolucao_id)
+          : await window.electronAPI.emitirNfceVenda(nota.venda_id, {})
+      const nome = nota.modelo === '55' ? 'NF-e' : 'Cupom'
       setMensagem(
         resultado?.status === 'autorizado'
           ? { tipo: 'success', texto: `${nome} nº ${resultado.numero} autorizado.` }
@@ -130,13 +138,15 @@ export default function NotasEmitidas() {
   return (
     <div className="produtos notas-emitidas">
       <div className="produtos-header">
-        <div className="produtos-header-left">
-          <h2 className="dashboard-heading">Notas emitidas</h2>
-          <p className="dashboard-subtitle">
-            Cupons fiscais (NFC-e) das vendas e NF-e de devolução ao artesão. Reenvie as que deram erro, reimprima
-            ou cancele.
-          </p>
-        </div>
+        {!somenteDevolucoes && (
+          <div className="produtos-header-left">
+            <h2 className="dashboard-heading">Notas emitidas</h2>
+            <p className="dashboard-subtitle">
+              Cupons fiscais (NFC-e) das vendas e NF-e de devolução ao artesão. Reenvie as que deram erro, reimprima
+              ou cancele.
+            </p>
+          </div>
+        )}
         <div className="notas-emitidas-filtro">
           <input type="date" value={dataInicio} onChange={(e) => setDataInicio(e.target.value)} aria-label="De" />
           <span>a</span>
@@ -211,7 +221,7 @@ export default function NotasEmitidas() {
                             Atualizar situação
                           </BotaoAcao>
                         )}
-                        {STATUS_REENVIAR.includes(nota.status) && !nota.venda_excluida_em && !nota.devolucao_excluida_em && (
+                        {STATUS_REENVIAR.includes(nota.status) && !nota.venda_excluida_em && !nota.devolucao_excluida_em && !nota.devolucao_cliente_excluida_em && (
                           <BotaoAcao icone="atualizar" onClick={() => reenviar(nota)} disabled={processandoId === nota.id}>
                             {processandoId === nota.id ? 'Enviando...' : 'Tentar de novo'}
                           </BotaoAcao>

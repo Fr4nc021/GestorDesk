@@ -2564,6 +2564,214 @@ button.caixa-btn-filtro-periodo {
   color: #b91c1c;
 }
 
+.notas-emitidas-filtro select {
+  padding: 8px 10px;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  font-size: 13px;
+  background: #fff;
+}
+
+.vendas-abas {
+  display: flex;
+  gap: 4px;
+  background: #f0f0f0;
+  padding: 4px;
+  border-radius: 10px;
+}
+
+.vendas-abas button {
+  border: none;
+  background: transparent;
+  padding: 8px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  cursor: pointer;
+  color: #555;
+}
+
+.vendas-abas button.ativa {
+  background: #fff;
+  color: #222;
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+
+.vendas-barra {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.vendas-barra .notas-emitidas-filtro {
+  flex-wrap: wrap;
+}
+
+.vendas-barra-acoes {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.vendas-barra-acoes button {
+  background: #111;
+  color: #fff;
+  border-color: #111;
+  padding: 8px 14px;
+}
+
+.vendas-barra-acoes button:hover:not(:disabled) {
+  background: #333;
+  border-color: #333;
+}
+
+.vendas-barra-acoes button:disabled {
+  background: #111;
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.vendas-barra-acoes button img,
+.vendas-barra-acoes button svg {
+  filter: brightness(0) invert(1);
+}
+
+.vendas-resumo-selecao {
+  font-size: 13px;
+  color: #555;
+  margin-right: 4px;
+}
+
+.vendas-progresso {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  margin-bottom: 12px;
+}
+
+.vendas-progresso-barra {
+  height: 6px;
+  background: #f0f0f0;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.vendas-progresso-barra div {
+  height: 100%;
+  background: #047857;
+  transition: width 0.2s;
+}
+
+.vendas-resumo-lote {
+  border: 1px solid #e0e0e0;
+  border-radius: 10px;
+  padding: 10px 14px;
+  margin-bottom: 12px;
+  font-size: 13px;
+  background: #fff;
+}
+
+.vendas-resumo-lote-topo {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.vendas-resumo-lote ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  color: #b91c1c;
+}
+
+.vendas-itens {
+  max-width: 260px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.vendas-linha-marcada td {
+  background: #f6fbf9;
+}
+
+.dashboard-alerta-cupons {
+  display: block;
+  margin-bottom: 16px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: #fffbeb;
+  color: #b45309;
+  border: 1px solid #fde68a;
+  font-size: 14px;
+  text-decoration: none;
+}
+
+.modal-devolucao-cliente {
+  max-width: 760px;
+  width: 100%;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.modal-devolucao-cliente input[type='number'] {
+  width: 70px;
+}
+
+.devolucao-simbolica {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.devolucao-simbolica .notas-emitidas-filtro {
+  flex-wrap: wrap;
+}
+
+.devolucao-simbolica-previa ul {
+  color: inherit;
+  margin: 0 0 8px;
+}
+
+.devolucao-simbolica-previa .modal-submit {
+  align-self: flex-start;
+}
+
+.produto-sugestao-cest {
+  margin-top: 6px;
+  padding: 4px 8px;
+  border: 1px dashed #047857;
+  border-radius: 6px;
+  background: #ecfdf5;
+  color: #047857;
+  font-size: 12px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.vendas-periodo {
+  padding: 7px 10px;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  background: #fff;
+  font-size: 13px;
+  cursor: pointer;
+  color: #555;
+}
+
+.vendas-periodo.ativa {
+  border-color: #047857;
+  color: #047857;
+  font-weight: 600;
+}
+
+.vendas-prazo-vazio {
+  color: #aaa;
+}
+
 .fiscal-emitir-nfce {
   margin-top: 16px;
 }

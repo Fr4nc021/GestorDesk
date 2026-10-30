@@ -9,7 +9,7 @@ import Estoque from './pages/Estoque'
 import Caixa from './pages/Caixa'
 import Configuracoes from './pages/Configuracoes'
 import NotasEntrada from './pages/NotasEntrada'
-import NotasEmitidas from './pages/NotasEmitidas'
+import Vendas from './pages/Vendas'
 import Layout from './Layout'
 
 function obterUsuarioLogado() {
@@ -57,7 +57,8 @@ export default function App() {
           <Route path="artesaos" element={<Artesaos />} />
           <Route path="estoque" element={<Estoque />} />
           <Route path="notas-entrada" element={<NotasEntrada />} />
-          <Route path="notas-emitidas" element={<NotasEmitidas />} />
+          <Route path="vendas" element={<Vendas />} />
+          <Route path="notas-emitidas" element={<Navigate to="/app/vendas" replace />} />
           <Route path="caixa" element={<Caixa />} />
           <Route path="relatorios" element={<Relatorios />} />
           <Route path="configuracoes" element={<Configuracoes />} />

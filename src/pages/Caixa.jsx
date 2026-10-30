@@ -608,7 +608,9 @@ export default function Caixa() {
                   <tr key={`${transacao.venda_id}-${transacao.sequencia}`}>
                     <td>{periodoUmDia ? formatHora(transacao.data) : formatDataHoraCaixa(transacao.data)}</td>
                     <td>#{String(transacao.venda_id).padStart(4, '0')}/{transacao.sequencia}</td>
-                    <td title={transacao.itens_resumo || undefined}>{transacao.qtd_itens ?? 0} itens</td>
+                    <td title={transacao.itens_resumo || undefined}>
+                      {transacao.estorno ? 'Devolução de cliente' : `${transacao.qtd_itens ?? 0} itens`}
+                    </td>
                     {modoBuscaProduto && (
                       <td>{transacao.qtd_produto_filtrado != null ? transacao.qtd_produto_filtrado : '—'}</td>
                     )}
@@ -620,7 +622,7 @@ export default function Caixa() {
                     </td>
                     <td>{formatBRL(transacao.valor)}</td>
                     <td>
-                      <div className="caixa-acoes-cell">
+                      {!transacao.estorno && <div className="caixa-acoes-cell">
                         {transacao.sequencia === 1 && (
                           <button
                             type="button"
@@ -649,7 +651,7 @@ export default function Caixa() {
                           </svg>
                           Excluir
                         </button>
-                      </div>
+                      </div>}
                     </td>
                   </tr>
                 ))
