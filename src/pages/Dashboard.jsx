@@ -1,13 +1,13 @@
 import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import pdvIcon from '../assets/icons/pdv.png'
-import estoqueIcon from '../assets/icons/estoque.png'
-import relatoriosIcon from '../assets/icons/relatorios.png'
+import produtosIcon from '../assets/icons/produtos.png'
+import dinheiroIcon from '../assets/icons/dinheiro.svg'
 
 const dashboardQuickActions = [
   { to: '/app/pdv', label: 'Vendas', icon: pdvIcon },
-  { to: '/app/produtos', label: 'Produtos', icon: estoqueIcon },
-  { to: '/app/caixa', label: 'Caixa', icon: relatoriosIcon },
+  { to: '/app/produtos', label: 'Produtos', icon: produtosIcon },
+  { to: '/app/caixa', label: 'Caixa', icon: dinheiroIcon },
 ]
 
 const TZ_BRASILIA = 'America/Sao_Paulo'
@@ -83,6 +83,11 @@ export default function Dashboard() {
   const [resumoMesAnterior, setResumoMesAnterior] = useState(null)
   const [syncStatus, setSyncStatus] = useState('idle')
   const [syncMessage, setSyncMessage] = useState('')
+  const [cuponsPendentes, setCuponsPendentes] = useState(0)
+
+  useEffect(() => {
+    window.electronAPI?.contarCuponsPendentes?.().then(setCuponsPendentes).catch(() => {})
+  }, [])
 
   useEffect(() => {
     async function carregar() {
@@ -144,6 +149,12 @@ export default function Dashboard() {
 
   return (
     <div className="dashboard">
+      {cuponsPendentes > 0 && (
+        <Link to="/app/vendas" className="dashboard-alerta-cupons">
+          {cuponsPendentes} venda(s) com cupom fiscal pendente ou com erro. O sistema tenta reenviar sozinho; clique
+          para ver.
+        </Link>
+      )}
       <section className="dashboard-section">
         <h2 className="dashboard-heading">Ações Rápidas</h2>
         <hr className="dashboard-divider" />

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, clipboard } = require('electron')
+const { app, BrowserWindow, ipcMain, dialog, clipboard, shell } = require('electron')
 const path = require('path')
 const fs = require('fs')
 
@@ -58,10 +58,26 @@ loadEnv()
 
 // Banco sempre em userData (dev e instalado): atualizar o app nao troca esse arquivo.
 // Sobrescreva com GESTORDESK_DB_PATH no ambiente se precisar de outro caminho.
+// Em desenvolvimento (npm start) o app usa uma cópia de testes do banco e não sincroniza com o
+// Supabase, para que testes nunca cheguem ao banco oficial da loja. GESTORDESK_SYNC_DEV=1 libera.
 {
   const userDataDir = app.getPath('userData')
   if (!process.env.GESTORDESK_DB_PATH) {
-    process.env.GESTORDESK_DB_PATH = path.join(userDataDir, 'database.db')
+    const bancoOficial = path.join(userDataDir, 'database.db')
+    if (app.isPackaged) {
+      process.env.GESTORDESK_DB_PATH = bancoOficial
+    } else {
+      const bancoTeste = path.join(userDataDir, 'database-teste.db')
+      if (!fs.existsSync(bancoTeste) && fs.existsSync(bancoOficial)) {
+        fs.copyFileSync(bancoOficial, bancoTeste)
+        console.log(`[DB] Cópia de testes criada: ${bancoTeste}`)
+      }
+      process.env.GESTORDESK_DB_PATH = bancoTeste
+    }
+  }
+  if (!app.isPackaged && process.env.GESTORDESK_SYNC_DEV !== '1') {
+    process.env.GESTORDESK_SYNC_DESATIVADO = '1'
+    console.log('[Sync] Desativado em desenvolvimento (banco de testes). Use GESTORDESK_SYNC_DEV=1 para ligar.')
   }
   if (!process.env.GESTORDESK_USER_DATA_DIR) {
     process.env.GESTORDESK_USER_DATA_DIR = userDataDir
@@ -78,6 +94,7 @@ const {
   criarProduto,
   listarProdutos,
   atualizarProduto,
+  atualizarFiscalEmLote,
   excluirProduto,
   buscarProdutoPorCodigo,
   refazerCodigoBarras,
@@ -123,7 +140,44 @@ const {
   aplicarPrecoFormacaoEmTodos,
   obterRelatoriosPeriodoPadrao,
   salvarRelatoriosPeriodoPadrao,
+  obterConfigFiscal,
+  salvarConfigFiscal,
+  buscarArtesaoPorDocumento,
+  buscarNotaEntradaPorChave,
+  importarNotaEntrada,
+  listarNotasEntrada,
+  listarItensNotaEntrada,
+  excluirNotaEntrada,
+  listarVinculosNotaEntrada,
+  registrarDevolucaoArtesao,
+  listarDevolucoesArtesao,
+  cancelarDevolucaoArtesao,
+  listarNotasFiscais,
+  listarVendasComCupom,
+  sugerirCest,
+  listarInutilizacoes,
+  importarTabelaIbpt,
+  situacaoTabelaIbpt,
+  contarCuponsPendentes,
+  calcularDevolucaoSimbolica,
+  registrarDevolucaoSimbolica,
+  obterVendaParaDevolucaoCliente,
+  registrarDevolucaoCliente,
+  resumoFiscalPeriodo,
 } = require('./database')
+const {
+  emitirNfceDaVenda,
+  emitirNfeDevolucao,
+  emitirNfeDevolucaoCliente,
+  atualizarSituacaoNota,
+  cancelarNota,
+  inutilizarNumeracao,
+  buracosNumeracao,
+  reenviarPendentes,
+  gerarZipXmls,
+  urlDanfe,
+} = require('./services/nfceService')
+const { buscarNotasRecebidas, baixarXmlNotaRecebida } = require('./services/notasRecebidasService')
 
 // CLI: criar usuário e sair — node electron/main.cjs não funciona; use: npx electron . criar-usuario LOGIN SENHA
 if (process.argv[2] === 'criar-usuario' && process.argv[3] && process.argv[4]) {
@@ -214,6 +268,7 @@ ipcMain.handle('excluir-artesao', (_, id) => excluirArtesao(id))
 ipcMain.handle('criar-produto', (_, data) => criarProduto(data))
 ipcMain.handle('listar-produtos', () => listarProdutos())
 ipcMain.handle('atualizar-produto', (_, id, data) => atualizarProduto(id, data))
+ipcMain.handle('atualizar-fiscal-em-lote', (_, ids, data) => atualizarFiscalEmLote(ids, data))
 ipcMain.handle('excluir-produto', (_, id) => excluirProduto(id))
 ipcMain.handle('buscar-produto-por-codigo', (_, codigo) => buscarProdutoPorCodigo(codigo))
 ipcMain.handle('refazer-codigo-barras', (_, id) => refazerCodigoBarras(id))
@@ -233,6 +288,164 @@ ipcMain.handle('salvar-formacao-preco', (_, data) => salvarFormacaoPreco(data))
 ipcMain.handle('aplicar-preco-formacao-em-todos', (_, multiplicador) => aplicarPrecoFormacaoEmTodos(multiplicador))
 ipcMain.handle('obter-relatorios-periodo-padrao', () => obterRelatoriosPeriodoPadrao())
 ipcMain.handle('salvar-relatorios-periodo-padrao', (_, data) => salvarRelatoriosPeriodoPadrao(data))
+ipcMain.handle('obter-config-fiscal', () => obterConfigFiscal())
+ipcMain.handle('salvar-config-fiscal', (_, data) => salvarConfigFiscal(data))
+/** Salva a configuração fiscal (com os tokens da Focus) num arquivo, para levar a outro computador. */
+ipcMain.handle('exportar-config-fiscal', async (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender)
+  const result = await dialog.showSaveDialog(win, {
+    title: 'Exportar configuração fiscal',
+    defaultPath: 'configuracao-fiscal.json',
+    filters: [{ name: 'Configuração fiscal', extensions: ['json'] }],
+  })
+  if (result.canceled || !result.filePath) return null
+  const arquivo = { tipo: 'gestordesk-config-fiscal', versao: 1, exportado_em: new Date().toISOString(), config: obterConfigFiscal() }
+  fs.writeFileSync(result.filePath, JSON.stringify(arquivo, null, 2), 'utf8')
+  return { caminho: result.filePath }
+})
+/** Lê o arquivo exportado e grava a configuração fiscal (com as mesmas validações da tela). */
+ipcMain.handle('importar-config-fiscal', async (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender)
+  const result = await dialog.showOpenDialog(win, {
+    title: 'Importar configuração fiscal',
+    filters: [{ name: 'Configuração fiscal', extensions: ['json'] }],
+    properties: ['openFile'],
+  })
+  if (result.canceled || !result.filePaths?.[0]) return null
+  let arquivo
+  try {
+    arquivo = JSON.parse(fs.readFileSync(result.filePaths[0], 'utf8'))
+  } catch {
+    throw new Error('Arquivo inválido.')
+  }
+  if (arquivo?.tipo !== 'gestordesk-config-fiscal' || !arquivo.config) {
+    throw new Error('Este arquivo não é uma configuração fiscal exportada pelo GestorDesk.')
+  }
+  return salvarConfigFiscal({ ...obterConfigFiscal(), ...arquivo.config })
+})
+ipcMain.handle('buscar-artesao-por-documento', (_, documento) => buscarArtesaoPorDocumento(documento))
+ipcMain.handle('buscar-nota-entrada-por-chave', (_, chave) => buscarNotaEntradaPorChave(chave))
+ipcMain.handle('importar-nota-entrada', (_, data) => importarNotaEntrada(data))
+ipcMain.handle('listar-notas-entrada', () => listarNotasEntrada())
+ipcMain.handle('listar-itens-nota-entrada', (_, notaId) => listarItensNotaEntrada(notaId))
+ipcMain.handle('excluir-nota-entrada', (_, id) => excluirNotaEntrada(id))
+ipcMain.handle('listar-vinculos-nota-entrada', (_, artesaoId) => listarVinculosNotaEntrada(artesaoId))
+ipcMain.handle('registrar-devolucao-artesao', (_, dados) => registrarDevolucaoArtesao(dados))
+ipcMain.handle('listar-devolucoes-artesao', (_, notaEntradaId) => listarDevolucoesArtesao(notaEntradaId ?? null))
+ipcMain.handle('cancelar-devolucao-artesao', (_, id) => cancelarDevolucaoArtesao(id))
+ipcMain.handle('emitir-nfce-venda', (_, vendaId, opcoes) => emitirNfceDaVenda(vendaId, opcoes || {}))
+ipcMain.handle('emitir-nfe-devolucao', (_, devolucaoId) => emitirNfeDevolucao(devolucaoId))
+ipcMain.handle('atualizar-situacao-nota', (_, notaId) => atualizarSituacaoNota(notaId))
+ipcMain.handle('cancelar-nfce', (_, notaId, justificativa) => cancelarNota(notaId, justificativa))
+ipcMain.handle('listar-notas-fiscais', (_, filtros) => listarNotasFiscais(filtros || {}))
+ipcMain.handle('listar-vendas-com-cupom', (_, filtros) => listarVendasComCupom(filtros || {}))
+ipcMain.handle('sugerir-cest', (_, ncm) => sugerirCest(ncm))
+ipcMain.handle('buracos-numeracao', () => buracosNumeracao())
+ipcMain.handle('contar-cupons-pendentes', () => contarCuponsPendentes())
+ipcMain.handle('calcular-devolucao-simbolica', (_, filtros) => calcularDevolucaoSimbolica(filtros || {}))
+ipcMain.handle('registrar-devolucao-simbolica', (_, dados) => registrarDevolucaoSimbolica(dados || {}))
+ipcMain.handle('obter-venda-para-devolucao-cliente', (_, vendaId) => obterVendaParaDevolucaoCliente(vendaId))
+ipcMain.handle('registrar-devolucao-cliente', (_, dados) => registrarDevolucaoCliente(dados || {}))
+ipcMain.handle('emitir-nfe-devolucao-cliente', (_, id) => emitirNfeDevolucaoCliente(id))
+ipcMain.handle('resumo-fiscal-periodo', (_, dataInicio, dataFim) => resumoFiscalPeriodo(dataInicio, dataFim))
+ipcMain.handle('exportar-xmls-periodo', async (event, dataInicio, dataFim) => {
+  const { buffer, total, faltando } = await gerarZipXmls(dataInicio, dataFim)
+  const win = BrowserWindow.fromWebContents(event.sender)
+  const result = await dialog.showSaveDialog(win, {
+    title: 'Salvar XMLs do período',
+    defaultPath: `XMLs ${dataInicio} a ${dataFim}.zip`,
+    filters: [{ name: 'Arquivo ZIP', extensions: ['zip'] }],
+  })
+  if (result.canceled || !result.filePath) return null
+  fs.writeFileSync(result.filePath, buffer)
+  return { total, faltando, caminho: result.filePath }
+})
+ipcMain.handle('inutilizar-numeracao', (_, dados) => inutilizarNumeracao(dados || {}))
+ipcMain.handle('listar-inutilizacoes', () => listarInutilizacoes())
+ipcMain.handle('situacao-tabela-ibpt', () => situacaoTabelaIbpt())
+ipcMain.handle('importar-tabela-ibpt', async (event) => {
+  const win = BrowserWindow.fromWebContents(event.sender)
+  const result = await dialog.showOpenDialog(win, {
+    title: 'Tabela do IBPT (CSV do De Olho no Imposto)',
+    filters: [{ name: 'CSV', extensions: ['csv'] }],
+    properties: ['openFile'],
+  })
+  if (result.canceled || !result.filePaths?.[0]) return null
+  const buffer = fs.readFileSync(result.filePaths[0])
+  // O CSV do IBPT vem em Latin-1; se não houver bytes inválidos em UTF-8, usa UTF-8.
+  const texto = buffer.toString('utf8')
+  return importarTabelaIbpt(texto.includes('�') ? buffer.toString('latin1') : texto)
+})
+/** Abre o DANFCe/DANFE só para ver, sem imprimir. */
+ipcMain.handle('visualizar-nota', async (event, notaId) => {
+  const { url, modelo } = urlDanfe(notaId)
+  if (modelo === '55') {
+    await shell.openExternal(url)
+    return { ok: true }
+  }
+  const janela = new BrowserWindow({
+    parent: BrowserWindow.fromWebContents(event.sender) || undefined,
+    width: 420,
+    height: 760,
+    title: 'Cupom fiscal',
+    autoHideMenuBar: true,
+    webPreferences: { contextIsolation: true, nodeIntegration: false },
+  })
+  await janela.loadURL(url)
+  return { ok: true }
+})
+ipcMain.handle('buscar-notas-recebidas', () => buscarNotasRecebidas())
+ipcMain.handle('baixar-xml-nota-recebida', (_, chave) => baixarXmlNotaRecebida(chave))
+ipcMain.handle('imprimir-nfce', async (event, notaId) => {
+  const { url, modelo } = urlDanfe(notaId)
+  // DANFE da NF-e é PDF: abre no visualizador do computador.
+  if (modelo === '55') {
+    await shell.openExternal(url)
+    return { ok: true }
+  }
+  const pai = BrowserWindow.fromWebContents(event.sender)
+  const janela = new BrowserWindow({
+    parent: pai || undefined,
+    width: 420,
+    height: 760,
+    title: 'Cupom fiscal',
+    autoHideMenuBar: true,
+    webPreferences: { contextIsolation: true, nodeIntegration: false },
+  })
+  await janela.loadURL(url)
+  // Espera logo e QR Code carregarem e mede a página para caber no papel de 80mm.
+  const { largura, altura } = await janela.webContents.executeJavaScript(`
+    Promise.all([...document.images].map((img) => img.complete ? null
+      : new Promise((ok) => { img.onload = img.onerror = ok })))
+      .then(() => ({
+        largura: document.documentElement.scrollWidth,
+        altura: document.documentElement.scrollHeight,
+      }))
+  `)
+  const larguraPapel = 80000 // mícrons
+  janela.webContents.print(
+    {
+      ...(await opcoesImpressao(janela.webContents, IMPRESSORA_CUPOM)),
+      margins: { marginType: 'none' },
+      pageSize: { width: larguraPapel, height: Math.ceil((altura / largura) * larguraPapel) + 5000 },
+    },
+    () => {},
+  )
+  return { ok: true }
+})
+
+// Impressoras fixas por tipo de impressão (nomes como estão no Windows).
+const IMPRESSORA_CUPOM = 'MP-4200 TH'
+const IMPRESSORA_ETIQUETA = 'LABEL'
+
+// Abre o diálogo de impressão já com a impressora indicada, se ela existir.
+async function opcoesImpressao(webContents, nome) {
+  const impressoras = await webContents.getPrintersAsync()
+  if (impressoras.some((p) => p.name === nome)) {
+    return { silent: false, printBackground: true, deviceName: nome }
+  }
+  return { silent: false, printBackground: true }
+}
 
 ipcMain.handle('criar-venda', (_, data) => criarVenda(data))
 ipcMain.handle('listar-vendas', () => listarVendas())
@@ -259,10 +472,7 @@ ipcMain.handle('atualizar-venda', (_, id, data) => atualizarVenda(id, data))
 ipcMain.handle('imprimir-etiquetas', async (event) => {
   const win = BrowserWindow.fromWebContents(event.sender)
   if (!win || !win.webContents) return { error: 'Janela não encontrada' }
-  return win.webContents.print({
-    silent: false,
-    printBackground: true,
-  })
+  return win.webContents.print(await opcoesImpressao(win.webContents, IMPRESSORA_ETIQUETA))
 })
 
 ipcMain.handle('copiar-texto', (_, texto) => {
@@ -351,4 +561,7 @@ app.on('before-quit', (event) => {
 app.whenReady().then(() => {
   createWindow()
   iniciarSyncTimer()
+  // Cupons que ficaram sem internet: tenta de novo a cada 5 minutos.
+  setTimeout(() => reenviarPendentes(), 60 * 1000)
+  setInterval(() => reenviarPendentes(), 5 * 60 * 1000)
 })

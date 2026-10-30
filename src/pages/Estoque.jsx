@@ -23,6 +23,15 @@ function formatData(dataStr) {
   return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' })
 }
 
+const ORIGENS_MOVIMENTACAO = {
+  pdv: 'PDV',
+  estorno: 'Estorno',
+  nfe_entrada: 'Nota de entrada',
+  estorno_nfe: 'Estorno de nota',
+  devolucao_artesao: 'Devolução ao artesão',
+  estorno_devolucao: 'Estorno de devolução',
+}
+
 function nomeProdutoComVariacao(produto) {
   if (!produto) return ''
   return `${produto.nome}${produto.variacao ? ` (${produto.variacao})` : ''}`
@@ -289,7 +298,7 @@ export default function Estoque() {
                       <div className="estoque-history-card-info">
                         <span className="estoque-history-produto">{mov.produto_nome}</span>
                         <span className="estoque-history-origem">
-                          {mov.origem === 'pdv' ? 'PDV' : 'Admin'}
+                          {ORIGENS_MOVIMENTACAO[mov.origem] || 'Admin'}
                         </span>
                         <span className="estoque-history-hora">{formatData(mov.data)} {formatHora(mov.data)}</span>
                       </div>

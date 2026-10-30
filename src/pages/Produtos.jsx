@@ -15,6 +15,14 @@ import {
   precoSugerido,
   arredondarPrecoVenda,
 } from '../utils/formacaoPreco'
+import {
+  ORIGENS_MERCADORIA,
+  TIPOS_POSSE,
+  formatarNcm,
+  regraFiscalVenda,
+  somenteDigitos,
+} from '../utils/fiscal'
+import ModalNcmLote from '../components/ModalNcmLote'
 import Barcode from 'react-barcode'
 import JsBarcode from 'jsbarcode'
 
@@ -80,10 +88,32 @@ export default function Produtos() {
 
   const [formacao, setFormacao] = useState(FORMACAO_PADRAO)
   const [modalFormacaoAberto, setModalFormacaoAberto] = useState(false)
+  const [modalNcmLoteAberto, setModalNcmLoteAberto] = useState(false)
   const [formacaoRascunho, setFormacaoRascunho] = useState(() => camposDeFormacao(FORMACAO_PADRAO))
   const [salvandoFormacao, setSalvandoFormacao] = useState(false)
   const [aplicandoEmTodos, setAplicandoEmTodos] = useState(false)
   const [abaProduto, setAbaProduto] = useState('dados')
+  const [tipoPosse, setTipoPosse] = useState('consignado')
+  const [ncm, setNcm] = useState('')
+  const [cest, setCest] = useState('')
+  const [unidade, setUnidade] = useState('UN')
+  const [origem, setOrigem] = useState('0')
+  const [icmsSt, setIcmsSt] = useState(false)
+  const [sugestaoCest, setSugestaoCest] = useState(null)
+
+  // Sugere o CEST que outros produtos com o mesmo NCM já usam (só quando o produto tem ST).
+  useEffect(() => {
+    const ncmDigitos = somenteDigitos(ncm)
+    if (tipoPosse !== 'proprio' || !icmsSt || ncmDigitos.length !== 8 || !window.electronAPI?.sugerirCest) {
+      setSugestaoCest(null)
+      return
+    }
+    let ativo = true
+    window.electronAPI.sugerirCest(ncmDigitos).then((s) => ativo && setSugestaoCest(s)).catch(() => {})
+    return () => {
+      ativo = false
+    }
+  }, [ncm, tipoPosse, icmsSt])
   const formacaoCalc = useMemo(() => calcularFormacao(formacao), [formacao])
   const formacaoRascunhoCalc = useMemo(() => calcularFormacao(formacaoRascunho), [formacaoRascunho])
 
@@ -353,7 +383,29 @@ export default function Produtos() {
     setTipoVariacaoProdutoId('')
     setErroTipoVariacaoProduto('')
     setAbaProduto('dados')
+    preencherFiscalProduto(null)
     setModalAberto(true)
+  }
+
+  function preencherFiscalProduto(produto) {
+    setTipoPosse(produto?.tipo_posse || 'consignado')
+    setNcm(formatarNcm(produto?.ncm || ''))
+    setCest(produto?.cest || '')
+    setUnidade(produto?.unidade || 'UN')
+    setOrigem(produto?.origem ?? '0')
+    setIcmsSt(Boolean(produto?.icms_st))
+  }
+
+  /** Campos fiscais do formulário, no formato que o banco espera. */
+  function dadosFiscaisProduto() {
+    return {
+      tipo_posse: tipoPosse,
+      ncm: somenteDigitos(ncm),
+      cest: somenteDigitos(cest),
+      unidade: unidade.trim().toUpperCase() || 'UN',
+      origem,
+      icms_st: tipoPosse === 'proprio' && icmsSt,
+    }
   }
 
   function abrirModalEdicao(produto) {
@@ -406,6 +458,7 @@ export default function Produtos() {
     setTipoVariacaoProdutoId(tipoDoProduto ? String(tipoDoProduto.id) : '')
     setErroTipoVariacaoProduto('')
     setAbaProduto('dados')
+    preencherFiscalProduto(produto)
     setModalAberto(true)
   }
 
@@ -434,6 +487,12 @@ export default function Produtos() {
         preco_venda: Number(produto.preco_venda) || 0,
         estoque: Number(produto.estoque) || 0,
         artesao_id: artesaoVal,
+        tipo_posse: produto.tipo_posse || 'consignado',
+        ncm: produto.ncm || '',
+        cest: produto.cest || '',
+        unidade: produto.unidade || 'UN',
+        origem: produto.origem ?? '0',
+        icms_st: Boolean(produto.icms_st),
       })
       await carregarProdutos()
       mostrarToast('Produto duplicado com sucesso!', 'success')
@@ -688,6 +747,7 @@ export default function Produtos() {
   }
 
   async function salvarProdutoEmEdicaoComVariacao(custo, venda, artesaoVal) {
+    const fiscal = dadosFiscaisProduto()
     const tipoSelecionado = tiposVariacao.find((t) => String(t.id) === String(tipoVariacaoProdutoId))
     if (!tipoSelecionado) {
       setErroTipoVariacaoProduto('Selecione um tipo de variação.')
@@ -718,6 +778,7 @@ export default function Produtos() {
       preco_venda: venda,
       estoque: qtdPrincipal,
       artesao_id: artesaoVal,
+      ...fiscal,
     })
     for (const variacao of variacoesSelecionadas) {
       if (variacao === variacaoPrincipal) continue
@@ -736,6 +797,7 @@ export default function Produtos() {
           preco_venda: venda,
           estoque: qtd,
           artesao_id: artesaoVal,
+          ...fiscal,
         })
       } else {
         await window.electronAPI.criarProduto({
@@ -745,6 +807,7 @@ export default function Produtos() {
           preco_venda: venda,
           estoque: qtd,
           artesao_id: artesaoVal,
+          ...fiscal,
         })
       }
     }
@@ -752,6 +815,7 @@ export default function Produtos() {
   }
 
   async function salvarProdutoEmEdicaoSemVariacao(custo, venda, artesaoVal) {
+    const fiscal = dadosFiscaisProduto()
     const qtd = parseEstoqueInput(estoque)
     await window.electronAPI.atualizarProduto(produtoEmEdicao.id, {
       nome: nome.trim(),
@@ -760,10 +824,12 @@ export default function Produtos() {
       preco_venda: venda,
       estoque: qtd,
       artesao_id: artesaoVal,
+      ...fiscal,
     })
   }
 
   async function salvarNovoProdutoComVariacoes(custo, venda, artesaoVal) {
+    const fiscal = dadosFiscaisProduto()
     const tipoSelecionado = tiposVariacao.find((t) => String(t.id) === String(tipoVariacaoProdutoId))
     if (!tipoSelecionado) {
       setErroTipoVariacaoProduto('Selecione um tipo de variação.')
@@ -790,12 +856,14 @@ export default function Produtos() {
         preco_venda: venda,
         estoque: qtd,
         artesao_id: artesaoVal,
+        ...fiscal,
       })
     }
     return true
   }
 
   async function salvarNovoProdutoSemVariacao(custo, venda, artesaoVal) {
+    const fiscal = dadosFiscaisProduto()
     const qtd = parseEstoqueInput(estoque)
     await window.electronAPI.criarProduto({
       nome: nome.trim(),
@@ -804,6 +872,7 @@ export default function Produtos() {
       preco_venda: venda,
       estoque: qtd,
       artesao_id: artesaoVal,
+      ...fiscal,
     })
   }
 
@@ -820,6 +889,24 @@ export default function Produtos() {
     if (!artesaoVal || artesaoVal < 1) {
       setAbaProduto('dados')
       alert('Selecione um fornecedor.')
+      return
+    }
+
+    const ncmDigitos = somenteDigitos(ncm)
+    if (ncmDigitos && ncmDigitos.length !== 8) {
+      setAbaProduto('fiscal')
+      alert('O NCM deve ter 8 dígitos.')
+      return
+    }
+    const cestDigitos = somenteDigitos(cest)
+    if (cestDigitos && cestDigitos.length !== 7) {
+      setAbaProduto('fiscal')
+      alert('O CEST deve ter 7 dígitos.')
+      return
+    }
+    if (tipoPosse === 'proprio' && icmsSt && cestDigitos.length !== 7) {
+      setAbaProduto('fiscal')
+      alert('Produto com ICMS-ST precisa do CEST (7 dígitos). Veja o CEST na nota do fornecedor.')
       return
     }
 
@@ -1673,6 +1760,9 @@ ${chunk.join('\n')}
           <button type="button" className="produtos-btn-quiet" onClick={abrirModalFormacao}>
             Formação de Preço
           </button>
+          <button type="button" className="produtos-btn-quiet" onClick={() => setModalNcmLoteAberto(true)}>
+            NCM em lote
+          </button>
           <button type="button" className="produtos-btn-primary" onClick={abrirModal}>
             <span>+</span> Novo Produto
           </button>
@@ -1721,7 +1811,10 @@ ${chunk.join('\n')}
               produtosFiltrados.map((p) => (
                 <tr key={p.id}>
                   <td>{p.codigo_barras}</td>
-                  <td>{p.nome}{p.variacao ? ` (${p.variacao})` : ''}</td>
+                  <td>
+                    {p.nome}{p.variacao ? ` (${p.variacao})` : ''}
+                    {p.tipo_posse === 'proprio' && <span className="produto-tag-proprio">Próprio</span>}
+                  </td>
                   <td>{rotuloNomeFantasia(p.artesao_nome_fantasia, p.artesao_razao_social, p.artesao_nome, '-')}</td>
                   <td>{p.estoque}</td>
                   <td>R$ {p.preco_venda?.toFixed(2).replace('.', ',')}</td>
@@ -1808,6 +1901,15 @@ ${chunk.join('\n')}
                     onClick={() => setAbaProduto('formacao')}
                   >
                     Formação de Preço
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={abaProduto === 'fiscal'}
+                    className={`formacao-tab ${abaProduto === 'fiscal' ? 'active' : ''}`}
+                    onClick={() => setAbaProduto('fiscal')}
+                  >
+                    Fiscal
                   </button>
                 </div>
                 {abaProduto === 'dados' && (
@@ -2030,6 +2132,84 @@ ${chunk.join('\n')}
                 </div>
                 </>
                 )}
+                {abaProduto === 'fiscal' && (
+                  <div className="fiscal-produto">
+                    <div className="modal-field">
+                      <label htmlFor="tipoPosse">Tipo do produto</label>
+                      <select id="tipoPosse" value={tipoPosse} onChange={(e) => setTipoPosse(e.target.value)}>
+                        {TIPOS_POSSE.map((op) => (
+                          <option key={op.value} value={op.value}>{op.label}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="modal-produto-precos">
+                      <div className="modal-field">
+                        <label htmlFor="ncm">NCM</label>
+                        <input
+                          id="ncm"
+                          type="text"
+                          inputMode="numeric"
+                          value={ncm}
+                          onChange={(e) => setNcm(formatarNcm(e.target.value))}
+                          placeholder="0000.00.00"
+                        />
+                      </div>
+                      <div className="modal-field">
+                        <label htmlFor="cest">CEST</label>
+                        <input
+                          id="cest"
+                          type="text"
+                          inputMode="numeric"
+                          maxLength={7}
+                          value={cest}
+                          onChange={(e) => setCest(somenteDigitos(e.target.value).slice(0, 7))}
+                          placeholder={tipoPosse === 'proprio' && icmsSt ? 'Obrigatório com ST' : 'Só se tiver ST'}
+                        />
+                        {sugestaoCest && sugestaoCest.cest !== cest && (
+                          <button type="button" className="produto-sugestao-cest" onClick={() => setCest(sugestaoCest.cest)}>
+                            Usar {sugestaoCest.cest} (já usado em {sugestaoCest.total} produto(s) com este NCM)
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    <div className="modal-produto-precos">
+                      <div className="modal-field">
+                        <label htmlFor="unidade">Unidade</label>
+                        <input
+                          id="unidade"
+                          type="text"
+                          maxLength={6}
+                          value={unidade}
+                          onChange={(e) => setUnidade(e.target.value.toUpperCase())}
+                          placeholder="UN"
+                        />
+                      </div>
+                      <div className="modal-field">
+                        <label htmlFor="origem">Origem</label>
+                        <select id="origem" value={origem} onChange={(e) => setOrigem(e.target.value)}>
+                          {ORIGENS_MERCADORIA.map((op) => (
+                            <option key={op.value} value={op.value}>{op.label}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                    {tipoPosse === 'proprio' && (
+                      <label className="fiscal-produto-st">
+                        <input type="checkbox" checked={icmsSt} onChange={(e) => setIcmsSt(e.target.checked)} />
+                        ICMS-ST já retido pelo fornecedor
+                      </label>
+                    )}
+                    {(() => {
+                      const regra = regraFiscalVenda({ tipo_posse: tipoPosse, icms_st: icmsSt })
+                      return (
+                        <p className="modal-field-hint">
+                          Na venda: CFOP {regra.cfop}, CSOSN {regra.csosn}, PIS/COFINS {regra.cstPisCofins}.
+                          {tipoPosse === 'consignado' && ' Use o mesmo NCM da nota do artesão.'}
+                        </p>
+                      )
+                    })()}
+                  </div>
+                )}
                 {abaProduto === 'formacao' && (
                   <div className="formacao-produto">
                     <div className="modal-field">
@@ -2182,6 +2362,19 @@ ${chunk.join('\n')}
             </form>
           </div>
         </div>
+      )}
+
+      {modalNcmLoteAberto && (
+        <ModalNcmLote
+          produtos={produtos}
+          artesoes={artesoes}
+          onFechar={() => setModalNcmLoteAberto(false)}
+          onAplicado={(total) => {
+            setModalNcmLoteAberto(false)
+            carregarProdutos()
+            mostrarToast(`NCM salvo em ${total} produto(s).`)
+          }}
+        />
       )}
 
       {modalEtiquetasAberto && (

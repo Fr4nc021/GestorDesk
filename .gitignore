@@ -34,3 +34,7 @@ release/
 # Local SQLite (não versionar dados reais)
 database.db
 *.db
+# Documentos e certificado digital da loja (nunca versionar)
+GestorDesk - DOCS cnpj/
+*.pfx
+*.p12

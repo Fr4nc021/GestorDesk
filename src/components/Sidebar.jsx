@@ -2,19 +2,27 @@ import { NavLink, Link, useNavigate } from 'react-router-dom'
 import pdvIcon from '../assets/icons/pdv.png'
 import artesaosIcon from '../assets/icons/artesaos.png'
 import estoqueIcon from '../assets/icons/estoque.png'
-import relatoriosIcon from '../assets/icons/relatorios.png'
+import relatorioIcon from '../assets/icons/relatorio.png'
+import painelIcon from '../assets/icons/painel.png'
+import produtosIcon from '../assets/icons/produtos.png'
+import estoqueProntoIcon from '../assets/icons/estoque-pronto.png'
+import configuracoesIcon from '../assets/icons/configuracoes.png'
+import dinheiroIcon from '../assets/icons/dinheiro.svg'
+import notaEmitidaIcon from '../assets/icons/nota-emitida.svg'
 import sairIcon from '../assets/icons/sair.png'
 import logo from '../assets/logo.png'
 
 const sidebarNavItems = [
-  { to: '/app', label: 'Dashboard', icon: relatoriosIcon },
+  { to: '/app', label: 'Dashboard', icon: painelIcon },
   { to: '/app/pdv', label: 'PDV (Venda)', icon: pdvIcon },
-  { to: '/app/produtos', label: 'Produtos', icon: estoqueIcon },
+  { to: '/app/produtos', label: 'Produtos', icon: produtosIcon },
   { to: '/app/artesaos', label: 'Fornecedores', icon: artesaosIcon },
-  { to: '/app/estoque', label: 'Estoque', icon: estoqueIcon },
-  { to: '/app/caixa', label: 'Caixa', icon: pdvIcon },
-  { to: '/app/relatorios', label: 'Relatórios', icon: relatoriosIcon },
-  { to: '/app/configuracoes', label: 'Configurações', icon: relatoriosIcon },
+  { to: '/app/estoque', label: 'Estoque', icon: estoqueProntoIcon },
+  { to: '/app/notas-entrada', label: 'Notas de entrada', icon: estoqueIcon },
+  { to: '/app/vendas', label: 'Vendas', icon: notaEmitidaIcon },
+  { to: '/app/caixa', label: 'Caixa', icon: dinheiroIcon },
+  { to: '/app/relatorios', label: 'Relatórios', icon: relatorioIcon },
+  { to: '/app/configuracoes', label: 'Configurações', icon: configuracoesIcon },
 ]
 
 export default function Sidebar() {

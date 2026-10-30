@@ -185,10 +185,9 @@ async function pullTabelaDoSupabase(supabase, tabela) {
           'SELECT preco_custo_unitario, preco_unitario FROM vendas_itens WHERE id = ?',
         )
       : null
-  const getLocalArtesao =
-    tabela === 'artesoes'
-      ? db.prepare('SELECT razao_social, nome_fantasia FROM artesoes WHERE id = ?')
-      : null
+  // Coluna que ainda não existe no Supabase (SQL de schema não rodado) mantém o valor local
+  // em vez de ser apagada pelo pull.
+  const getLocalRow = db.prepare(`SELECT * FROM ${tabela} WHERE id = ?`)
 
   while (true) {
     const { data, error } = await supabase
@@ -216,12 +215,8 @@ async function pullTabelaDoSupabase(supabase, tabela) {
               v = localRow[c]
             }
           }
-          if (
-            getLocalArtesao &&
-            (c === 'razao_social' || c === 'nome_fantasia') &&
-            !colunaNoRemoto
-          ) {
-            const localRow = getLocalArtesao.get(row.id)
+          if (!colunaNoRemoto) {
+            const localRow = getLocalRow.get(row.id)
             if (localRow) v = localRow[c]
           }
           values.push(v)
@@ -255,6 +250,11 @@ async function enviarPendentesTabela(supabase, tabela) {
 async function syncWithSupabase() {
   const log = (msg) => console.log(`[Sync] ${msg}`)
   const logError = (msg, err) => console.error(`[Sync] ${msg}`, err?.message || err)
+
+  if (process.env.GESTORDESK_SYNC_DESATIVADO === '1') {
+    log('Sincronização desativada (modo de testes).')
+    return { success: false, error: 'Sincronização desativada no modo de testes' }
+  }
 
   log('Início da sincronização.')
 

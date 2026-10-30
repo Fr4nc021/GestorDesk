@@ -28,7 +28,22 @@ ALTER TABLE public.artesoes
   ADD COLUMN IF NOT EXISTS complemento TEXT,
   ADD COLUMN IF NOT EXISTS bairro TEXT,
   ADD COLUMN IF NOT EXISTS cidade TEXT,
-  ADD COLUMN IF NOT EXISTS uf TEXT;
+  ADD COLUMN IF NOT EXISTS uf TEXT,
+  ADD COLUMN IF NOT EXISTS codigo_municipio TEXT;
+
+-- Dados fiscais do produto (NFC-e / NF-e). Espelha o SQLite local.
+ALTER TABLE public.produtos
+  ADD COLUMN IF NOT EXISTS tipo_posse TEXT DEFAULT 'consignado',
+  ADD COLUMN IF NOT EXISTS ncm TEXT,
+  ADD COLUMN IF NOT EXISTS cest TEXT,
+  ADD COLUMN IF NOT EXISTS unidade TEXT DEFAULT 'UN',
+  ADD COLUMN IF NOT EXISTS origem TEXT DEFAULT '0',
+  ADD COLUMN IF NOT EXISTS icms_st INTEGER DEFAULT 0;
+
+-- Desconto e troco gravados na venda.
+ALTER TABLE public.vendas
+  ADD COLUMN IF NOT EXISTS desconto NUMERIC DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS troco NUMERIC DEFAULT 0;
 
 -- Ativar RLS e criar políticas para tabelas sincronizadas
 do $$

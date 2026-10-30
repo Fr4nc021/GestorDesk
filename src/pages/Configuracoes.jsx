@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useAtualizacao } from '../hooks/useAtualizacao'
+import { buscarCep, formatarCep } from '../utils/cep'
+import { AMBIENTES, CRT_OPCOES, formatarCnpj } from '../utils/fiscal'
 import {
   RELATORIO_MODO_DIAS_ATRAS,
   RELATORIO_MODO_OPCOES,
@@ -14,8 +16,50 @@ const SYNC_STATUS_CSS = {
   'no-internet': 'no-internet',
 }
 
+const ESTADOS_BR = [
+  'AC', 'AL', 'AP', 'AM', 'BA', 'CE', 'DF', 'ES', 'GO', 'MA', 'MT', 'MS', 'MG', 'PA',
+  'PB', 'PR', 'PE', 'PI', 'RJ', 'RN', 'RS', 'RO', 'RR', 'SC', 'SP', 'SE', 'TO',
+]
+
+const CONFIG_FISCAL_VAZIA = {
+  cnpj: '',
+  inscricao_estadual: '',
+  razao_social: '',
+  nome_fantasia: '',
+  cep: '',
+  logradouro: '',
+  numero: '',
+  complemento: '',
+  bairro: '',
+  municipio: '',
+  codigo_municipio: '',
+  uf: '',
+  telefone: '',
+  email: '',
+  crt: '1',
+  ambiente: '2',
+  serie_nfce: '1',
+  proximo_numero_nfce: '1',
+  serie_nfe: '1',
+  proximo_numero_nfe: '1',
+  csc_id: '',
+  csc: '',
+  emitir_nfce: '0',
+  prazo_cancelamento_nfce: '30',
+  limite_identificacao_nfce: '10000',
+  usar_ibpt: '0',
+  focus_token_homologacao: '',
+  focus_token_producao: '',
+}
+
+function configFiscalParaForm(config) {
+  const base = { ...CONFIG_FISCAL_VAZIA, ...(config || {}) }
+  return { ...base, cnpj: formatarCnpj(base.cnpj), cep: formatarCep(base.cep) }
+}
+
 export default function Configuracoes() {
   const [abaAtiva, setAbaAtiva] = useState('usuarios')
+  const [ibpt, setIbpt] = useState(null)
   const [usuariosLocais, setUsuariosLocais] = useState([])
   const [carregandoUsuarios, setCarregandoUsuarios] = useState(true)
   const [erroUsuarios, setErroUsuarios] = useState('')
@@ -30,10 +74,146 @@ export default function Configuracoes() {
   const [salvandoPeriodoRelatorios, setSalvandoPeriodoRelatorios] = useState(false)
   const [feedbackPeriodoRelatorios, setFeedbackPeriodoRelatorios] = useState('')
 
+  const [fiscal, setFiscal] = useState(CONFIG_FISCAL_VAZIA)
+  const [carregandoFiscal, setCarregandoFiscal] = useState(true)
+  const [salvandoFiscal, setSalvandoFiscal] = useState(false)
+  const [feedbackFiscal, setFeedbackFiscal] = useState({ tipo: '', texto: '' })
+  const [cepFiscalStatus, setCepFiscalStatus] = useState('')
+  const [mostrarCsc, setMostrarCsc] = useState(false)
+  const [mostrarTokens, setMostrarTokens] = useState(false)
+
   useEffect(() => {
     carregarUsuarios()
     carregarPeriodoRelatorios()
+    carregarConfigFiscal()
+    carregarIbpt()
   }, [])
+
+  async function carregarConfigFiscal() {
+    if (!window.electronAPI?.obterConfigFiscal) {
+      setCarregandoFiscal(false)
+      return
+    }
+    setCarregandoFiscal(true)
+    try {
+      const dados = await window.electronAPI.obterConfigFiscal()
+      setFiscal(configFiscalParaForm(dados))
+    } catch (err) {
+      console.error('[Configurações] Erro ao carregar dados fiscais:', err)
+      setFeedbackFiscal({ tipo: 'error', texto: err?.message || 'Erro ao carregar dados fiscais.' })
+    } finally {
+      setCarregandoFiscal(false)
+    }
+  }
+
+  function atualizarFiscal(campo, valor) {
+    setFiscal((prev) => ({ ...prev, [campo]: valor }))
+    setFeedbackFiscal({ tipo: '', texto: '' })
+  }
+
+  async function consultarCepFiscal() {
+    const digitos = fiscal.cep.replace(/\D/g, '')
+    if (digitos.length !== 8) return
+    setCepFiscalStatus('Buscando endereço...')
+    try {
+      const endereco = await buscarCep(digitos)
+      if (!endereco) {
+        setCepFiscalStatus('CEP não encontrado.')
+        return
+      }
+      setFiscal((prev) => ({
+        ...prev,
+        logradouro: endereco.logradouro || prev.logradouro,
+        bairro: endereco.bairro || prev.bairro,
+        municipio: endereco.cidade || prev.municipio,
+        uf: endereco.uf || prev.uf,
+        codigo_municipio: endereco.ibge || prev.codigo_municipio,
+      }))
+      setCepFiscalStatus('')
+    } catch (err) {
+      console.error('[Configurações] Erro ao buscar CEP:', err)
+      setCepFiscalStatus('Não foi possível buscar o CEP. Verifique sua conexão.')
+    }
+  }
+
+  async function exportarFiscal() {
+    try {
+      const r = await window.electronAPI.exportarConfigFiscal()
+      if (r) {
+        setFeedbackFiscal({
+          tipo: 'success',
+          texto: `Configuração exportada para ${r.caminho}. O arquivo tem os tokens da Focus: apague depois de importar.`,
+        })
+      }
+    } catch (err) {
+      setFeedbackFiscal({ tipo: 'error', texto: err?.message || 'Erro ao exportar.' })
+    }
+  }
+
+  async function importarFiscal() {
+    try {
+      const salvo = await window.electronAPI.importarConfigFiscal()
+      if (!salvo) return
+      setFiscal(configFiscalParaForm(salvo))
+      setFeedbackFiscal({ tipo: 'success', texto: 'Configuração fiscal importada e salva. Confira o ambiente antes de vender.' })
+    } catch (err) {
+      setFeedbackFiscal({ tipo: 'error', texto: err?.message || 'Erro ao importar.' })
+    }
+  }
+
+  async function carregarIbpt() {
+    try {
+      setIbpt(await window.electronAPI?.situacaoTabelaIbpt?.())
+    } catch {
+      setIbpt(null)
+    }
+  }
+
+  async function importarIbpt() {
+    try {
+      const r = await window.electronAPI.importarTabelaIbpt()
+      if (!r) return
+      setFeedbackFiscal({ tipo: 'success', texto: `Tabela do IBPT importada: ${r.total} NCMs.` })
+      await carregarIbpt()
+    } catch (err) {
+      setFeedbackFiscal({ tipo: 'error', texto: err?.message || 'Erro ao importar a tabela do IBPT.' })
+    }
+  }
+
+  async function handleSalvarFiscal(e) {
+    e.preventDefault()
+    if (!window.electronAPI?.salvarConfigFiscal) {
+      setFeedbackFiscal({ tipo: 'error', texto: 'Salvar dados fiscais só está disponível no aplicativo.' })
+      return
+    }
+    setSalvandoFiscal(true)
+    setFeedbackFiscal({ tipo: '', texto: '' })
+    try {
+      const salvo = await window.electronAPI.salvarConfigFiscal(fiscal)
+      setFiscal(configFiscalParaForm(salvo))
+      setFeedbackFiscal({ tipo: 'success', texto: 'Dados fiscais salvos.' })
+    } catch (err) {
+      console.error('[Configurações] Erro ao salvar dados fiscais:', err)
+      setFeedbackFiscal({ tipo: 'error', texto: err?.message || 'Erro ao salvar dados fiscais.' })
+    } finally {
+      setSalvandoFiscal(false)
+    }
+  }
+
+  function campoFiscal(campo, label, props = {}) {
+    return (
+      <div className="modal-field">
+        <label htmlFor={`fiscal-${campo}`}>{label}</label>
+        <input
+          id={`fiscal-${campo}`}
+          type="text"
+          value={fiscal[campo]}
+          onChange={(e) => atualizarFiscal(campo, e.target.value)}
+          {...props}
+        />
+      </div>
+    )
+  }
 
   async function carregarPeriodoRelatorios() {
     if (!window.electronAPI?.obterRelatoriosPeriodoPadrao) {
@@ -150,7 +330,7 @@ export default function Configuracoes() {
     <div className="configuracoes">
       <div className="configuracoes-header">
         <h2 className="dashboard-heading">Configurações</h2>
-        <p className="dashboard-subtitle">Gerencie usuários, sincronização e atualizações do aplicativo.</p>
+        <p className="dashboard-subtitle">Gerencie usuários, sincronização, dados fiscais e atualizações do aplicativo.</p>
       </div>
 
       <div className="config-tabs">
@@ -166,7 +346,202 @@ export default function Configuracoes() {
         <button className={`config-tab ${abaAtiva === 'relatorios' ? 'active' : ''}`} onClick={() => setAbaAtiva('relatorios')}>
           Relatórios
         </button>
+        <button className={`config-tab ${abaAtiva === 'fiscal' ? 'active' : ''}`} onClick={() => setAbaAtiva('fiscal')}>
+          Fiscal
+        </button>
       </div>
+
+      {abaAtiva === 'fiscal' && (
+        <section className="config-card">
+          <h3>Dados fiscais da empresa</h3>
+          <p className="config-card-sub">
+            Usados na emissão de NFC-e e NF-e. Ficam salvos neste computador.
+          </p>
+          {!window.electronAPI?.obterConfigFiscal && (
+            <p className="config-card-sub">Disponível apenas no aplicativo instalado.</p>
+          )}
+          {window.electronAPI?.obterConfigFiscal && carregandoFiscal && (
+            <p className="config-card-sub">Carregando dados fiscais...</p>
+          )}
+          {window.electronAPI?.obterConfigFiscal && !carregandoFiscal && (
+            <form onSubmit={handleSalvarFiscal} className="fiscal-form">
+              <p className="fiscal-secao">Empresa</p>
+              <div className="fiscal-grid">
+                {campoFiscal('razao_social', 'Razão social')}
+                {campoFiscal('nome_fantasia', 'Nome fantasia')}
+                <div className="modal-field">
+                  <label htmlFor="fiscal-cnpj">CNPJ</label>
+                  <input
+                    id="fiscal-cnpj"
+                    type="text"
+                    inputMode="numeric"
+                    value={fiscal.cnpj}
+                    onChange={(e) => atualizarFiscal('cnpj', formatarCnpj(e.target.value))}
+                    placeholder="00.000.000/0000-00"
+                  />
+                </div>
+                {campoFiscal('inscricao_estadual', 'Inscrição Estadual', { inputMode: 'numeric' })}
+                <div className="modal-field">
+                  <label htmlFor="fiscal-crt">Regime tributário (CRT)</label>
+                  <select id="fiscal-crt" value={fiscal.crt} onChange={(e) => atualizarFiscal('crt', e.target.value)}>
+                    {CRT_OPCOES.map((op) => (
+                      <option key={op.value} value={op.value}>{op.label}</option>
+                    ))}
+                  </select>
+                </div>
+                {campoFiscal('telefone', 'Telefone', { inputMode: 'tel' })}
+                {campoFiscal('email', 'E-mail', { type: 'email' })}
+              </div>
+
+              <p className="fiscal-secao">Endereço</p>
+              <div className="fiscal-grid">
+                <div className="modal-field">
+                  <label htmlFor="fiscal-cep">CEP</label>
+                  <input
+                    id="fiscal-cep"
+                    type="text"
+                    inputMode="numeric"
+                    value={fiscal.cep}
+                    onChange={(e) => atualizarFiscal('cep', formatarCep(e.target.value))}
+                    onBlur={consultarCepFiscal}
+                    placeholder="00000-000"
+                  />
+                  {cepFiscalStatus && <p className="modal-field-cep-status">{cepFiscalStatus}</p>}
+                </div>
+                {campoFiscal('logradouro', 'Logradouro')}
+                {campoFiscal('numero', 'Número')}
+                {campoFiscal('complemento', 'Complemento')}
+                {campoFiscal('bairro', 'Bairro')}
+                {campoFiscal('municipio', 'Município')}
+                <div className="modal-field">
+                  <label htmlFor="fiscal-uf">UF</label>
+                  <select id="fiscal-uf" value={fiscal.uf} onChange={(e) => atualizarFiscal('uf', e.target.value)}>
+                    <option value="">—</option>
+                    {ESTADOS_BR.map((estado) => (
+                      <option key={estado} value={estado}>{estado}</option>
+                    ))}
+                  </select>
+                </div>
+                {campoFiscal('codigo_municipio', 'Código IBGE do município', {
+                  inputMode: 'numeric',
+                  maxLength: 7,
+                  placeholder: 'Preenchido pelo CEP',
+                })}
+              </div>
+
+              <p className="fiscal-secao">Emissão</p>
+              <div className="fiscal-grid">
+                <div className="modal-field">
+                  <label htmlFor="fiscal-ambiente">Ambiente</label>
+                  <select
+                    id="fiscal-ambiente"
+                    value={fiscal.ambiente}
+                    onChange={(e) => atualizarFiscal('ambiente', e.target.value)}
+                  >
+                    {AMBIENTES.map((op) => (
+                      <option key={op.value} value={op.value}>{op.label}</option>
+                    ))}
+                  </select>
+                </div>
+                {campoFiscal('serie_nfce', 'Série da NFC-e', { inputMode: 'numeric' })}
+                {campoFiscal('proximo_numero_nfce', 'Próximo número da NFC-e', { inputMode: 'numeric' })}
+                {campoFiscal('serie_nfe', 'Série da NF-e', { inputMode: 'numeric' })}
+                {campoFiscal('proximo_numero_nfe', 'Próximo número da NF-e', { inputMode: 'numeric' })}
+                {campoFiscal('prazo_cancelamento_nfce', 'Prazo para cancelar o cupom (minutos)', { inputMode: 'numeric' })}
+                {campoFiscal('limite_identificacao_nfce', 'Exigir CPF no cupom a partir de (R$)', { inputMode: 'numeric' })}
+                {campoFiscal('csc_id', 'ID do CSC (token NFC-e)', { inputMode: 'numeric' })}
+                <div className="modal-field">
+                  <label htmlFor="fiscal-csc">CSC (token NFC-e)</label>
+                  <input
+                    id="fiscal-csc"
+                    type={mostrarCsc ? 'text' : 'password'}
+                    value={fiscal.csc}
+                    onChange={(e) => atualizarFiscal('csc', e.target.value)}
+                    autoComplete="off"
+                  />
+                  <button type="button" className="fiscal-mostrar-csc" onClick={() => setMostrarCsc((v) => !v)}>
+                    {mostrarCsc ? 'Ocultar' : 'Mostrar'}
+                  </button>
+                </div>
+              </div>
+
+              <p className="fiscal-secao">Emissor de notas (Focus NFe)</p>
+              <p className="config-card-sub">
+                Os tokens ficam no painel da Focus NFe (Painel API › Tokens). O certificado digital e o CSC são
+                cadastrados lá, no cadastro da empresa.
+              </p>
+              <div className="fiscal-grid">
+                {['focus_token_homologacao', 'focus_token_producao'].map((campo) => (
+                  <div className="modal-field" key={campo}>
+                    <label htmlFor={`fiscal-${campo}`}>
+                      {campo === 'focus_token_producao' ? 'Token de produção' : 'Token de homologação'}
+                    </label>
+                    <input
+                      id={`fiscal-${campo}`}
+                      type={mostrarTokens ? 'text' : 'password'}
+                      value={fiscal[campo]}
+                      onChange={(e) => atualizarFiscal(campo, e.target.value)}
+                      autoComplete="off"
+                    />
+                  </div>
+                ))}
+              </div>
+              <button type="button" className="fiscal-mostrar-csc" onClick={() => setMostrarTokens((v) => !v)}>
+                {mostrarTokens ? 'Ocultar tokens' : 'Mostrar tokens'}
+              </button>
+              <label className="fiscal-produto-st fiscal-emitir-nfce">
+                <input
+                  type="checkbox"
+                  checked={fiscal.emitir_nfce === '1'}
+                  onChange={(e) => atualizarFiscal('emitir_nfce', e.target.checked ? '1' : '0')}
+                />
+                Emitir NFC-e ao finalizar cada venda no PDV
+              </label>
+              {fiscal.emitir_nfce === '1' && fiscal.ambiente === '2' && (
+                <p className="config-card-sub">Ambiente de homologação: os cupons saem sem valor fiscal.</p>
+              )}
+
+              <p className="fiscal-secao">Valor aproximado dos tributos (IBPT)</p>
+              <label className="fiscal-produto-st">
+                <input
+                  type="checkbox"
+                  checked={fiscal.usar_ibpt === '1'}
+                  onChange={(e) => atualizarFiscal('usar_ibpt', e.target.checked ? '1' : '0')}
+                />
+                Mostrar no cupom o valor aproximado dos tributos (Lei 12.741/2012)
+              </label>
+              <p className="config-card-sub">
+                Baixe a tabela do RS em deolhonoimposto.ibpt.org.br (arquivo CSV, gratuito com cadastro do CNPJ) e
+                importe aqui. Ela vale por cerca de 6 meses.{' '}
+                {ibpt?.total
+                  ? `Tabela atual: ${ibpt.total} NCMs, versão ${ibpt.versao || '—'}, vale até ${String(ibpt.vigencia_fim || '').split('-').reverse().join('/')}.`
+                  : 'Nenhuma tabela importada.'}
+                {ibpt?.vigencia_fim && ibpt.vigencia_fim < new Date().toISOString().slice(0, 10) && (
+                  <strong> A tabela venceu: importe a nova.</strong>
+                )}
+              </p>
+              <button type="button" className="fiscal-mostrar-csc" onClick={importarIbpt}>
+                Importar tabela do IBPT
+              </button>
+
+              <div className="sync-action-row config-save-row">
+                <button type="submit" className="btn-sync-manual" disabled={salvandoFiscal}>
+                  {salvandoFiscal ? 'Salvando...' : 'Salvar dados fiscais'}
+                </button>
+                <button type="button" className="fiscal-mostrar-csc" onClick={exportarFiscal}>
+                  Exportar configuração
+                </button>
+                <button type="button" className="fiscal-mostrar-csc" onClick={importarFiscal}>
+                  Importar configuração
+                </button>
+              </div>
+              {feedbackFiscal.texto && (
+                <p className={`config-feedback ${feedbackFiscal.tipo}`}>{feedbackFiscal.texto}</p>
+              )}
+            </form>
+          )}
+        </section>
+      )}
 
       {abaAtiva === 'usuarios' && (
         <section className="config-card">

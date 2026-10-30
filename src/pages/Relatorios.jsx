@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom'
 import { jsPDF } from 'jspdf'
 import { recoverInputFocus } from '../utils/focusRecovery'
 import { rotuloArtesao, rotuloNomeFantasia, textoInclui } from '../utils/artesao'
+import { formatarCnpj } from '../utils/fiscal'
+import RelatorioFiscal from '../components/RelatorioFiscal'
 import {
   calcularPeriodoPadraoRelatorio,
   criarRelatoriosPeriodoPadrao,
@@ -207,6 +209,7 @@ const TAB_LUCRO = 'lucro'
 const TAB_MAIS_VENDIDOS = 'mais_vendidos'
 const TAB_PRODUTOS = 'produtos'
 const TAB_VALOR = 'valor'
+const TAB_FISCAL = 'fiscal'
 
 const PREVIEW_TITULOS_PDF = {
   geral: 'Relatório de Vendas — Visão geral',
@@ -310,6 +313,7 @@ export default function Relatorios() {
   const [vendasArtesaoCarregando, setVendasArtesaoCarregando] = useState(false)
 
   const [aluguelInput, setAluguelInput] = useState('')
+  const [dadosLoja, setDadosLoja] = useState(null)
   const [incluirValorVenda, setIncluirValorVenda] = useState(false)
   const [incluirValorVendaProdutos, setIncluirValorVendaProdutos] = useState(false)
   const [relatorioCustoVendasArtesao, setRelatorioCustoVendasArtesao] = useState(null)
@@ -345,6 +349,10 @@ export default function Relatorios() {
     setAba(abaId)
     aplicarPeriodoPadraoDaAba(abaId)
   }
+
+  useEffect(() => {
+    window.electronAPI?.obterConfigFiscal?.().then(setDadosLoja).catch(() => setDadosLoja(null))
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -1069,6 +1077,33 @@ export default function Relatorios() {
       desenharRodapeTabelaPdf()
     }
 
+    if (artesaoId && totalCusto > 0) {
+      if (y > 250) {
+        doc.addPage()
+        y = 20
+      }
+      y += 14
+      doc.setFont('helvetica', 'bold')
+      doc.setFontSize(10)
+      doc.text('Nota fiscal de acerto (a emitir pelo fornecedor)', margin, y)
+      y += 6
+      doc.setFont('helvetica', 'normal')
+      doc.setFontSize(9)
+      const linhasNota = [
+        'CFOP 5113 - venda de produção remetida anteriormente em consignação',
+        `Valor da nota: ${formatBRL(totalCusto)} (custo das peças vendidas, sem descontar o aluguel)`,
+      ]
+      if (dadosLoja?.cnpj) {
+        linhasNota.push(
+          `Destinatário: ${dadosLoja.razao_social || dadosLoja.nome_fantasia || ''} - CNPJ ${formatarCnpj(dadosLoja.cnpj)}`
+        )
+      }
+      for (const linha of linhasNota) {
+        doc.text(limitarTextoPdf(doc, linha, doc.internal.pageSize.getWidth() - margin * 2), margin, y)
+        y += 5
+      }
+    }
+
     const filename =
       dataInicio === dataFim
         ? `relatorio-vendas-custo-${dataInicio}.pdf`
@@ -1394,6 +1429,7 @@ export default function Relatorios() {
     { id: TAB_MAIS_VENDIDOS, label: 'Mais Vendidos' },
     { id: TAB_PRODUTOS, label: 'Produtos' },
     { id: TAB_VALOR, label: 'Valor' },
+    { id: TAB_FISCAL, label: 'Fiscal' },
   ]
 
   return (
@@ -1988,6 +2024,14 @@ export default function Relatorios() {
                           </td>
                         </tr>
                       )}
+                      {artesaoId && totalCustoBaseRel > 0 && (
+                        <tr>
+                          <td colSpan={colSpanRotuloCusto}>
+                            Nota fiscal de acerto que o fornecedor deve emitir (CFOP 5113, sem descontar o aluguel)
+                          </td>
+                          <td>{formatBRL(totalCustoBaseRel)}</td>
+                        </tr>
+                      )}
                     </tfoot>
                   </table>
                 </div>
@@ -2131,6 +2175,8 @@ export default function Relatorios() {
           )}
         </section>
       )}
+
+      {aba === TAB_FISCAL && <RelatorioFiscal dataInicio={dataInicio} dataFim={dataFim} />}
 
       {!carregando && aba === TAB_VALOR && (
         <section className="relatorios-mais-vendidos">

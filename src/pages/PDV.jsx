@@ -1,8 +1,9 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import codeIcon from '../assets/complements/code.png'
 import ProdutoSearchModal from '../components/ProdutoSearchModal'
 import { recoverInputFocus } from '../utils/focusRecovery'
+import { mensagemErro } from '../utils/erros'
 
 const FORMAS_PAGAMENTO = [
   { id: 'credito', label: 'Cartão de Crédito', icon: 'credit' },
@@ -79,6 +80,31 @@ export default function PDV() {
   const MAX_FILA = 20
   const [toast, setToast] = useState(null)
   const [voltarRelatorios, setVoltarRelatorios] = useState(false)
+  const [emitirNfce, setEmitirNfce] = useState(false)
+  const [cpfNota, setCpfNota] = useState('')
+  const [limiteCpfNota, setLimiteCpfNota] = useState(10000)
+  const [cupom, setCupom] = useState(null)
+
+  // Lido de novo a cada pagamento, para valer na hora uma mudança feita em Configurações.
+  const carregarEmissaoNfce = useCallback(() => {
+    window.electronAPI
+      ?.obterConfigFiscal?.()
+      .then((config) => {
+        setEmitirNfce(config?.emitir_nfce === '1')
+        setLimiteCpfNota(Number(config?.limite_identificacao_nfce) || 10000)
+      })
+      .catch(() => setEmitirNfce(false))
+  }, [])
+
+  useEffect(() => {
+    window.electronAPI
+      ?.obterConfigFiscal?.()
+      .then((config) => {
+        setEmitirNfce(config?.emitir_nfce === '1')
+        setLimiteCpfNota(Number(config?.limite_identificacao_nfce) || 10000)
+      })
+      .catch(() => setEmitirNfce(false))
+  }, [])
 
   useEffect(() => {
     if (!toast) return
@@ -323,6 +349,7 @@ export default function PDV() {
       alert('Selecione pelo menos uma forma de pagamento')
       return
     }
+    carregarEmissaoNfce()
     setShowModalPagamento(true)
   }
 
@@ -381,6 +408,17 @@ export default function PDV() {
           },
         ]
 
+    // Com várias formas, o que passa do total volta como troco.
+    const trocoVenda = formasSelecionadas.length > 1
+      ? Math.max(pagamentos.reduce((acc, pg) => acc + pg.valor, 0) - total, 0)
+      : troco
+
+    const digitosCpf = String(cpfNota).replace(/\D/g, '').length
+    if (emitirNfce && vendaEdicaoId == null && total >= limiteCpfNota && digitosCpf !== 11 && digitosCpf !== 14) {
+      alert(`Venda a partir de ${limiteCpfNota.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} precisa do CPF/CNPJ do cliente no cupom.`)
+      return
+    }
+
     try {
       const payload = {
         itens: itens.map((i) => ({
@@ -391,12 +429,20 @@ export default function PDV() {
         forma_pagamento: formaPrincipal,
         valor_total: total,
         pagamentos,
+        desconto: Math.max(subtotal - total, 0),
+        troco: trocoVenda,
       }
+      let vendaCriada = null
       if (vendaEdicaoId != null) {
         await window.electronAPI.atualizarVenda(vendaEdicaoId, payload)
         setToast({ tipo: 'sucesso', mensagem: 'Venda atualizada com sucesso.' })
       } else {
-        await window.electronAPI.criarVenda(payload)
+        vendaCriada = await window.electronAPI.criarVenda(payload)
+      }
+      const cpfInformado = cpfNota
+      setCpfNota('')
+      if (vendaCriada?.id && emitirNfce) {
+        void emitirCupom(vendaCriada.id, cpfInformado)
       }
       setShowModalPagamento(false)
       limparFilaLeitura()
@@ -412,9 +458,39 @@ export default function PDV() {
       })
     } catch (err) {
       console.error('[PDV] Erro ao finalizar venda:', err)
-      alert('Erro ao finalizar venda')
+      alert(mensagemErro(err, 'Erro ao finalizar venda'))
       fecharModalPagamentoERestaurarFoco()
     }
+  }
+
+  async function emitirCupom(vendaId, cpf = '') {
+    setCupom({ vendaId, estado: 'emitindo' })
+    try {
+      const nota = await window.electronAPI.emitirNfceVenda(vendaId, { cpf })
+      const autorizado = nota?.status === 'autorizado'
+      setCupom({ vendaId, estado: autorizado ? 'autorizado' : 'erro', nota })
+      if (autorizado) void imprimirCupom(nota.id)
+    } catch (err) {
+      console.error('[PDV] Erro ao emitir NFC-e:', err)
+      setCupom({ vendaId, estado: 'erro', nota: { mensagem: mensagemErro(err, 'Erro ao emitir o cupom fiscal.') } })
+    }
+  }
+
+  async function imprimirCupom(notaId) {
+    try {
+      await window.electronAPI.imprimirNfce(notaId)
+    } catch (err) {
+      console.error('[PDV] Erro ao imprimir NFC-e:', err)
+      setToast({ tipo: 'erro', mensagem: mensagemErro(err, 'Não foi possível abrir o cupom para impressão.') })
+    }
+  }
+
+  function fecharCupom() {
+    setCupom(null)
+    queueMicrotask(() => {
+      inputRef.current?.focus()
+      if (document.activeElement !== inputRef.current) recoverInputFocus()
+    })
   }
 
   function handleCancelar() {
@@ -751,6 +827,19 @@ export default function PDV() {
                 </p>
               </div>
             )}
+            {emitirNfce && vendaEdicaoId == null && (
+              <div className="pdv-modal-cpf">
+                <label htmlFor="pdv-cpf-nota">CPF ou CNPJ na nota (opcional)</label>
+                <input
+                  id="pdv-cpf-nota"
+                  type="text"
+                  inputMode="numeric"
+                  value={cpfNota}
+                  onChange={(e) => setCpfNota(e.target.value.replace(/[^\d./-]/g, '').slice(0, 18))}
+                  placeholder="Somente se o cliente pedir"
+                />
+              </div>
+            )}
             <div className="pdv-modal-actions">
               <button
                 type="button"
@@ -763,6 +852,45 @@ export default function PDV() {
                 {vendaEdicaoId != null ? 'Salvar venda' : 'Confirmar Pagamento'}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {cupom && (
+        <div className="modal-overlay" onClick={() => cupom.estado !== 'emitindo' && fecharCupom()}>
+          <div className="modal-content pdv-modal-cupom" onClick={(e) => e.stopPropagation()}>
+            <h2 className="pdv-modal-title">Cupom fiscal</h2>
+            {cupom.estado === 'emitindo' && <p>Emitindo o cupom fiscal...</p>}
+            {cupom.estado === 'autorizado' && (
+              <p className="config-feedback success">
+                Cupom nº {cupom.nota.numero} autorizado
+                {cupom.nota.ambiente === '2' ? ' em homologação (sem valor fiscal)' : ''}.
+              </p>
+            )}
+            {cupom.estado === 'erro' && (
+              <>
+                <p className="config-feedback error">{cupom.nota?.mensagem || 'O cupom não foi autorizado.'}</p>
+                <p className="pdv-modal-dinheiro-hint">
+                  A venda está salva. Corrija o problema e tente de novo aqui ou depois em Notas emitidas.
+                </p>
+              </>
+            )}
+            {cupom.estado !== 'emitindo' && (
+              <div className="pdv-modal-actions">
+                <button type="button" className="pdv-modal-cancelar" onClick={fecharCupom}>
+                  Fechar
+                </button>
+                {cupom.estado === 'autorizado' ? (
+                  <button type="button" className="pdv-modal-confirmar" onClick={() => imprimirCupom(cupom.nota.id)}>
+                    Imprimir de novo
+                  </button>
+                ) : (
+                  <button type="button" className="pdv-modal-confirmar" onClick={() => emitirCupom(cupom.vendaId)}>
+                    Tentar de novo
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         </div>
       )}
