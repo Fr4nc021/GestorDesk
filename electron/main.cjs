@@ -155,6 +155,9 @@ const {
   listarNotasFiscais,
   listarVendasComCupom,
   sugerirCest,
+  pendenciasFiscaisDasVendas,
+  definirFiscalProduto,
+  detalharVenda,
   listarInutilizacoes,
   importarTabelaIbpt,
   situacaoTabelaIbpt,
@@ -340,6 +343,9 @@ ipcMain.handle('cancelar-nfce', (_, notaId, justificativa) => cancelarNota(notaI
 ipcMain.handle('listar-notas-fiscais', (_, filtros) => listarNotasFiscais(filtros || {}))
 ipcMain.handle('listar-vendas-com-cupom', (_, filtros) => listarVendasComCupom(filtros || {}))
 ipcMain.handle('sugerir-cest', (_, ncm) => sugerirCest(ncm))
+ipcMain.handle('pendencias-fiscais-vendas', (_, vendaIds) => pendenciasFiscaisDasVendas(vendaIds))
+ipcMain.handle('definir-fiscal-produto', (_, produtoId, dados) => definirFiscalProduto(produtoId, dados || {}))
+ipcMain.handle('detalhar-venda', (_, vendaId) => detalharVenda(vendaId))
 ipcMain.handle('buracos-numeracao', () => buracosNumeracao())
 ipcMain.handle('contar-cupons-pendentes', () => contarCuponsPendentes())
 ipcMain.handle('calcular-devolucao-simbolica', (_, filtros) => calcularDevolucaoSimbolica(filtros || {}))

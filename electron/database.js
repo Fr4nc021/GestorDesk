@@ -318,6 +318,7 @@ const ORDEM_SYNC = [
   'vendas',
   'vendas_itens',
   'vendas_pagamentos',
+  'notas_fiscais',
   'movimentacoes_estoque',
   'movimentacoes_caixa',
 ]
@@ -582,6 +583,18 @@ try {
     db.exec(`ALTER TABLE notas_fiscais ADD COLUMN autorizada_em TEXT`)
     db.exec(`UPDATE notas_fiscais SET autorizada_em = updated_at WHERE status IN ('autorizado', 'cancelado')`)
   }
+  // A tabela é criada depois do laço de ORDEM_SYNC: as colunas de sync entram aqui.
+  if (!tabelaTemColuna(db, 'notas_fiscais', 'sync_status')) {
+    db.exec(`ALTER TABLE notas_fiscais ADD COLUMN sync_status TEXT DEFAULT 'pending'`)
+  }
+  if (!tabelaTemColuna(db, 'notas_fiscais', 'deleted_at')) {
+    db.exec(`ALTER TABLE notas_fiscais ADD COLUMN deleted_at TEXT`)
+  }
+  // 2.2.4: os caminhos do DANFE passaram a subir; reenvia as notas já sincronizadas sem eles.
+  if (db.pragma('user_version', { simple: true }) < 1) {
+    db.exec(`UPDATE notas_fiscais SET sync_status = 'pending' WHERE caminho_danfe IS NOT NULL`)
+    db.pragma('user_version = 1')
+  }
 } catch (_) {}
 
 // Devolução/troca de cliente: NF-e de entrada da loja referenciando o cupom da venda.
@@ -663,7 +676,9 @@ function getPendingRecordsForSync(tabela) {
   if (!tabelaTemColuna(db, tabela, 'sync_status')) {
     return db.prepare(`SELECT * FROM ${tabela}`).all()
   }
-  return db.prepare(`SELECT * FROM ${tabela} WHERE sync_status = 'pending'`).all()
+  // Notas de homologação são testes do próprio PC: não vão para a nuvem.
+  const filtroExtra = tabela === 'notas_fiscais' ? " AND ambiente = '1'" : ''
+  return db.prepare(`SELECT * FROM ${tabela} WHERE sync_status = 'pending'${filtroExtra}`).all()
 }
 
 function markAsSynced(tabela, ids) {
@@ -2865,7 +2880,7 @@ function atualizarNotaFiscal(id, dados) {
   if (campos.length > 0) {
     const sets = campos.map((c) => `${c} = ?`).join(', ')
     const valores = campos.map((c) => (c === 'resposta' && dados[c] && typeof dados[c] !== 'string' ? JSON.stringify(dados[c]) : dados[c]))
-    db.prepare(`UPDATE notas_fiscais SET ${sets}, updated_at = datetime('now', 'localtime') WHERE id = ?`).run(...valores, id)
+    db.prepare(`UPDATE notas_fiscais SET ${sets}, updated_at = datetime('now', 'localtime'), sync_status = 'pending' WHERE id = ?`).run(...valores, id)
   }
   return obterNotaFiscal(id)
 }
@@ -3156,6 +3171,65 @@ function listarVendasComCupom({ dataInicio, dataFim } = {}) {
   `).all(dataInicio, dataFim)
 }
 
+/**
+ * Produtos das vendas que impedem a emissão do cupom: sem NCM, ou com ICMS-ST sem CEST.
+ * Inclui produtos já excluídos, que não aparecem mais no cadastro.
+ */
+function pendenciasFiscaisDasVendas(vendaIds) {
+  const ids = [...new Set((vendaIds || []).map(Number).filter((n) => Number.isInteger(n) && n > 0))]
+  if (ids.length === 0) return []
+  const linhas = db.prepare(`
+    SELECT DISTINCT p.id, p.nome, p.variacao, p.ncm, p.cest, p.tipo_posse, p.icms_st, p.deleted_at,
+           a.nome as artesao_nome
+    FROM vendas_itens vi
+    JOIN produtos p ON p.id = vi.produto_id
+    LEFT JOIN artesoes a ON a.id = p.artesao_id
+    WHERE vi.venda_id IN (${ids.map(() => '?').join(',')}) AND vi.deleted_at IS NULL
+    ORDER BY p.nome
+  `).all(...ids)
+  const digitos = (v) => String(v ?? '').replace(/\D/g, '')
+  return linhas
+    .map((p) => ({
+      ...p,
+      precisa_ncm: digitos(p.ncm).length !== 8,
+      precisa_cest: p.tipo_posse === 'proprio' && Boolean(p.icms_st) && digitos(p.cest).length !== 7,
+    }))
+    .filter((p) => p.precisa_ncm || p.precisa_cest)
+}
+
+/** Grava NCM/CEST de um produto, mesmo excluído (para emitir cupom de vendas antigas). */
+function definirFiscalProduto(produtoId, { ncm, cest = null } = {}) {
+  const ncmDigitos = String(ncm ?? '').replace(/\D/g, '')
+  if (ncmDigitos.length !== 8) throw new Error('O NCM precisa ter 8 números.')
+  const cestDigitos = String(cest ?? '').replace(/\D/g, '')
+  if (cestDigitos && cestDigitos.length !== 7) throw new Error('O CEST precisa ter 7 números.')
+  const r = db
+    .prepare(`UPDATE produtos SET ncm = ?, cest = COALESCE(?, cest), sync_status = 'pending' WHERE id = ?`)
+    .run(ncmDigitos, cestDigitos || null, Number(produtoId))
+  if (r.changes === 0) throw new Error('Produto não encontrado.')
+  return { ok: true }
+}
+
+/** Venda com itens (inclusive de produtos excluídos), pagamentos e o último cupom. */
+function detalharVenda(vendaId) {
+  const venda = db.prepare('SELECT * FROM vendas WHERE id = ? AND deleted_at IS NULL').get(vendaId)
+  if (!venda) throw new Error('Venda não encontrada.')
+  const itens = db.prepare(`
+    SELECT vi.produto_id, vi.quantidade, vi.preco_unitario, p.nome, p.variacao, p.codigo_barras, p.ncm,
+           p.deleted_at as produto_excluido_em, a.nome as artesao_nome
+    FROM vendas_itens vi
+    LEFT JOIN produtos p ON p.id = vi.produto_id
+    LEFT JOIN artesoes a ON a.id = p.artesao_id
+    WHERE vi.venda_id = ? AND vi.deleted_at IS NULL
+    ORDER BY vi.id ASC
+  `).all(vendaId)
+  const pagamentos = db.prepare(`
+    SELECT forma_pagamento, valor FROM vendas_pagamentos
+    WHERE venda_id = ? AND deleted_at IS NULL ORDER BY id ASC
+  `).all(vendaId)
+  return { venda, itens, pagamentos, nota: ultimaNotaFiscalDaVenda(vendaId) || null }
+}
+
 /** Impede alterar ou excluir uma venda que já tem cupom fiscal autorizado. */
 function exigirVendaSemNfceAutorizada(vendaId, acao) {
   const nota = ultimaNotaFiscalDaVenda(vendaId)
@@ -3386,6 +3460,9 @@ module.exports = {
   listarNotasFiscais,
   listarVendasComCupom,
   sugerirCest,
+  pendenciasFiscaisDasVendas,
+  definirFiscalProduto,
+  detalharVenda,
   listarBuracosNumeracao,
   registrarInutilizacao,
   listarInutilizacoes,

@@ -124,6 +124,8 @@ export default function Vendas() {
   const [cancelamento, setCancelamento] = useState(null)
   const [processandoId, setProcessandoId] = useState(null)
   const [devolucaoVendaId, setDevolucaoVendaId] = useState(null)
+  const [pendencias, setPendencias] = useState(null)
+  const [detalhe, setDetalhe] = useState(null)
 
   const carregar = useCallback(async () => {
     if (!window.electronAPI?.listarVendasComCupom) {
@@ -215,15 +217,63 @@ export default function Vendas() {
     await carregar()
   }
 
-  function emitirSelecionadas() {
-    const ignoradas = marcadas.length - paraEmitir.length
+  async function emitirSelecionadas() {
     if (paraEmitir.length === 0) {
       setMensagem({ tipo: 'error', texto: 'Nenhuma das vendas marcadas está sem cupom ou com erro.' })
       return
     }
-    const aviso = ignoradas ? `\n${ignoradas} venda(s) marcada(s) já têm cupom e serão ignoradas.` : ''
-    if (!window.confirm(`Emitir cupom fiscal de ${paraEmitir.length} venda(s)?${aviso}`)) return
-    rodarLote('Emitindo cupons', paraEmitir, async (v) => {
+    // Antes de enviar, pede o NCM/CEST dos produtos que não têm (inclusive os já excluídos).
+    try {
+      const lista = (await window.electronAPI.pendenciasFiscaisVendas?.(paraEmitir.map((v) => v.id))) || []
+      if (lista.length > 0) {
+        const valores = Object.fromEntries(lista.map((p) => [p.id, { ncm: p.ncm || '', cest: p.cest || '' }]))
+        setPendencias({ lista, valores, vendas: paraEmitir, salvando: false, erro: '' })
+        return
+      }
+    } catch (err) {
+      setMensagem({ tipo: 'error', texto: mensagemErro(err, 'Erro ao conferir os dados fiscais.') })
+      return
+    }
+    iniciarEmissao(paraEmitir)
+  }
+
+  async function salvarPendenciasEEmitir() {
+    const { lista, valores, vendas: vendasParaEmitir } = pendencias
+    for (const p of lista) {
+      const { ncm, cest } = valores[p.id]
+      if (String(ncm).replace(/\D/g, '').length !== 8) {
+        setPendencias((prev) => ({ ...prev, erro: `Preencha o NCM (8 números) de "${p.nome}".` }))
+        return
+      }
+      if (p.precisa_cest && String(cest).replace(/\D/g, '').length !== 7) {
+        setPendencias((prev) => ({ ...prev, erro: `Preencha o CEST (7 números) de "${p.nome}".` }))
+        return
+      }
+    }
+    setPendencias((prev) => ({ ...prev, salvando: true, erro: '' }))
+    try {
+      for (const p of lista) await window.electronAPI.definirFiscalProduto(p.id, valores[p.id])
+    } catch (err) {
+      setPendencias((prev) => ({ ...prev, salvando: false, erro: mensagemErro(err, 'Erro ao salvar o NCM.') }))
+      return
+    }
+    setPendencias(null)
+    iniciarEmissao(vendasParaEmitir)
+  }
+
+  async function abrirDetalhe(venda) {
+    try {
+      setDetalhe(await window.electronAPI.detalharVenda(venda.id))
+    } catch (err) {
+      setMensagem({ tipo: 'error', texto: mensagemErro(err, 'Não foi possível abrir a venda.') })
+    }
+  }
+
+  function iniciarEmissao(lista) {
+    const ignoradas = marcadas.length - lista.length
+    const aviso = ignoradas > 0 ? `\n${ignoradas} venda(s) marcada(s) já têm cupom e serão ignoradas.` : ''
+    if (!window.confirm(`Emitir cupom fiscal de ${lista.length} venda(s)?${aviso}`)) return
+    rodarLote('Emitindo cupons', lista, async (v) => {
       const nota = await window.electronAPI.emitirNfceVenda(v.id, {})
       if (nota?.status === 'autorizado') return { ok: true, texto: `Cupom nº ${nota.numero} autorizado.` }
       if (nota?.status === 'processando_autorizacao') return { ok: true, texto: 'Em processamento na SEFAZ.' }
@@ -391,7 +441,7 @@ export default function Vendas() {
 
           {mensagem.texto && <p className={`config-feedback ${mensagem.tipo}`}>{mensagem.texto}</p>}
 
-          <div className="produtos-table-wrapper">
+          <div className="produtos-table-wrapper vendas-tabela-wrapper">
             <table className="pdv-products-table">
               <thead>
                 <tr>
@@ -460,11 +510,14 @@ export default function Vendas() {
                         <td>
                           <SeloPrazo limite={limite} agora={agora} prazoMin={prazoMin} />
                         </td>
-                        <td>
+                        <td className="vendas-acoes">
                           <div className="caixa-acoes-cell">
+                            <BotaoAcao icone="imprimir" onClick={() => abrirDetalhe(v)}>
+                              Ver venda
+                            </BotaoAcao>
                             {(s === 'autorizado' || s === 'cancelado') && v.nota_caminho_danfe && (
                               <BotaoAcao icone="imprimir" onClick={() => visualizar(v)}>
-                                Visualizar
+                                Ver cupom
                               </BotaoAcao>
                             )}
                             {s === 'autorizado' && v.nota_caminho_danfe && (
@@ -513,6 +566,136 @@ export default function Vendas() {
             carregar()
           }}
         />
+      )}
+
+      {pendencias && (
+        <div className="modal-overlay" onClick={() => !pendencias.salvando && setPendencias(null)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Corrigir dados fiscais</h3>
+              <button type="button" className="modal-close" onClick={() => setPendencias(null)} aria-label="Fechar">
+                ×
+              </button>
+            </div>
+            <p className="modal-field-hint">
+              Estes produtos estão sem NCM{pendencias.lista.some((p) => p.precisa_cest) ? ' ou CEST' : ''} e a SEFAZ não
+              aceita o cupom assim. O que você preencher fica salvo no cadastro do produto, e o cupom é emitido em seguida.
+            </p>
+            {pendencias.lista.map((p) => (
+              <div className="modal-field" key={p.id}>
+                <label htmlFor={`ncm-${p.id}`}>
+                  {[p.nome, p.variacao].filter(Boolean).join(' - ')}
+                  {p.artesao_nome ? ` · ${p.artesao_nome}` : ''}
+                  {p.deleted_at ? ' (produto excluído)' : ''}
+                </label>
+                <input
+                  id={`ncm-${p.id}`}
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={10}
+                  placeholder="NCM (8 números)"
+                  value={pendencias.valores[p.id].ncm}
+                  onChange={(e) => {
+                    const ncm = e.target.value
+                    setPendencias((prev) => ({
+                      ...prev,
+                      erro: '',
+                      valores: { ...prev.valores, [p.id]: { ...prev.valores[p.id], ncm } },
+                    }))
+                  }}
+                />
+                {p.precisa_cest && (
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    maxLength={9}
+                    placeholder="CEST (7 números)"
+                    value={pendencias.valores[p.id].cest}
+                    onChange={(e) => {
+                      const cest = e.target.value
+                      setPendencias((prev) => ({
+                        ...prev,
+                        erro: '',
+                        valores: { ...prev.valores, [p.id]: { ...prev.valores[p.id], cest } },
+                      }))
+                    }}
+                  />
+                )}
+              </div>
+            ))}
+            {pendencias.erro && <p className="config-feedback error">{pendencias.erro}</p>}
+            <div className="estoque-modal-acoes">
+              <button type="button" className="modal-btn-cancelar" onClick={() => setPendencias(null)} disabled={pendencias.salvando}>
+                Voltar
+              </button>
+              <button type="button" className="modal-submit" onClick={salvarPendenciasEEmitir} disabled={pendencias.salvando}>
+                {pendencias.salvando ? 'Salvando…' : 'Salvar e emitir'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {detalhe && (
+        <div className="modal-overlay" onClick={() => setDetalhe(null)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>
+                Venda #{detalhe.venda.id} · {formatarDataVenda(detalhe.venda.data)}
+              </h3>
+              <button type="button" className="modal-close" onClick={() => setDetalhe(null)} aria-label="Fechar">
+                ×
+              </button>
+            </div>
+            <table className="pdv-products-table">
+              <thead>
+                <tr>
+                  <th>Produto</th>
+                  <th>Fornecedor</th>
+                  <th>Qtd</th>
+                  <th>Unitário</th>
+                  <th>Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {detalhe.itens.map((i, idx) => (
+                  <tr key={`${i.produto_id}-${idx}`}>
+                    <td>
+                      {[i.nome || `Produto ${i.produto_id}`, i.variacao].filter(Boolean).join(' - ')}
+                      {i.produto_excluido_em && <span className="notas-entrada-cfop">produto excluído</span>}
+                      {String(i.ncm || '').replace(/\D/g, '').length !== 8 && (
+                        <span className="notas-entrada-cfop">sem NCM</span>
+                      )}
+                    </td>
+                    <td>{i.artesao_nome || '—'}</td>
+                    <td>{i.quantidade}</td>
+                    <td>{formatarMoeda(i.preco_unitario)}</td>
+                    <td>{formatarMoeda(i.quantidade * i.preco_unitario)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <p className="modal-field-hint">
+              {Number(detalhe.venda.desconto) > 0 && <>Desconto: {formatarMoeda(detalhe.venda.desconto)} · </>}
+              Total: <strong>{formatarMoeda(detalhe.venda.valor_total)}</strong>
+              {' · '}
+              Pagamento:{' '}
+              {(detalhe.pagamentos.length ? detalhe.pagamentos : [{ forma_pagamento: detalhe.venda.forma_pagamento, valor: detalhe.venda.valor_total }])
+                .map((p) => `${FORMAS[p.forma_pagamento] || p.forma_pagamento} ${formatarMoeda(p.valor)}`)
+                .join(' + ')}
+              {Number(detalhe.venda.troco) > 0 && <> · Troco: {formatarMoeda(detalhe.venda.troco)}</>}
+            </p>
+            <p className="modal-field-hint">
+              Cupom: {SITUACOES[detalhe.nota?.status || 'sem_cupom']?.label || detalhe.nota?.status}
+              {detalhe.nota?.numero ? ` nº ${detalhe.nota.numero}` : ''}
+            </p>
+            <div className="estoque-modal-acoes">
+              <button type="button" className="modal-btn-cancelar" onClick={() => setDetalhe(null)}>
+                Fechar
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {cancelamento && (

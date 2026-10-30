@@ -135,12 +135,22 @@ function normalizarLinha(row) {
   return out
 }
 
+// Colunas pesadas: ficam só no SQLite (o pull preserva o valor local).
+// caminho_danfe/caminho_xml são caminhos na Focus e servem em qualquer PC.
+const COLUNAS_SO_LOCAIS = {
+  notas_fiscais: ['xml', 'requisicao', 'resposta'],
+}
+
+// Tabela ainda não criada no Supabase não pode travar a sincronização das demais.
+const TABELAS_OPCIONAIS = ['notas_fiscais']
+
 async function enviarUpsert(supabase, tabela, registros) {
   if (registros.length === 0) return { count: 0 }
   const rows = registros.map((row) => {
     const normalized = normalizarLinha(row)
     const rest = { ...normalized }
     delete rest.sync_status
+    for (const c of COLUNAS_SO_LOCAIS[tabela] || []) delete rest[c]
     return rest
   })
   const { error } = await supabase.from(tabela).upsert(rows, { onConflict: 'id' })
@@ -287,6 +297,7 @@ async function syncWithSupabase() {
         }
       } catch (err) {
         logError(`Erro ao sincronizar tabela "${tabela}".`, err)
+        if (TABELAS_OPCIONAIS.includes(tabela)) continue
         throw err
       }
     }
@@ -298,6 +309,7 @@ async function syncWithSupabase() {
         totalPulled += r.pulled
       } catch (err) {
         logError(`Erro ao puxar tabela "${tabela}" do Supabase.`, err)
+        if (TABELAS_OPCIONAIS.includes(tabela)) continue
         throw err
       }
     }
