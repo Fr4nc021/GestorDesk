@@ -308,9 +308,39 @@ ipcMain.handle('imprimir-nfce', async (event, notaId) => {
     webPreferences: { contextIsolation: true, nodeIntegration: false },
   })
   await janela.loadURL(url)
-  janela.webContents.print({ silent: false, printBackground: true }, () => {})
+  // Espera logo e QR Code carregarem e mede a página para caber no papel de 80mm.
+  const { largura, altura } = await janela.webContents.executeJavaScript(`
+    Promise.all([...document.images].map((img) => img.complete ? null
+      : new Promise((ok) => { img.onload = img.onerror = ok })))
+      .then(() => ({
+        largura: document.documentElement.scrollWidth,
+        altura: document.documentElement.scrollHeight,
+      }))
+  `)
+  const larguraPapel = 80000 // mícrons
+  janela.webContents.print(
+    {
+      ...(await opcoesImpressao(janela.webContents, IMPRESSORA_CUPOM)),
+      margins: { marginType: 'none' },
+      pageSize: { width: larguraPapel, height: Math.ceil((altura / largura) * larguraPapel) + 5000 },
+    },
+    () => {},
+  )
   return { ok: true }
 })
+
+// Impressoras fixas por tipo de impressão (nomes como estão no Windows).
+const IMPRESSORA_CUPOM = 'MP-4200 TH'
+const IMPRESSORA_ETIQUETA = 'LABEL'
+
+// Abre o diálogo de impressão já com a impressora indicada, se ela existir.
+async function opcoesImpressao(webContents, nome) {
+  const impressoras = await webContents.getPrintersAsync()
+  if (impressoras.some((p) => p.name === nome)) {
+    return { silent: false, printBackground: true, deviceName: nome }
+  }
+  return { silent: false, printBackground: true }
+}
 
 ipcMain.handle('criar-venda', (_, data) => criarVenda(data))
 ipcMain.handle('listar-vendas', () => listarVendas())
@@ -337,10 +367,7 @@ ipcMain.handle('atualizar-venda', (_, id, data) => atualizarVenda(id, data))
 ipcMain.handle('imprimir-etiquetas', async (event) => {
   const win = BrowserWindow.fromWebContents(event.sender)
   if (!win || !win.webContents) return { error: 'Janela não encontrada' }
-  return win.webContents.print({
-    silent: false,
-    printBackground: true,
-  })
+  return win.webContents.print(await opcoesImpressao(win.webContents, IMPRESSORA_ETIQUETA))
 })
 
 ipcMain.handle('copiar-texto', (_, texto) => {
