@@ -71,12 +71,26 @@ function distribuirDesconto(brutos, descontoCents) {
   })
 }
 
+/** Origens tratadas como nacionais na tabela do IBPT; as demais usam a alíquota de importados. */
+const ORIGENS_NACIONAIS = ['0', '3', '4', '5', '8']
+
+/** Tributos aproximados (em centavos) de um item pela tabela do IBPT, ou null se o NCM não está na tabela. */
+function tributosAproximados(ibpt, item, valorCents) {
+  const linha = ibpt?.[somenteDigitos(item.ncm)]
+  if (!linha || valorCents <= 0) return null
+  const aliqFederal = ORIGENS_NACIONAIS.includes(String(item.origem ?? '0')) ? linha.nacional_federal : linha.importados_federal
+  const federal = Math.round((valorCents * aliqFederal) / 100)
+  const estadual = Math.round((valorCents * linha.estadual) / 100)
+  const municipal = Math.round((valorCents * linha.municipal) / 100)
+  return { federal, estadual, municipal, total: federal + estadual + municipal, fonte: linha.fonte }
+}
+
 /**
  * Valida a venda e devolve o JSON da NFC-e para a Focus.
  * @param {object} dados - { venda, itens, pagamentos, config, cpf }
  *   itens: vendas_itens com os campos fiscais do produto (nome, ncm, cest, origem, tipo_posse, icms_st, unidade)
  */
-function montarNfce({ venda, itens, pagamentos, config, cpf = '' }) {
+function montarNfce({ venda, itens, pagamentos, config, cpf = '', ibpt = null }) {
   const cnpj = somenteDigitos(config.cnpj)
   if (cnpj.length !== 14) throw new Error('Cadastre o CNPJ da loja em Configurações › Fiscal.')
   if (!Array.isArray(itens) || itens.length === 0) throw new Error('A venda não tem itens.')
@@ -87,9 +101,19 @@ function montarNfce({ venda, itens, pagamentos, config, cpf = '' }) {
     throw new Error(`Produto sem NCM: ${nomes}. Preencha o NCM na aba Fiscal do produto.`)
   }
 
+  const semCest = itens.filter((i) => regraFiscalVenda(i).csosn === '500' && somenteDigitos(i.cest).length !== 7)
+  if (semCest.length > 0) {
+    const nomes = [...new Set(semCest.map((i) => i.nome))].slice(0, 5).join(', ')
+    throw new Error(`Produto com ICMS-ST sem CEST: ${nomes}. Preencha o CEST na aba Fiscal do produto.`)
+  }
+
   const brutos = itens.map((i) => centavos(i.quantidade * i.preco_unitario))
   const totalBruto = brutos.reduce((acc, v) => acc + v, 0)
   const totalVenda = centavos(venda.valor_total)
+  const limite = Number(config.limite_identificacao_nfce) || 10000
+  if (totalVenda >= centavos(limite) && ![11, 14].includes(somenteDigitos(cpf).length)) {
+    throw new Error(`Venda a partir de R$ ${limite.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} precisa do CPF/CNPJ do cliente no cupom.`)
+  }
   const descontoCents = Math.max(totalBruto - totalVenda, 0)
   const descontos = distribuirDesconto(brutos, descontoCents)
 
@@ -124,6 +148,8 @@ function montarNfce({ venda, itens, pagamentos, config, cpf = '' }) {
     if (descontos[indice] > 0) linha.valor_desconto = dinheiro(descontos[indice])
     const cest = somenteDigitos(item.cest)
     if (cest.length === 7) linha.cest = cest
+    const tributos = tributosAproximados(ibpt, item, brutos[indice] - descontos[indice])
+    if (tributos) linha.valor_total_tributos = dinheiro(tributos.total)
     return linha
   })
 
@@ -163,6 +189,24 @@ function montarNfce({ venda, itens, pagamentos, config, cpf = '' }) {
     items,
     formas_pagamento: formasPagamento,
   }
+  if (ibpt) {
+    const soma = { federal: 0, estadual: 0, municipal: 0, total: 0 }
+    let fonte = 'IBPT'
+    itens.forEach((item, i) => {
+      const t = tributosAproximados(ibpt, item, brutos[i] - descontos[i])
+      if (!t) return
+      for (const k of Object.keys(soma)) soma[k] += t[k]
+      fonte = t.fonte || fonte
+    })
+    if (soma.total > 0) {
+      nota.valor_total_tributos = dinheiro(soma.total)
+      const br = (cents) => dinheiro(cents).replace('.', ',')
+      const partes = [`Federal R$ ${br(soma.federal)}`, `Estadual R$ ${br(soma.estadual)}`]
+      if (soma.municipal > 0) partes.push(`Municipal R$ ${br(soma.municipal)}`)
+      nota.informacoes_adicionais_contribuinte = `Trib. aprox.: ${partes.join(', ')}. Fonte: ${fonte}. Lei 12.741/2012.`
+    }
+  }
+
   const cpfDigitos = somenteDigitos(cpf)
   if (cpfDigitos.length === 11) nota.cpf_destinatario = cpfDigitos
   else if (cpfDigitos.length === 14) nota.cnpj_destinatario = cpfDigitos
@@ -204,10 +248,16 @@ function montarNfeDevolucao({ devolucao, itens, chaveRemessa, remessa, artesao, 
   }
 
   const inscricao = somenteDigitos(artesao.inscricao_estadual)
+  // Simbólica (5919/6919): peças vendidas pela loja; física (5918): peças que voltam ao artesão.
+  const simbolica = devolucao.tipo === 'simbolica'
+  const cfop = simbolica ? String(devolucao.cfop || '5919') : '5918'
   const nota = {
     cnpj_emitente: cnpj,
     data_emissao: agoraBrasilia(),
-    natureza_operacao: 'DEVOLUCAO DE MERCADORIA RECEBIDA EM CONSIGNACAO',
+    // natOp tem no máximo 60 caracteres.
+    natureza_operacao: simbolica
+      ? 'DEVOLUCAO SIMBOLICA DE MERCADORIA RECEBIDA EM CONSIGNACAO'
+      : 'DEVOLUCAO DE MERCADORIA RECEBIDA EM CONSIGNACAO',
     tipo_documento: '1',
     finalidade_emissao: '4',
     local_destino: String(artesao.uf || '').toUpperCase() === String(config.uf || 'RS').toUpperCase() ? '1' : '2',
@@ -233,7 +283,7 @@ function montarNfeDevolucao({ devolucao, itens, chaveRemessa, remessa, artesao, 
         codigo_produto: String(item.codigo || item.codigo_barras || item.produto_id),
         descricao: String(item.descricao || item.produto_nome || '').slice(0, 120),
         codigo_ncm: somenteDigitos(item.ncm),
-        cfop: '5918',
+        cfop,
         unidade_comercial: unidade,
         unidade_tributavel: unidade,
         quantidade_comercial: Number(item.quantidade).toFixed(4),
@@ -259,8 +309,12 @@ function montarNfeDevolucao({ devolucao, itens, chaveRemessa, remessa, artesao, 
   if (telefone.length >= 10) nota.telefone_destinatario = telefone
   // Texto pedido pelo manual do contador para a devolução.
   const dataRemessa = String(remessa?.data_emissao || '').slice(0, 10).split('-').reverse().join('/')
+  const periodo = [devolucao.periodo_inicio, devolucao.periodo_fim]
+    .map((d) => String(d || '').slice(0, 10).split('-').reverse().join('/'))
+    .join(' a ')
   const complementar = [
-    `Devolução de mercadoria recebida em consignação mercantil pela NF-e nº ${remessa?.numero || chave.slice(25, 34)}` +
+    `${simbolica ? 'Devolução simbólica de mercadoria vendida no período de ' + periodo + ', recebida' : 'Devolução de mercadoria recebida'}` +
+      ` em consignação mercantil pela NF-e nº ${remessa?.numero || chave.slice(25, 34)}` +
       `${dataRemessa ? `, de ${dataRemessa}` : ''}, nos termos do Ajuste SINIEF 02/93.`,
     'Documento emitido por ME/EPP optante pelo Simples Nacional. Não gera direito a crédito fiscal de ICMS e IPI.',
     devolucao.observacao ? String(devolucao.observacao) : '',
@@ -268,6 +322,80 @@ function montarNfeDevolucao({ devolucao, itens, chaveRemessa, remessa, artesao, 
     .filter(Boolean)
     .join(' ')
   nota.informacoes_adicionais_contribuinte = complementar.slice(0, 2000)
+  return nota
+}
+
+/**
+ * NF-e de entrada da devolução de um cliente (consumidor), referenciando o cupom da venda.
+ * CFOP escolhido por item na tela (1202, 1411 ou 1918). CSOSN 900 e PIS/COFINS 99, sem destaque de imposto.
+ * @param {object} dados - { devolucao, itens, chaveCupom, config }
+ */
+function montarNfeDevolucaoCliente({ devolucao, itens, chaveCupom, config }) {
+  const cnpj = somenteDigitos(config.cnpj)
+  if (cnpj.length !== 14) throw new Error('Cadastre o CNPJ da loja em Configurações › Fiscal.')
+  const chave = somenteDigitos(chaveCupom)
+  if (chave.length !== 44) throw new Error('O cupom da venda não tem chave de acesso válida.')
+  if (!Array.isArray(itens) || itens.length === 0) throw new Error('A devolução não tem itens.')
+  const semNcm = itens.filter((i) => somenteDigitos(i.ncm).length !== 8)
+  if (semNcm.length > 0) throw new Error(`Produto sem NCM: ${semNcm.map((i) => i.nome).slice(0, 5).join(', ')}.`)
+
+  const documento = somenteDigitos(devolucao.cliente_cpf_cnpj)
+  const nota = {
+    cnpj_emitente: cnpj,
+    data_emissao: agoraBrasilia(),
+    natureza_operacao: 'DEVOLUCAO DE VENDA',
+    tipo_documento: '0',
+    finalidade_emissao: '4',
+    local_destino: String(devolucao.cliente_uf || '').toUpperCase() === String(config.uf || 'RS').toUpperCase() ? '1' : '2',
+    consumidor_final: '1',
+    presenca_comprador: '1',
+    modalidade_frete: '9',
+    notas_referenciadas: [{ chave_nfe: chave }],
+    nome_destinatario: String(devolucao.cliente_nome || '').slice(0, 60),
+    logradouro_destinatario: devolucao.cliente_logradouro,
+    numero_destinatario: devolucao.cliente_numero,
+    bairro_destinatario: devolucao.cliente_bairro,
+    municipio_destinatario: devolucao.cliente_cidade,
+    uf_destinatario: String(devolucao.cliente_uf).toUpperCase(),
+    cep_destinatario: somenteDigitos(devolucao.cliente_cep),
+    pais_destinatario: 'Brasil',
+    indicador_inscricao_estadual_destinatario: '9',
+    formas_pagamento: [{ forma_pagamento: '90', valor_pagamento: '0.00' }],
+    items: itens.map((item, indice) => {
+      const unidade = String(item.unidade || 'UN').trim().toUpperCase() || 'UN'
+      const linha = {
+        numero_item: String(indice + 1),
+        codigo_produto: String(item.codigo_barras || item.produto_id),
+        descricao: [item.nome, item.variacao].filter(Boolean).join(' - ').slice(0, 120),
+        codigo_ncm: somenteDigitos(item.ncm),
+        cfop: String(item.cfop),
+        unidade_comercial: unidade,
+        unidade_tributavel: unidade,
+        quantidade_comercial: Number(item.quantidade).toFixed(4),
+        quantidade_tributavel: Number(item.quantidade).toFixed(4),
+        valor_unitario_comercial: Number(item.valor_unitario).toFixed(2),
+        valor_unitario_tributavel: Number(item.valor_unitario).toFixed(2),
+        valor_bruto: dinheiro(centavos(item.quantidade * item.valor_unitario)),
+        icms_origem: String(item.origem ?? '0'),
+        icms_situacao_tributaria: '900',
+        pis_situacao_tributaria: '99',
+        cofins_situacao_tributaria: '99',
+      }
+      const cest = somenteDigitos(item.cest)
+      if (cest.length === 7) linha.cest = cest
+      return linha
+    }),
+  }
+  if (documento.length === 14) nota.cnpj_destinatario = documento
+  else nota.cpf_destinatario = documento
+  nota.informacoes_adicionais_contribuinte = [
+    `Devolução de venda ao consumidor referente à NFC-e chave ${chave}.`,
+    devolucao.motivo ? `Motivo: ${devolucao.motivo}.` : '',
+    'Documento emitido por ME/EPP optante pelo Simples Nacional. Não gera direito a crédito fiscal de ICMS e IPI.',
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .slice(0, 2000)
   return nota
 }
 
@@ -342,6 +470,17 @@ function cancelarNfe(config, ref, justificativa) {
   return requisicao(config, 'DELETE', `/v2/nfe/${encodeURIComponent(ref)}`, { justificativa })
 }
 
+/** Inutiliza uma faixa de números na SEFAZ. modelo '65' (NFC-e) ou '55' (NF-e). */
+function inutilizar(config, modelo, { serie, numero_inicial, numero_final, justificativa }) {
+  return requisicao(config, 'POST', `/v2/${modelo === '55' ? 'nfe' : 'nfce'}/inutilizacao`, {
+    cnpj: somenteDigitos(config.cnpj),
+    serie: String(serie),
+    numero_inicial: String(numero_inicial),
+    numero_final: String(numero_final),
+    justificativa,
+  })
+}
+
 /** NF-e emitidas contra o CNPJ da loja (Recebimento de NF-es da Focus). Até 100 por chamada, a partir de `versao`. */
 function listarNfesRecebidas(config, cnpj, versao = 0) {
   return requisicao(config, 'GET', `/v2/nfes_recebidas?cnpj=${somenteDigitos(cnpj)}&versao=${Number(versao) || 0}`)
@@ -388,11 +527,13 @@ module.exports = {
   consultarNfce,
   cancelarNfce,
   montarNfeDevolucao,
+  montarNfeDevolucaoCliente,
   emitirNfe,
   consultarNfe,
   cancelarNfe,
   listarNfesRecebidas,
   manifestarCiencia,
+  inutilizar,
   baixarArquivo,
   urlCompleta,
   mensagemDaResposta,

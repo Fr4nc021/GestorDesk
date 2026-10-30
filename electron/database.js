@@ -563,7 +563,92 @@ try {
   if (!tabelaTemColuna(db, 'notas_fiscais', 'devolucao_id')) {
     db.exec(`ALTER TABLE notas_fiscais ADD COLUMN devolucao_id INTEGER REFERENCES devolucoes_artesao(id)`)
   }
+  if (!tabelaTemColuna(db, 'notas_fiscais', 'devolucao_cliente_id')) {
+    db.exec(`ALTER TABLE notas_fiscais ADD COLUMN devolucao_cliente_id INTEGER`)
+  }
+  // Devolução simbólica (5919) das peças vendidas: não mexe no estoque, cobre um período de vendas.
+  for (const [coluna, tipo] of [
+    ['tipo', "TEXT NOT NULL DEFAULT 'fisica'"],
+    ['periodo_inicio', 'TEXT'],
+    ['periodo_fim', 'TEXT'],
+    ['cfop', 'TEXT'],
+  ]) {
+    if (!tabelaTemColuna(db, 'devolucoes_artesao', coluna)) {
+      db.exec(`ALTER TABLE devolucoes_artesao ADD COLUMN ${coluna} ${tipo}`)
+    }
+  }
+  // Hora da autorização na SEFAZ: base do prazo de cancelamento. As antigas usam a última atualização.
+  if (!tabelaTemColuna(db, 'notas_fiscais', 'autorizada_em')) {
+    db.exec(`ALTER TABLE notas_fiscais ADD COLUMN autorizada_em TEXT`)
+    db.exec(`UPDATE notas_fiscais SET autorizada_em = updated_at WHERE status IN ('autorizado', 'cancelado')`)
+  }
 } catch (_) {}
+
+// Devolução/troca de cliente: NF-e de entrada da loja referenciando o cupom da venda.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS devolucoes_cliente (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    venda_id INTEGER NOT NULL,
+    data TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    valor_total REAL NOT NULL DEFAULT 0,
+    remover_caixa INTEGER NOT NULL DEFAULT 0,
+    forma_reembolso TEXT,
+    cliente_nome TEXT NOT NULL,
+    cliente_cpf_cnpj TEXT NOT NULL,
+    cliente_logradouro TEXT,
+    cliente_numero TEXT,
+    cliente_bairro TEXT,
+    cliente_cidade TEXT,
+    cliente_uf TEXT,
+    cliente_cep TEXT,
+    motivo TEXT,
+    deleted_at TEXT,
+    FOREIGN KEY (venda_id) REFERENCES vendas(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS devolucoes_cliente_itens (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    devolucao_id INTEGER NOT NULL,
+    produto_id INTEGER NOT NULL,
+    quantidade INTEGER NOT NULL,
+    valor_unitario REAL NOT NULL DEFAULT 0,
+    cfop TEXT NOT NULL,
+    FOREIGN KEY (devolucao_id) REFERENCES devolucoes_cliente(id),
+    FOREIGN KEY (produto_id) REFERENCES produtos(id)
+  );
+`)
+
+// Tabela do IBPT (Lei 12.741/12): alíquotas aproximadas por NCM, para o "Trib. aprox." do cupom.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS ibpt (
+    ncm TEXT NOT NULL,
+    ex TEXT NOT NULL DEFAULT '',
+    nacional_federal REAL NOT NULL DEFAULT 0,
+    importados_federal REAL NOT NULL DEFAULT 0,
+    estadual REAL NOT NULL DEFAULT 0,
+    municipal REAL NOT NULL DEFAULT 0,
+    vigencia_fim TEXT,
+    versao TEXT,
+    fonte TEXT,
+    PRIMARY KEY (ncm, ex)
+  );
+`)
+
+// Faixas de numeração inutilizadas na SEFAZ (números pulados que não viraram nota).
+db.exec(`
+  CREATE TABLE IF NOT EXISTS inutilizacoes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    modelo TEXT NOT NULL,
+    serie TEXT NOT NULL,
+    numero_inicial INTEGER NOT NULL,
+    numero_final INTEGER NOT NULL,
+    ambiente TEXT NOT NULL,
+    justificativa TEXT,
+    protocolo TEXT,
+    caminho_xml TEXT,
+    created_at TEXT DEFAULT (datetime('now', 'localtime'))
+  );
+`)
 
 try {
   if (!tabelaTemColuna(db, 'notas_entrada', 'acerto_inicio')) {
@@ -1228,7 +1313,7 @@ function listarPagamentosCaixaPorData(dataISO) {
     ORDER BY v.data DESC, v.id DESC, vp.id ASC`,
     )
     .all(dataISO)
-  return atribuirSequenciaPagamentosCaixa(rows)
+  return ordenarCaixa(atribuirSequenciaPagamentosCaixa(rows).concat(reembolsosCaixaComSequencia(dataISO, dataISO)))
 }
 
 function listarPagamentosCaixaPorPeriodo(dataInicio, dataFim) {
@@ -1240,7 +1325,16 @@ function listarPagamentosCaixaPorPeriodo(dataInicio, dataFim) {
     ORDER BY v.data DESC, v.id DESC, vp.id ASC`,
     )
     .all(dataInicio, dataFim)
-  return atribuirSequenciaPagamentosCaixa(rows)
+  return ordenarCaixa(atribuirSequenciaPagamentosCaixa(rows).concat(reembolsosCaixaComSequencia(dataInicio, dataFim)))
+}
+
+function ordenarCaixa(linhas) {
+  return linhas.sort((a, b) => String(b.data).localeCompare(String(a.data)))
+}
+
+/** Reembolsos de devolução de cliente no Caixa (sequência 0: não é pagamento da venda, não tem ações). */
+function reembolsosCaixaComSequencia(dataInicio, dataFim) {
+  return listarReembolsosCaixa(dataInicio, dataFim).map((r) => ({ ...r, sequencia: `D${r.devolucao_cliente_id}` }))
 }
 
 function listarPagamentosCaixaPorPeriodoEProduto(dataInicio, dataFim, produtoId) {
@@ -1837,7 +1931,7 @@ function obterRelatorioCustoVendasPeriodo(dataInicio, dataFim, artesaoId = null)
  * @returns {Array<{ forma_pagamento: string, total: number, qtd_transacoes: number }>}
  */
 function obterTotaisPagamentosPorPeriodo(dataInicio, dataFim) {
-  return db.prepare(`
+  const totais = db.prepare(`
     SELECT
       vp.forma_pagamento as forma_pagamento,
       COALESCE(SUM(vp.valor), 0) as total,
@@ -1849,6 +1943,13 @@ function obterTotaisPagamentosPorPeriodo(dataInicio, dataFim) {
       AND date(v.data) >= date(?) AND date(v.data) <= date(?)
     GROUP BY vp.forma_pagamento
   `).all(dataInicio, dataFim)
+  // Reembolsos de devolução de cliente saem do total da forma usada.
+  for (const r of listarReembolsosCaixa(dataInicio, dataFim)) {
+    const linha = totais.find((t) => t.forma_pagamento === r.forma_pagamento)
+    if (linha) linha.total += r.valor
+    else totais.push({ forma_pagamento: r.forma_pagamento, total: r.valor, qtd_transacoes: 0 })
+  }
+  return totais
 }
 
 function validarLogin(login, senha) {
@@ -2381,7 +2482,11 @@ function cancelarDevolucaoArtesao(id) {
   if (notaFiscal && ['enviando', 'processando_autorizacao', 'autorizado'].includes(notaFiscal.status)) {
     throw new Error('A NF-e desta devolução está em processamento ou autorizada. Confira em Notas emitidas.')
   }
-  const itens = db.prepare('SELECT produto_id, quantidade FROM devolucoes_artesao_itens WHERE devolucao_id = ?').all(id)
+  // A devolução simbólica não tirou nada do estoque (as peças foram vendidas), então não devolve.
+  const simbolica = db.prepare('SELECT tipo FROM devolucoes_artesao WHERE id = ?').get(id)?.tipo === 'simbolica'
+  const itens = simbolica
+    ? []
+    : db.prepare('SELECT produto_id, quantidade FROM devolucoes_artesao_itens WHERE devolucao_id = ?').all(id)
   const updateEstoque = db.prepare(`UPDATE produtos SET estoque = estoque + ?, sync_status = 'pending' WHERE id = ?`)
   const insertMov = db.prepare(`
     INSERT INTO movimentacoes_estoque (produto_id, tipo, quantidade, origem, data)
@@ -2399,6 +2504,309 @@ function cancelarDevolucaoArtesao(id) {
     db.prepare("UPDATE devolucoes_artesao SET deleted_at = datetime('now', 'localtime') WHERE id = ?").run(id)
   })()
   return { id }
+}
+
+// --- Devolução simbólica das peças consignadas vendidas (NF-e 5919, Ajuste SINIEF 02/93) ---
+
+/**
+ * Peças consignadas do artesão vendidas no período, distribuídas pelas notas de remessa (a mais antiga primeiro,
+ * até o saldo de cada item ainda não devolvido). Uma devolução por nota de remessa.
+ * @param {{ artesao_id: number, dataInicio: string, dataFim: string, base?: 'remessa'|'venda' }} filtros
+ * @returns {{ grupos: Array<{ nota_entrada_id, nota_numero, nota_chave, itens, valor_total }>, sem_remessa: Array }}
+ */
+function calcularDevolucaoSimbolica({ artesao_id, dataInicio, dataFim, base = 'remessa' }) {
+  if (!artesao_id) throw new Error('Escolha o fornecedor.')
+  if (!dataInicio || !dataFim || dataInicio > dataFim) throw new Error('Período inválido.')
+  const vendidos = db.prepare(`
+    SELECT vi.produto_id, p.nome, p.variacao, SUM(vi.quantidade) as quantidade,
+           SUM(vi.quantidade * vi.preco_unitario) / SUM(vi.quantidade) as preco_medio
+    FROM vendas_itens vi
+    JOIN vendas v ON v.id = vi.venda_id AND v.deleted_at IS NULL
+    JOIN produtos p ON p.id = vi.produto_id
+    WHERE vi.deleted_at IS NULL AND p.artesao_id = ? AND COALESCE(p.tipo_posse, 'consignado') = 'consignado'
+      AND date(v.data) >= date(?) AND date(v.data) <= date(?)
+    GROUP BY vi.produto_id
+  `).all(artesao_id, dataInicio, dataFim)
+  const remessas = db.prepare(`
+    SELECT i.id as nota_item_id, i.nota_id, i.quantidade_estoque, i.valor_unitario,
+           n.numero as nota_numero, n.chave as nota_chave, n.data_emissao,
+           (SELECT COALESCE(SUM(di.quantidade), 0) FROM devolucoes_artesao_itens di
+              JOIN devolucoes_artesao d ON d.id = di.devolucao_id AND d.deleted_at IS NULL
+              WHERE di.nota_item_id = i.id) as devolvida
+    FROM notas_entrada_itens i
+    JOIN notas_entrada n ON n.id = i.nota_id AND n.deleted_at IS NULL AND n.tipo = 'remessa_consignacao'
+    WHERE i.produto_id = ?
+    ORDER BY n.data_emissao, n.id, i.id
+  `)
+  const grupos = new Map()
+  const semRemessa = []
+  for (const v of vendidos) {
+    let falta = Number(v.quantidade) || 0
+    for (const r of remessas.all(v.produto_id)) {
+      if (falta <= 0) break
+      const saldo = Number(r.quantidade_estoque) - Number(r.devolvida)
+      if (saldo <= 0) continue
+      const qtd = Math.min(saldo, falta)
+      falta -= qtd
+      if (!grupos.has(r.nota_id)) {
+        grupos.set(r.nota_id, { nota_entrada_id: r.nota_id, nota_numero: r.nota_numero, nota_chave: r.nota_chave, itens: [] })
+      }
+      grupos.get(r.nota_id).itens.push({
+        nota_item_id: r.nota_item_id,
+        produto_id: v.produto_id,
+        nome: [v.nome, v.variacao].filter(Boolean).join(' - '),
+        quantidade: qtd,
+        valor_unitario: base === 'venda' ? Math.round(Number(v.preco_medio) * 100) / 100 : Number(r.valor_unitario) || 0,
+      })
+    }
+    if (falta > 0) semRemessa.push({ produto_id: v.produto_id, nome: v.nome, quantidade: falta })
+  }
+  const lista = [...grupos.values()].map((g) => ({
+    ...g,
+    valor_total: Math.round(g.itens.reduce((s, i) => s + i.quantidade * i.valor_unitario, 0) * 100) / 100,
+  }))
+  return { grupos: lista, sem_remessa: semRemessa }
+}
+
+/** Grava as devoluções simbólicas do período (uma por nota de remessa), prontas para emitir a NF-e. */
+function registrarDevolucaoSimbolica({ artesao_id, dataInicio, dataFim, base = 'remessa', cfop = '5919' }) {
+  if (!['5919', '6919'].includes(String(cfop))) throw new Error('CFOP inválido para devolução simbólica.')
+  const sobreposta = db.prepare(`
+    SELECT periodo_inicio, periodo_fim FROM devolucoes_artesao
+    WHERE deleted_at IS NULL AND tipo = 'simbolica' AND artesao_id = ?
+      AND date(periodo_inicio) <= date(?) AND date(periodo_fim) >= date(?)
+    LIMIT 1
+  `).get(artesao_id, dataFim, dataInicio)
+  if (sobreposta) {
+    throw new Error(`Já existe devolução simbólica deste fornecedor de ${sobreposta.periodo_inicio} a ${sobreposta.periodo_fim}.`)
+  }
+  const { grupos } = calcularDevolucaoSimbolica({ artesao_id, dataInicio, dataFim, base })
+  if (grupos.length === 0) throw new Error('Nenhuma peça consignada deste fornecedor vendida no período com nota de remessa.')
+  const insertDevolucao = db.prepare(`
+    INSERT INTO devolucoes_artesao (nota_entrada_id, artesao_id, valor_total, observacao, tipo, periodo_inicio, periodo_fim, cfop)
+    VALUES (?, ?, ?, NULL, 'simbolica', ?, ?, ?)
+  `)
+  const insertItem = db.prepare(`
+    INSERT INTO devolucoes_artesao_itens (devolucao_id, nota_item_id, produto_id, quantidade, valor_unitario)
+    VALUES (?, ?, ?, ?, ?)
+  `)
+  return db.transaction(() =>
+    grupos.map((g) => {
+      const id = insertDevolucao.run(g.nota_entrada_id, artesao_id, g.valor_total, dataInicio, dataFim, String(cfop)).lastInsertRowid
+      for (const i of g.itens) insertItem.run(id, i.nota_item_id, i.produto_id, i.quantidade, i.valor_unitario)
+      return { id, nota_numero: g.nota_numero, valor_total: g.valor_total }
+    }),
+  )()
+}
+
+// --- Devolução/troca de cliente (NF-e de entrada referenciando o cupom) ---
+
+/** Itens da venda com quanto ainda pode ser devolvido, e o cupom autorizado que será referenciado. */
+function obterVendaParaDevolucaoCliente(vendaId) {
+  const venda = db.prepare('SELECT * FROM vendas WHERE id = ? AND deleted_at IS NULL').get(vendaId)
+  if (!venda) throw new Error('Venda não encontrada.')
+  const cupom = ultimaNotaFiscalDaVenda(vendaId)
+  const itens = db.prepare(`
+    SELECT vi.produto_id, SUM(vi.quantidade) as quantidade,
+           SUM(vi.quantidade * vi.preco_unitario) / SUM(vi.quantidade) as valor_unitario,
+           p.nome, p.variacao, p.tipo_posse, p.icms_st,
+           (SELECT COALESCE(SUM(di.quantidade), 0) FROM devolucoes_cliente_itens di
+              JOIN devolucoes_cliente d ON d.id = di.devolucao_id AND d.deleted_at IS NULL
+              WHERE d.venda_id = vi.venda_id AND di.produto_id = vi.produto_id) as devolvida
+    FROM vendas_itens vi
+    JOIN produtos p ON p.id = vi.produto_id
+    WHERE vi.venda_id = ? AND vi.deleted_at IS NULL
+    GROUP BY vi.produto_id
+  `).all(vendaId)
+  // Desconto da venda rateado: devolve o que o cliente pagou de fato.
+  const bruto = itens.reduce((s, i) => s + i.quantidade * i.valor_unitario, 0)
+  const fator = bruto > 0 ? Number(venda.valor_total) / bruto : 1
+  return {
+    venda,
+    cupom: cupom && cupom.status === 'autorizado' ? { id: cupom.id, numero: cupom.numero, chave: cupom.chave } : null,
+    itens: itens.map((i) => ({ ...i, valor_unitario: Math.round(i.valor_unitario * fator * 100) / 100 })),
+  }
+}
+
+const CFOPS_DEVOLUCAO_CLIENTE = ['1202', '1411', '1918']
+const FORMAS_PAGAMENTO_VALIDAS = ['dinheiro', 'credito', 'debito', 'pix']
+
+/**
+ * Registra a devolução do cliente: volta as peças ao estoque e, se pedido, tira o valor do caixa.
+ * @param {object} dados - { venda_id, itens: [{ produto_id, quantidade, cfop }], cliente: {...}, remover_caixa, forma_reembolso, motivo }
+ */
+function registrarDevolucaoCliente({ venda_id, itens, cliente = {}, remover_caixa = false, forma_reembolso = 'dinheiro', motivo = '' }) {
+  const { venda, cupom, itens: vendidos } = obterVendaParaDevolucaoCliente(venda_id)
+  if (!cupom?.chave) throw new Error('A venda precisa ter cupom fiscal autorizado para emitir a NF-e de devolução.')
+  const doc = String(cliente.cpf_cnpj || '').replace(/\D/g, '')
+  if (doc.length !== 11 && doc.length !== 14) throw new Error('Informe o CPF ou CNPJ do cliente.')
+  const faltando = [
+    ['nome', 'nome'],
+    ['logradouro', 'endereço'],
+    ['numero', 'número'],
+    ['bairro', 'bairro'],
+    ['cidade', 'cidade'],
+    ['uf', 'UF'],
+    ['cep', 'CEP'],
+  ].filter(([c]) => !String(cliente[c] || '').trim())
+  if (faltando.length) throw new Error(`Complete os dados do cliente: ${faltando.map(([, n]) => n).join(', ')}.`)
+  if (!FORMAS_PAGAMENTO_VALIDAS.includes(forma_reembolso)) throw new Error('Forma de reembolso inválida.')
+
+  const linhas = (itens || [])
+    .map((i) => ({ produto_id: Number(i.produto_id), quantidade: Math.round(Number(i.quantidade) || 0), cfop: String(i.cfop) }))
+    .filter((i) => i.quantidade > 0)
+    .map((i) => {
+      const v = vendidos.find((x) => x.produto_id === i.produto_id)
+      if (!v) throw new Error('Produto não pertence a esta venda.')
+      if (i.quantidade > v.quantidade - v.devolvida) {
+        throw new Error(`"${v.nome}": só ${v.quantidade - v.devolvida} peça(s) ainda podem ser devolvidas.`)
+      }
+      if (!CFOPS_DEVOLUCAO_CLIENTE.includes(i.cfop)) throw new Error(`CFOP ${i.cfop} inválido.`)
+      return { ...i, valor_unitario: v.valor_unitario }
+    })
+  if (linhas.length === 0) throw new Error('Informe a quantidade de pelo menos uma peça.')
+  const valorTotal = Math.round(linhas.reduce((s, l) => s + l.quantidade * l.valor_unitario, 0) * 100) / 100
+
+  const insert = db.prepare(`
+    INSERT INTO devolucoes_cliente (venda_id, valor_total, remover_caixa, forma_reembolso, cliente_nome, cliente_cpf_cnpj,
+      cliente_logradouro, cliente_numero, cliente_bairro, cliente_cidade, cliente_uf, cliente_cep, motivo)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `)
+  const insertItem = db.prepare(`
+    INSERT INTO devolucoes_cliente_itens (devolucao_id, produto_id, quantidade, valor_unitario, cfop) VALUES (?, ?, ?, ?, ?)
+  `)
+  const updateEstoque = db.prepare(`UPDATE produtos SET estoque = estoque + ?, sync_status = 'pending' WHERE id = ?`)
+  const insertMov = db.prepare(`
+    INSERT INTO movimentacoes_estoque (produto_id, tipo, quantidade, origem, data)
+    VALUES (?, 'entrada', ?, 'devolucao_cliente', datetime('now', 'localtime'))
+  `)
+  return db.transaction(() => {
+    const id = insert.run(
+      venda.id,
+      valorTotal,
+      remover_caixa ? 1 : 0,
+      remover_caixa ? forma_reembolso : null,
+      String(cliente.nome).trim().slice(0, 60),
+      doc,
+      String(cliente.logradouro).trim(),
+      String(cliente.numero).trim(),
+      String(cliente.bairro).trim(),
+      String(cliente.cidade).trim(),
+      String(cliente.uf).trim().toUpperCase(),
+      String(cliente.cep).replace(/\D/g, ''),
+      String(motivo || '').trim() || null,
+    ).lastInsertRowid
+    for (const l of linhas) {
+      insertItem.run(id, l.produto_id, l.quantidade, l.valor_unitario, l.cfop)
+      assertUmaLinhaProdutoEstoque(updateEstoque.run(l.quantidade, l.produto_id), l.produto_id, 'Devolução de cliente')
+      insertMov.run(l.produto_id, l.quantidade)
+    }
+    return { id, valor_total: valorTotal }
+  })()
+}
+
+/** Devolução de cliente com itens e a chave do cupom, para montar a NF-e de entrada. */
+function obterDevolucaoClienteParaNfe(devolucaoId) {
+  const devolucao = db.prepare('SELECT * FROM devolucoes_cliente WHERE id = ? AND deleted_at IS NULL').get(devolucaoId)
+  if (!devolucao) throw new Error('Devolução não encontrada.')
+  const cupom = ultimaNotaFiscalDaVenda(devolucao.venda_id)
+  const itens = db.prepare(`
+    SELECT di.*, p.nome, p.variacao, p.ncm, p.cest, p.origem, p.unidade, p.codigo_barras
+    FROM devolucoes_cliente_itens di JOIN produtos p ON p.id = di.produto_id
+    WHERE di.devolucao_id = ? ORDER BY di.id
+  `).all(devolucaoId)
+  return { devolucao, itens, chaveCupom: cupom?.status === 'autorizado' ? cupom.chave : null }
+}
+
+function ultimaNotaFiscalDaDevolucaoCliente(devolucaoId) {
+  return db.prepare('SELECT * FROM notas_fiscais WHERE devolucao_cliente_id = ? ORDER BY id DESC LIMIT 1').get(devolucaoId) || null
+}
+
+function contarTentativasNotaFiscalDevolucaoCliente(devolucaoId) {
+  return db.prepare('SELECT COUNT(*) as n FROM notas_fiscais WHERE devolucao_cliente_id = ?').get(devolucaoId).n
+}
+
+/** Reembolsos de devolução de cliente que saem do caixa, como linhas negativas do Caixa. */
+function listarReembolsosCaixa(dataInicio, dataFim) {
+  return db.prepare(`
+    SELECT d.venda_id, d.data, -d.valor_total as valor_total, d.forma_reembolso as forma_pagamento,
+           -d.valor_total as valor, 'Devolução de cliente' as itens_resumo, 0 as qtd_itens, 1 as estorno,
+           d.id as devolucao_cliente_id
+    FROM devolucoes_cliente d
+    WHERE d.deleted_at IS NULL AND d.remover_caixa = 1
+      AND date(d.data) >= date(?) AND date(d.data) <= date(?)
+  `).all(dataInicio, dataFim)
+}
+
+// --- Relatório fiscal (contador) ---
+
+/** Notas autorizadas/canceladas do período (pela data de emissão), para o .zip de XMLs. */
+function listarNotasParaXml({ dataInicio, dataFim, ambiente }) {
+  return db.prepare(`
+    SELECT n.id, n.modelo, n.numero, n.serie, n.chave, n.status, n.xml, n.caminho_xml, n.ambiente,
+           n.venda_id, n.devolucao_id, n.devolucao_cliente_id, d.tipo as devolucao_tipo
+    FROM notas_fiscais n
+    LEFT JOIN devolucoes_artesao d ON d.id = n.devolucao_id
+    WHERE n.status IN ('autorizado', 'cancelado') AND n.ambiente = ?
+      AND date(n.created_at) >= date(?) AND date(n.created_at) <= date(?)
+    ORDER BY n.id
+  `).all(String(ambiente), dataInicio, dataFim)
+}
+
+/** XMLs das notas de fornecedores (entrada) emitidas no período. */
+function listarXmlsEntrada(dataInicio, dataFim) {
+  return db.prepare(`
+    SELECT chave, tipo, xml FROM notas_entrada
+    WHERE deleted_at IS NULL AND date(data_emissao) >= date(?) AND date(data_emissao) <= date(?)
+    ORDER BY data_emissao
+  `).all(dataInicio, dataFim)
+}
+
+/**
+ * Faturamento do período separado como o PGDAS pede: revenda normal (5102), com ICMS-ST (5405) e
+ * consignado (5115). Desconto da venda rateado entre os itens; devoluções de cliente descontadas.
+ */
+function resumoFiscalPeriodo(dataInicio, dataFim) {
+  const categoria = `CASE WHEN COALESCE(p.tipo_posse, 'consignado') = 'proprio'
+                          THEN CASE WHEN p.icms_st = 1 THEN 'st' ELSE 'normal' END
+                          ELSE 'consignado' END`
+  const vendas = db.prepare(`
+    SELECT ${categoria} as categoria,
+           SUM(vi.quantidade * vi.preco_unitario *
+               (v.valor_total / NULLIF((SELECT SUM(x.quantidade * x.preco_unitario) FROM vendas_itens x
+                                         WHERE x.venda_id = v.id AND x.deleted_at IS NULL), 0))) as valor
+    FROM vendas_itens vi
+    JOIN vendas v ON v.id = vi.venda_id AND v.deleted_at IS NULL
+    JOIN produtos p ON p.id = vi.produto_id
+    WHERE vi.deleted_at IS NULL AND date(v.data) >= date(?) AND date(v.data) <= date(?)
+    GROUP BY categoria
+  `).all(dataInicio, dataFim)
+  const devolucoes = db.prepare(`
+    SELECT ${categoria} as categoria, SUM(di.quantidade * di.valor_unitario) as valor
+    FROM devolucoes_cliente_itens di
+    JOIN devolucoes_cliente d ON d.id = di.devolucao_id AND d.deleted_at IS NULL
+    JOIN produtos p ON p.id = di.produto_id
+    WHERE date(d.data) >= date(?) AND date(d.data) <= date(?)
+    GROUP BY categoria
+  `).all(dataInicio, dataFim)
+  const cupons = db.prepare(`
+    SELECT
+      SUM(CASE WHEN n.status = 'autorizado' THEN 1 ELSE 0 END) as autorizados,
+      SUM(CASE WHEN n.status = 'cancelado' THEN 1 ELSE 0 END) as cancelados,
+      SUM(CASE WHEN n.id IS NULL OR n.status NOT IN ('autorizado', 'cancelado') THEN 1 ELSE 0 END) as sem_cupom,
+      SUM(CASE WHEN n.status = 'autorizado' THEN v.valor_total ELSE 0 END) as valor_autorizado,
+      COUNT(*) as vendas
+    FROM vendas v
+    LEFT JOIN notas_fiscais n ON n.id = (SELECT MAX(t.id) FROM notas_fiscais t WHERE t.venda_id = v.id)
+    WHERE v.deleted_at IS NULL AND date(v.data) >= date(?) AND date(v.data) <= date(?)
+  `).get(dataInicio, dataFim)
+  const linhas = ['normal', 'st', 'consignado'].map((c) => {
+    const bruto = vendas.find((v) => v.categoria === c)?.valor || 0
+    const devolvido = devolucoes.find((v) => v.categoria === c)?.valor || 0
+    const r = (n) => Math.round(n * 100) / 100
+    return { categoria: c, vendas: r(bruto), devolucoes: r(devolvido), liquido: r(bruto - devolvido) }
+  })
+  return { linhas, cupons }
 }
 
 // --- NFC-e emitidas (Focus NFe) ---
@@ -2423,16 +2831,26 @@ function obterVendaParaNfce(vendaId) {
 
 const CAMPOS_NOTA_FISCAL = [
   'status', 'numero', 'serie', 'chave', 'protocolo', 'mensagem', 'caminho_danfe', 'caminho_xml', 'url_qrcode',
-  'xml', 'resposta', 'cancelada_em', 'justificativa_cancelamento',
+  'xml', 'resposta', 'cancelada_em', 'justificativa_cancelamento', 'autorizada_em',
 ]
 
-function criarNotaFiscal({ venda_id = null, devolucao_id = null, modelo = '65', ref, ambiente, valor_total, requisicao }) {
+function criarNotaFiscal({
+  venda_id = null,
+  devolucao_id = null,
+  devolucao_cliente_id = null,
+  modelo = '65',
+  ref,
+  ambiente,
+  valor_total,
+  requisicao,
+}) {
   const id = db.prepare(`
-    INSERT INTO notas_fiscais (venda_id, devolucao_id, modelo, ref, ambiente, status, valor_total, requisicao)
-    VALUES (?, ?, ?, ?, ?, 'enviando', ?, ?)
+    INSERT INTO notas_fiscais (venda_id, devolucao_id, devolucao_cliente_id, modelo, ref, ambiente, status, valor_total, requisicao)
+    VALUES (?, ?, ?, ?, ?, ?, 'enviando', ?, ?)
   `).run(
     venda_id,
     devolucao_id,
+    devolucao_cliente_id,
     modelo,
     ref,
     String(ambiente),
@@ -2517,24 +2935,232 @@ function listarNotasFiscais({ dataInicio, dataFim } = {}) {
     SELECT n.id, n.venda_id, n.devolucao_id, n.modelo, n.ref, n.ambiente, n.status, n.numero, n.serie, n.chave,
            n.mensagem, n.valor_total, n.caminho_danfe, n.cancelada_em, n.created_at, n.updated_at,
            v.data as venda_data, v.deleted_at as venda_excluida_em, d.deleted_at as devolucao_excluida_em,
+           d.tipo as devolucao_tipo, d.cfop as devolucao_cfop,
            a.razao_social as artesao_razao_social, a.nome_fantasia as artesao_nome_fantasia, a.nome as artesao_nome,
+           n.devolucao_cliente_id, dc.venda_id as devolucao_cliente_venda_id, dc.cliente_nome,
+           dc.deleted_at as devolucao_cliente_excluida_em,
            (SELECT COUNT(*) FROM notas_fiscais t
-              WHERE t.venda_id IS n.venda_id AND t.devolucao_id IS n.devolucao_id) as tentativas
+              WHERE t.venda_id IS n.venda_id AND t.devolucao_id IS n.devolucao_id
+                AND t.devolucao_cliente_id IS n.devolucao_cliente_id) as tentativas
     FROM notas_fiscais n
     LEFT JOIN vendas v ON v.id = n.venda_id
     LEFT JOIN devolucoes_artesao d ON d.id = n.devolucao_id
     LEFT JOIN artesoes a ON a.id = d.artesao_id
+    LEFT JOIN devolucoes_cliente dc ON dc.id = n.devolucao_cliente_id
     WHERE n.id = (SELECT MAX(t.id) FROM notas_fiscais t
-                    WHERE t.venda_id IS n.venda_id AND t.devolucao_id IS n.devolucao_id) ${where}
+                    WHERE t.venda_id IS n.venda_id AND t.devolucao_id IS n.devolucao_id
+                      AND t.devolucao_cliente_id IS n.devolucao_cliente_id) ${where}
     ORDER BY n.created_at DESC, n.id DESC
   `).all(...params)
+}
+
+/** Status em que o número foi de fato usado por uma nota na SEFAZ. */
+const STATUS_NUMERO_USADO = ['autorizado', 'cancelado', 'denegado']
+
+/**
+ * Números pulados na sequência de cada modelo/série do ambiente: entre o menor e o maior número usado,
+ * os que não têm nota autorizada/cancelada/denegada nem foram inutilizados. Agrupa em faixas.
+ */
+function listarBuracosNumeracao(ambiente) {
+  const usados = db.prepare(`
+    SELECT modelo, serie, CAST(numero AS INTEGER) as numero FROM notas_fiscais
+    WHERE ambiente = ? AND numero IS NOT NULL AND serie IS NOT NULL
+      AND status IN (${STATUS_NUMERO_USADO.map(() => '?').join(',')})
+  `).all(String(ambiente), ...STATUS_NUMERO_USADO)
+  const inutilizadas = db.prepare('SELECT * FROM inutilizacoes WHERE ambiente = ?').all(String(ambiente))
+  const grupos = new Map()
+  for (const u of usados) {
+    const chave = `${u.modelo}|${u.serie}`
+    if (!grupos.has(chave)) grupos.set(chave, new Set())
+    grupos.get(chave).add(u.numero)
+  }
+  const faixas = []
+  for (const [chave, numeros] of grupos) {
+    const [modelo, serie] = chave.split('|')
+    const lista = [...numeros].sort((a, b) => a - b)
+    const pulados = (n) =>
+      !numeros.has(n) &&
+      !inutilizadas.some((i) => i.modelo === modelo && i.serie === serie && n >= i.numero_inicial && n <= i.numero_final)
+    let inicio = null
+    for (let n = lista[0]; n <= lista[lista.length - 1] + 1; n += 1) {
+      if (n <= lista[lista.length - 1] && pulados(n)) {
+        if (inicio == null) inicio = n
+      } else if (inicio != null) {
+        faixas.push({ modelo, serie, numero_inicial: inicio, numero_final: n - 1 })
+        inicio = null
+      }
+    }
+  }
+  return faixas
+}
+
+function registrarInutilizacao(dados) {
+  db.prepare(`
+    INSERT INTO inutilizacoes (modelo, serie, numero_inicial, numero_final, ambiente, justificativa, protocolo, caminho_xml)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    dados.modelo,
+    String(dados.serie),
+    dados.numero_inicial,
+    dados.numero_final,
+    String(dados.ambiente),
+    dados.justificativa || null,
+    dados.protocolo || null,
+    dados.caminho_xml || null,
+  )
+}
+
+function listarInutilizacoes() {
+  return db.prepare('SELECT * FROM inutilizacoes ORDER BY id DESC').all()
+}
+
+/** 'DD/MM/AAAA' ou 'AAAA-MM-DD' → 'AAAA-MM-DD'. */
+function dataIbptIso(texto) {
+  const s = String(texto || '').trim()
+  const br = s.match(/^(\d{2})\/(\d{2})\/(\d{4})$/)
+  return br ? `${br[3]}-${br[2]}-${br[1]}` : s.slice(0, 10)
+}
+
+/**
+ * Importa o CSV do IBPT (De Olho no Imposto), separado por ';':
+ * codigo;ex;tipo;descricao;nacionalfederal;importadosfederal;estadual;municipal;vigenciainicio;vigenciafim;chave;versao;fonte
+ * Só as linhas de tipo 0 (NCM). Substitui a tabela inteira.
+ */
+function importarTabelaIbpt(conteudo) {
+  const linhas = String(conteudo || '').replace(/^﻿/, '').split(/\r?\n/).filter((l) => l.trim())
+  if (linhas.length < 2) throw new Error('Arquivo do IBPT vazio.')
+  const cabecalho = linhas[0].toLowerCase().split(';').map((c) => c.trim())
+  const col = (nome) => cabecalho.indexOf(nome)
+  const idx = {
+    codigo: col('codigo'),
+    ex: col('ex'),
+    tipo: col('tipo'),
+    nacional: col('nacionalfederal'),
+    importados: col('importadosfederal'),
+    estadual: col('estadual'),
+    municipal: col('municipal'),
+    fim: col('vigenciafim'),
+    versao: col('versao'),
+    fonte: col('fonte'),
+  }
+  if (idx.codigo < 0 || idx.nacional < 0 || idx.estadual < 0) {
+    throw new Error('Este arquivo não parece ser a tabela do IBPT (faltam as colunas codigo/nacionalfederal/estadual).')
+  }
+  const numero = (v) => Number(String(v ?? '').replace(',', '.')) || 0
+  const inserir = db.prepare(`
+    INSERT OR REPLACE INTO ibpt (ncm, ex, nacional_federal, importados_federal, estadual, municipal, vigencia_fim, versao, fonte)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `)
+  let total = 0
+  let vigencia = null
+  let versao = null
+  db.transaction(() => {
+    db.prepare('DELETE FROM ibpt').run()
+    for (const linha of linhas.slice(1)) {
+      const c = linha.split(';')
+      if (idx.tipo >= 0 && String(c[idx.tipo]).trim() !== '0') continue
+      const ncm = String(c[idx.codigo] || '').replace(/\D/g, '')
+      if (ncm.length !== 8) continue
+      vigencia = idx.fim >= 0 ? dataIbptIso(c[idx.fim]) : null
+      versao = idx.versao >= 0 ? String(c[idx.versao] || '').trim() : null
+      inserir.run(
+        ncm,
+        idx.ex >= 0 ? String(c[idx.ex] || '').trim() : '',
+        numero(c[idx.nacional]),
+        idx.importados >= 0 ? numero(c[idx.importados]) : numero(c[idx.nacional]),
+        numero(c[idx.estadual]),
+        idx.municipal >= 0 ? numero(c[idx.municipal]) : 0,
+        vigencia,
+        versao,
+        idx.fonte >= 0 ? String(c[idx.fonte] || '').trim() : 'IBPT',
+      )
+      total += 1
+    }
+  })()
+  if (total === 0) throw new Error('Nenhum NCM encontrado no arquivo.')
+  return { total, vigencia_fim: vigencia, versao }
+}
+
+function situacaoTabelaIbpt() {
+  return db.prepare('SELECT COUNT(*) as total, MAX(vigencia_fim) as vigencia_fim, MAX(versao) as versao FROM ibpt').get()
+}
+
+/** Alíquotas do IBPT para os NCMs pedidos (sem exceção tarifária). */
+function aliquotasIbpt(ncms) {
+  const lista = [...new Set((ncms || []).map((n) => String(n || '').replace(/\D/g, '')).filter((n) => n.length === 8))]
+  if (lista.length === 0) return {}
+  const rows = db
+    .prepare(`SELECT * FROM ibpt WHERE ex = '' AND ncm IN (${lista.map(() => '?').join(',')})`)
+    .all(...lista)
+  return Object.fromEntries(rows.map((r) => [r.ncm, r]))
+}
+
+/**
+ * Cupons de venda que ficaram sem resposta (sem internet, Focus fora) nos últimos dias, para reenviar sozinho.
+ * Ignora os que mudaram há menos de 2 minutos (podem estar sendo enviados agora).
+ */
+function listarNfcePendentesReenvio(dias = 7) {
+  return db.prepare(`
+    SELECT n.id, n.venda_id, n.status FROM notas_fiscais n
+    JOIN vendas v ON v.id = n.venda_id AND v.deleted_at IS NULL
+    WHERE n.modelo = '65'
+      AND n.id = (SELECT MAX(t.id) FROM notas_fiscais t WHERE t.venda_id = n.venda_id)
+      AND n.status IN ('erro_conexao', 'enviando', 'processando_autorizacao')
+      AND datetime(n.updated_at) <= datetime('now', 'localtime', '-2 minutes')
+      AND datetime(n.created_at) >= datetime('now', 'localtime', ?)
+    ORDER BY n.id
+  `).all(`-${Number(dias) || 7} days`)
+}
+
+/** Vendas com cupom pendente ou com erro (aviso do Dashboard). */
+function contarCuponsPendentes() {
+  return db.prepare(`
+    SELECT COUNT(*) as n FROM notas_fiscais n
+    JOIN vendas v ON v.id = n.venda_id AND v.deleted_at IS NULL
+    WHERE n.modelo = '65'
+      AND n.id = (SELECT MAX(t.id) FROM notas_fiscais t WHERE t.venda_id = n.venda_id)
+      AND n.status IN ('erro_conexao', 'enviando', 'processando_autorizacao', 'erro_autorizacao', 'erro_validacao')
+  `).get().n
+}
+
+/** CEST mais usado entre os produtos com o mesmo NCM (sugestão no cadastro). */
+function sugerirCest(ncm) {
+  const digitos = String(ncm ?? '').replace(/\D/g, '')
+  if (digitos.length !== 8) return null
+  return (
+    db.prepare(`
+      SELECT cest, COUNT(*) as total FROM produtos
+      WHERE ncm = ? AND cest IS NOT NULL AND length(cest) = 7 AND deleted_at IS NULL
+      GROUP BY cest ORDER BY total DESC LIMIT 1
+    `).get(digitos) || null
+  )
+}
+
+/** Vendas do período com a última tentativa de NFC-e de cada uma (ou nenhuma). */
+function listarVendasComCupom({ dataInicio, dataFim } = {}) {
+  return db.prepare(`
+    SELECT v.id, v.data, v.valor_total, v.forma_pagamento,
+           (SELECT GROUP_CONCAT(p.nome || ' x' || vi.quantidade, ', ')
+              FROM vendas_itens vi LEFT JOIN produtos p ON p.id = vi.produto_id
+              WHERE vi.venda_id = v.id AND vi.deleted_at IS NULL) as itens_resumo,
+           (SELECT GROUP_CONCAT(DISTINCT vp.forma_pagamento)
+              FROM vendas_pagamentos vp WHERE vp.venda_id = v.id AND vp.deleted_at IS NULL) as formas_pagamento,
+           n.id as nota_id, n.status as nota_status, n.numero as nota_numero, n.serie as nota_serie,
+           n.mensagem as nota_mensagem, n.ambiente as nota_ambiente, n.caminho_danfe as nota_caminho_danfe,
+           n.autorizada_em as nota_autorizada_em, n.cancelada_em as nota_cancelada_em
+    FROM vendas v
+    LEFT JOIN notas_fiscais n ON n.id = (SELECT MAX(t.id) FROM notas_fiscais t WHERE t.venda_id = v.id)
+    WHERE v.deleted_at IS NULL
+      AND date(v.data) >= date(?) AND date(v.data) <= date(?)
+    ORDER BY v.data DESC, v.id DESC
+  `).all(dataInicio, dataFim)
 }
 
 /** Impede alterar ou excluir uma venda que já tem cupom fiscal autorizado. */
 function exigirVendaSemNfceAutorizada(vendaId, acao) {
   const nota = ultimaNotaFiscalDaVenda(vendaId)
   if (nota && nota.status === 'autorizado') {
-    throw new Error(`Esta venda tem cupom fiscal autorizado (nº ${nota.numero}). Cancele o cupom em Notas emitidas antes de ${acao}.`)
+    throw new Error(`Esta venda tem cupom fiscal autorizado (nº ${nota.numero}). Cancele o cupom em Vendas antes de ${acao}.`)
   }
 }
 
@@ -2565,6 +3191,9 @@ const CONFIG_FISCAL_PADRAO = {
   csc_id: '',
   csc: '',
   emitir_nfce: '0',
+  prazo_cancelamento_nfce: '30',
+  limite_identificacao_nfce: '10000',
+  usar_ibpt: '0',
   focus_token_homologacao: '',
   focus_token_producao: '',
 }
@@ -2637,6 +3266,12 @@ function salvarConfigFiscal(data) {
     csc_id: somenteDigitos(data?.csc_id),
     csc: texto('csc'),
     emitir_nfce: data?.emitir_nfce === '1' || data?.emitir_nfce === true ? '1' : '0',
+    prazo_cancelamento_nfce: inteiroPositivoConfig(data?.prazo_cancelamento_nfce || '30', 'o prazo de cancelamento do cupom'),
+    limite_identificacao_nfce: inteiroPositivoConfig(
+      data?.limite_identificacao_nfce || '10000',
+      'o valor a partir do qual o cupom exige CPF',
+    ),
+    usar_ibpt: data?.usar_ibpt === '1' || data?.usar_ibpt === true ? '1' : '0',
     focus_token_homologacao: texto('focus_token_homologacao'),
     focus_token_producao: texto('focus_token_producao'),
   }
@@ -2749,6 +3384,26 @@ module.exports = {
   ultimaNotaFiscalDaVenda,
   contarTentativasNotaFiscal,
   listarNotasFiscais,
+  listarVendasComCupom,
+  sugerirCest,
+  listarBuracosNumeracao,
+  registrarInutilizacao,
+  listarInutilizacoes,
+  importarTabelaIbpt,
+  situacaoTabelaIbpt,
+  aliquotasIbpt,
+  listarNfcePendentesReenvio,
+  contarCuponsPendentes,
+  calcularDevolucaoSimbolica,
+  registrarDevolucaoSimbolica,
+  obterVendaParaDevolucaoCliente,
+  registrarDevolucaoCliente,
+  listarNotasParaXml,
+  listarXmlsEntrada,
+  resumoFiscalPeriodo,
+  obterDevolucaoClienteParaNfe,
+  ultimaNotaFiscalDaDevolucaoCliente,
+  contarTentativasNotaFiscalDevolucaoCliente,
   ultimaNotaFiscalDaDevolucao,
   contarTentativasNotaFiscalDevolucao,
   obterDevolucaoParaNfe,
