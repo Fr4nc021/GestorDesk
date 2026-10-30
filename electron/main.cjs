@@ -384,7 +384,7 @@ ipcMain.handle('importar-tabela-ibpt', async (event) => {
 })
 /** Abre o DANFCe/DANFE só para ver, sem imprimir. */
 ipcMain.handle('visualizar-nota', async (event, notaId) => {
-  const { url, modelo } = urlDanfe(notaId)
+  const { url, modelo } = await urlDanfe(notaId)
   if (modelo === '55') {
     await shell.openExternal(url)
     return { ok: true }
@@ -403,7 +403,7 @@ ipcMain.handle('visualizar-nota', async (event, notaId) => {
 ipcMain.handle('buscar-notas-recebidas', () => buscarNotasRecebidas())
 ipcMain.handle('baixar-xml-nota-recebida', (_, chave) => baixarXmlNotaRecebida(chave))
 ipcMain.handle('imprimir-nfce', async (event, notaId) => {
-  const { url, modelo } = urlDanfe(notaId)
+  const { url, modelo } = await urlDanfe(notaId)
   // DANFE da NF-e é PDF: abre no visualizador do computador.
   if (modelo === '55') {
     await shell.openExternal(url)

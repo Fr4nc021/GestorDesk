@@ -515,12 +515,12 @@ export default function Vendas() {
                             <BotaoAcao icone="imprimir" onClick={() => abrirDetalhe(v)}>
                               Ver venda
                             </BotaoAcao>
-                            {(s === 'autorizado' || s === 'cancelado') && v.nota_caminho_danfe && (
+                            {(s === 'autorizado' || s === 'cancelado') && (
                               <BotaoAcao icone="imprimir" onClick={() => visualizar(v)}>
                                 Ver cupom
                               </BotaoAcao>
                             )}
-                            {s === 'autorizado' && v.nota_caminho_danfe && (
+                            {s === 'autorizado' && (
                               <BotaoAcao icone="imprimir" onClick={() => imprimir(v)}>
                                 Reimprimir
                               </BotaoAcao>
