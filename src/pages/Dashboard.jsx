@@ -83,6 +83,11 @@ export default function Dashboard() {
   const [resumoMesAnterior, setResumoMesAnterior] = useState(null)
   const [syncStatus, setSyncStatus] = useState('idle')
   const [syncMessage, setSyncMessage] = useState('')
+  const [cuponsPendentes, setCuponsPendentes] = useState(0)
+
+  useEffect(() => {
+    window.electronAPI?.contarCuponsPendentes?.().then(setCuponsPendentes).catch(() => {})
+  }, [])
 
   useEffect(() => {
     async function carregar() {
@@ -144,6 +149,12 @@ export default function Dashboard() {
 
   return (
     <div className="dashboard">
+      {cuponsPendentes > 0 && (
+        <Link to="/app/vendas" className="dashboard-alerta-cupons">
+          {cuponsPendentes} venda(s) com cupom fiscal pendente ou com erro. O sistema tenta reenviar sozinho; clique
+          para ver.
+        </Link>
+      )}
       <section className="dashboard-section">
         <h2 className="dashboard-heading">Ações Rápidas</h2>
         <hr className="dashboard-divider" />

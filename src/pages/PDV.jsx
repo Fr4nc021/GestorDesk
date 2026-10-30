@@ -82,20 +82,27 @@ export default function PDV() {
   const [voltarRelatorios, setVoltarRelatorios] = useState(false)
   const [emitirNfce, setEmitirNfce] = useState(false)
   const [cpfNota, setCpfNota] = useState('')
+  const [limiteCpfNota, setLimiteCpfNota] = useState(10000)
   const [cupom, setCupom] = useState(null)
 
   // Lido de novo a cada pagamento, para valer na hora uma mudança feita em Configurações.
   const carregarEmissaoNfce = useCallback(() => {
     window.electronAPI
       ?.obterConfigFiscal?.()
-      .then((config) => setEmitirNfce(config?.emitir_nfce === '1'))
+      .then((config) => {
+        setEmitirNfce(config?.emitir_nfce === '1')
+        setLimiteCpfNota(Number(config?.limite_identificacao_nfce) || 10000)
+      })
       .catch(() => setEmitirNfce(false))
   }, [])
 
   useEffect(() => {
     window.electronAPI
       ?.obterConfigFiscal?.()
-      .then((config) => setEmitirNfce(config?.emitir_nfce === '1'))
+      .then((config) => {
+        setEmitirNfce(config?.emitir_nfce === '1')
+        setLimiteCpfNota(Number(config?.limite_identificacao_nfce) || 10000)
+      })
       .catch(() => setEmitirNfce(false))
   }, [])
 
@@ -405,6 +412,12 @@ export default function PDV() {
     const trocoVenda = formasSelecionadas.length > 1
       ? Math.max(pagamentos.reduce((acc, pg) => acc + pg.valor, 0) - total, 0)
       : troco
+
+    const digitosCpf = String(cpfNota).replace(/\D/g, '').length
+    if (emitirNfce && vendaEdicaoId == null && total >= limiteCpfNota && digitosCpf !== 11 && digitosCpf !== 14) {
+      alert(`Venda a partir de ${limiteCpfNota.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} precisa do CPF/CNPJ do cliente no cupom.`)
+      return
+    }
 
     try {
       const payload = {

@@ -45,6 +45,9 @@ const CONFIG_FISCAL_VAZIA = {
   csc_id: '',
   csc: '',
   emitir_nfce: '0',
+  prazo_cancelamento_nfce: '30',
+  limite_identificacao_nfce: '10000',
+  usar_ibpt: '0',
   focus_token_homologacao: '',
   focus_token_producao: '',
 }
@@ -56,6 +59,7 @@ function configFiscalParaForm(config) {
 
 export default function Configuracoes() {
   const [abaAtiva, setAbaAtiva] = useState('usuarios')
+  const [ibpt, setIbpt] = useState(null)
   const [usuariosLocais, setUsuariosLocais] = useState([])
   const [carregandoUsuarios, setCarregandoUsuarios] = useState(true)
   const [erroUsuarios, setErroUsuarios] = useState('')
@@ -82,6 +86,7 @@ export default function Configuracoes() {
     carregarUsuarios()
     carregarPeriodoRelatorios()
     carregarConfigFiscal()
+    carregarIbpt()
   }, [])
 
   async function carregarConfigFiscal() {
@@ -128,6 +133,50 @@ export default function Configuracoes() {
     } catch (err) {
       console.error('[Configurações] Erro ao buscar CEP:', err)
       setCepFiscalStatus('Não foi possível buscar o CEP. Verifique sua conexão.')
+    }
+  }
+
+  async function exportarFiscal() {
+    try {
+      const r = await window.electronAPI.exportarConfigFiscal()
+      if (r) {
+        setFeedbackFiscal({
+          tipo: 'success',
+          texto: `Configuração exportada para ${r.caminho}. O arquivo tem os tokens da Focus: apague depois de importar.`,
+        })
+      }
+    } catch (err) {
+      setFeedbackFiscal({ tipo: 'error', texto: err?.message || 'Erro ao exportar.' })
+    }
+  }
+
+  async function importarFiscal() {
+    try {
+      const salvo = await window.electronAPI.importarConfigFiscal()
+      if (!salvo) return
+      setFiscal(configFiscalParaForm(salvo))
+      setFeedbackFiscal({ tipo: 'success', texto: 'Configuração fiscal importada e salva. Confira o ambiente antes de vender.' })
+    } catch (err) {
+      setFeedbackFiscal({ tipo: 'error', texto: err?.message || 'Erro ao importar.' })
+    }
+  }
+
+  async function carregarIbpt() {
+    try {
+      setIbpt(await window.electronAPI?.situacaoTabelaIbpt?.())
+    } catch {
+      setIbpt(null)
+    }
+  }
+
+  async function importarIbpt() {
+    try {
+      const r = await window.electronAPI.importarTabelaIbpt()
+      if (!r) return
+      setFeedbackFiscal({ tipo: 'success', texto: `Tabela do IBPT importada: ${r.total} NCMs.` })
+      await carregarIbpt()
+    } catch (err) {
+      setFeedbackFiscal({ tipo: 'error', texto: err?.message || 'Erro ao importar a tabela do IBPT.' })
     }
   }
 
@@ -398,6 +447,8 @@ export default function Configuracoes() {
                 {campoFiscal('proximo_numero_nfce', 'Próximo número da NFC-e', { inputMode: 'numeric' })}
                 {campoFiscal('serie_nfe', 'Série da NF-e', { inputMode: 'numeric' })}
                 {campoFiscal('proximo_numero_nfe', 'Próximo número da NF-e', { inputMode: 'numeric' })}
+                {campoFiscal('prazo_cancelamento_nfce', 'Prazo para cancelar o cupom (minutos)', { inputMode: 'numeric' })}
+                {campoFiscal('limite_identificacao_nfce', 'Exigir CPF no cupom a partir de (R$)', { inputMode: 'numeric' })}
                 {campoFiscal('csc_id', 'ID do CSC (token NFC-e)', { inputMode: 'numeric' })}
                 <div className="modal-field">
                   <label htmlFor="fiscal-csc">CSC (token NFC-e)</label>
@@ -450,9 +501,38 @@ export default function Configuracoes() {
                 <p className="config-card-sub">Ambiente de homologação: os cupons saem sem valor fiscal.</p>
               )}
 
+              <p className="fiscal-secao">Valor aproximado dos tributos (IBPT)</p>
+              <label className="fiscal-produto-st">
+                <input
+                  type="checkbox"
+                  checked={fiscal.usar_ibpt === '1'}
+                  onChange={(e) => atualizarFiscal('usar_ibpt', e.target.checked ? '1' : '0')}
+                />
+                Mostrar no cupom o valor aproximado dos tributos (Lei 12.741/2012)
+              </label>
+              <p className="config-card-sub">
+                Baixe a tabela do RS em deolhonoimposto.ibpt.org.br (arquivo CSV, gratuito com cadastro do CNPJ) e
+                importe aqui. Ela vale por cerca de 6 meses.{' '}
+                {ibpt?.total
+                  ? `Tabela atual: ${ibpt.total} NCMs, versão ${ibpt.versao || '—'}, vale até ${String(ibpt.vigencia_fim || '').split('-').reverse().join('/')}.`
+                  : 'Nenhuma tabela importada.'}
+                {ibpt?.vigencia_fim && ibpt.vigencia_fim < new Date().toISOString().slice(0, 10) && (
+                  <strong> A tabela venceu: importe a nova.</strong>
+                )}
+              </p>
+              <button type="button" className="fiscal-mostrar-csc" onClick={importarIbpt}>
+                Importar tabela do IBPT
+              </button>
+
               <div className="sync-action-row config-save-row">
                 <button type="submit" className="btn-sync-manual" disabled={salvandoFiscal}>
                   {salvandoFiscal ? 'Salvando...' : 'Salvar dados fiscais'}
+                </button>
+                <button type="button" className="fiscal-mostrar-csc" onClick={exportarFiscal}>
+                  Exportar configuração
+                </button>
+                <button type="button" className="fiscal-mostrar-csc" onClick={importarFiscal}>
+                  Importar configuração
                 </button>
               </div>
               {feedbackFiscal.texto && (

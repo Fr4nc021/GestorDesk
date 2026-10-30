@@ -99,6 +99,21 @@ export default function Produtos() {
   const [unidade, setUnidade] = useState('UN')
   const [origem, setOrigem] = useState('0')
   const [icmsSt, setIcmsSt] = useState(false)
+  const [sugestaoCest, setSugestaoCest] = useState(null)
+
+  // Sugere o CEST que outros produtos com o mesmo NCM já usam (só quando o produto tem ST).
+  useEffect(() => {
+    const ncmDigitos = somenteDigitos(ncm)
+    if (tipoPosse !== 'proprio' || !icmsSt || ncmDigitos.length !== 8 || !window.electronAPI?.sugerirCest) {
+      setSugestaoCest(null)
+      return
+    }
+    let ativo = true
+    window.electronAPI.sugerirCest(ncmDigitos).then((s) => ativo && setSugestaoCest(s)).catch(() => {})
+    return () => {
+      ativo = false
+    }
+  }, [ncm, tipoPosse, icmsSt])
   const formacaoCalc = useMemo(() => calcularFormacao(formacao), [formacao])
   const formacaoRascunhoCalc = useMemo(() => calcularFormacao(formacaoRascunho), [formacaoRascunho])
 
@@ -887,6 +902,11 @@ export default function Produtos() {
     if (cestDigitos && cestDigitos.length !== 7) {
       setAbaProduto('fiscal')
       alert('O CEST deve ter 7 dígitos.')
+      return
+    }
+    if (tipoPosse === 'proprio' && icmsSt && cestDigitos.length !== 7) {
+      setAbaProduto('fiscal')
+      alert('Produto com ICMS-ST precisa do CEST (7 dígitos). Veja o CEST na nota do fornecedor.')
       return
     }
 
@@ -2143,8 +2163,13 @@ ${chunk.join('\n')}
                           maxLength={7}
                           value={cest}
                           onChange={(e) => setCest(somenteDigitos(e.target.value).slice(0, 7))}
-                          placeholder="Só se tiver ST"
+                          placeholder={tipoPosse === 'proprio' && icmsSt ? 'Obrigatório com ST' : 'Só se tiver ST'}
                         />
+                        {sugestaoCest && sugestaoCest.cest !== cest && (
+                          <button type="button" className="produto-sugestao-cest" onClick={() => setCest(sugestaoCest.cest)}>
+                            Usar {sugestaoCest.cest} (já usado em {sugestaoCest.total} produto(s) com este NCM)
+                          </button>
+                        )}
                       </div>
                     </div>
                     <div className="modal-produto-precos">
