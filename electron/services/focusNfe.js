@@ -109,7 +109,10 @@ function montarNfce({ venda, itens, pagamentos, config, cpf = '', ibpt = null })
 
   const brutos = itens.map((i) => centavos(i.quantidade * i.preco_unitario))
   const totalBruto = brutos.reduce((acc, v) => acc + v, 0)
-  const totalVenda = centavos(venda.valor_total)
+  // Vendas antigas podem ter valor_total zerado/nulo: nesse caso vale o bruto menos o desconto gravado.
+  const totalVenda =
+    centavos(venda.valor_total) > 0 ? centavos(venda.valor_total) : Math.max(totalBruto - centavos(venda.desconto || 0), 0)
+  if (totalVenda <= 0) throw new Error('A venda está com total zerado. Abra a venda no PDV e salve de novo.')
   const limite = Number(config.limite_identificacao_nfce) || 10000
   if (totalVenda >= centavos(limite) && ![11, 14].includes(somenteDigitos(cpf).length)) {
     throw new Error(`Venda a partir de R$ ${limite.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} precisa do CPF/CNPJ do cliente no cupom.`)
@@ -155,7 +158,7 @@ function montarNfce({ venda, itens, pagamentos, config, cpf = '', ibpt = null })
 
   // A soma dos pagamentos tem que fechar com o total da nota: o que passou (troco) sai do dinheiro.
   const formas = (pagamentos || []).filter((p) => centavos(p.valor) > 0)
-  if (formas.length === 0) formas.push({ forma_pagamento: venda.forma_pagamento, valor: venda.valor_total })
+  if (formas.length === 0) formas.push({ forma_pagamento: venda.forma_pagamento, valor: totalVenda / 100 })
   const valores = formas.map((p) => centavos(p.valor))
   let excedente = valores.reduce((acc, v) => acc + v, 0) - totalVenda
   if (excedente < 0) throw new Error('Os pagamentos da venda não cobrem o total.')
@@ -188,6 +191,10 @@ function montarNfce({ venda, itens, pagamentos, config, cpf = '', ibpt = null })
     local_destino: '1',
     items,
     formas_pagamento: formasPagamento,
+    // Totais explícitos: sem eles a SEFAZ pode rejeitar com "total líquido não informado".
+    valor_produtos: dinheiro(totalBruto),
+    valor_desconto: dinheiro(descontoCents),
+    valor_total: dinheiro(totalVenda),
   }
   if (ibpt) {
     const soma = { federal: 0, estadual: 0, municipal: 0, total: 0 }
