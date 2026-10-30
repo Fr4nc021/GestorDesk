@@ -3156,6 +3156,65 @@ function listarVendasComCupom({ dataInicio, dataFim } = {}) {
   `).all(dataInicio, dataFim)
 }
 
+/**
+ * Produtos das vendas que impedem a emissão do cupom: sem NCM, ou com ICMS-ST sem CEST.
+ * Inclui produtos já excluídos, que não aparecem mais no cadastro.
+ */
+function pendenciasFiscaisDasVendas(vendaIds) {
+  const ids = [...new Set((vendaIds || []).map(Number).filter((n) => Number.isInteger(n) && n > 0))]
+  if (ids.length === 0) return []
+  const linhas = db.prepare(`
+    SELECT DISTINCT p.id, p.nome, p.variacao, p.ncm, p.cest, p.tipo_posse, p.icms_st, p.deleted_at,
+           a.nome as artesao_nome
+    FROM vendas_itens vi
+    JOIN produtos p ON p.id = vi.produto_id
+    LEFT JOIN artesoes a ON a.id = p.artesao_id
+    WHERE vi.venda_id IN (${ids.map(() => '?').join(',')}) AND vi.deleted_at IS NULL
+    ORDER BY p.nome
+  `).all(...ids)
+  const digitos = (v) => String(v ?? '').replace(/\D/g, '')
+  return linhas
+    .map((p) => ({
+      ...p,
+      precisa_ncm: digitos(p.ncm).length !== 8,
+      precisa_cest: p.tipo_posse === 'proprio' && Boolean(p.icms_st) && digitos(p.cest).length !== 7,
+    }))
+    .filter((p) => p.precisa_ncm || p.precisa_cest)
+}
+
+/** Grava NCM/CEST de um produto, mesmo excluído (para emitir cupom de vendas antigas). */
+function definirFiscalProduto(produtoId, { ncm, cest = null } = {}) {
+  const ncmDigitos = String(ncm ?? '').replace(/\D/g, '')
+  if (ncmDigitos.length !== 8) throw new Error('O NCM precisa ter 8 números.')
+  const cestDigitos = String(cest ?? '').replace(/\D/g, '')
+  if (cestDigitos && cestDigitos.length !== 7) throw new Error('O CEST precisa ter 7 números.')
+  const r = db
+    .prepare(`UPDATE produtos SET ncm = ?, cest = COALESCE(?, cest), sync_status = 'pending' WHERE id = ?`)
+    .run(ncmDigitos, cestDigitos || null, Number(produtoId))
+  if (r.changes === 0) throw new Error('Produto não encontrado.')
+  return { ok: true }
+}
+
+/** Venda com itens (inclusive de produtos excluídos), pagamentos e o último cupom. */
+function detalharVenda(vendaId) {
+  const venda = db.prepare('SELECT * FROM vendas WHERE id = ? AND deleted_at IS NULL').get(vendaId)
+  if (!venda) throw new Error('Venda não encontrada.')
+  const itens = db.prepare(`
+    SELECT vi.produto_id, vi.quantidade, vi.preco_unitario, p.nome, p.variacao, p.codigo_barras, p.ncm,
+           p.deleted_at as produto_excluido_em, a.nome as artesao_nome
+    FROM vendas_itens vi
+    LEFT JOIN produtos p ON p.id = vi.produto_id
+    LEFT JOIN artesoes a ON a.id = p.artesao_id
+    WHERE vi.venda_id = ? AND vi.deleted_at IS NULL
+    ORDER BY vi.id ASC
+  `).all(vendaId)
+  const pagamentos = db.prepare(`
+    SELECT forma_pagamento, valor FROM vendas_pagamentos
+    WHERE venda_id = ? AND deleted_at IS NULL ORDER BY id ASC
+  `).all(vendaId)
+  return { venda, itens, pagamentos, nota: ultimaNotaFiscalDaVenda(vendaId) || null }
+}
+
 /** Impede alterar ou excluir uma venda que já tem cupom fiscal autorizado. */
 function exigirVendaSemNfceAutorizada(vendaId, acao) {
   const nota = ultimaNotaFiscalDaVenda(vendaId)
@@ -3386,6 +3445,9 @@ module.exports = {
   listarNotasFiscais,
   listarVendasComCupom,
   sugerirCest,
+  pendenciasFiscaisDasVendas,
+  definirFiscalProduto,
+  detalharVenda,
   listarBuracosNumeracao,
   registrarInutilizacao,
   listarInutilizacoes,
