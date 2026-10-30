@@ -1,13 +1,13 @@
 import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import pdvIcon from '../assets/icons/pdv.png'
-import estoqueIcon from '../assets/icons/estoque.png'
-import relatoriosIcon from '../assets/icons/relatorios.png'
+import produtosIcon from '../assets/icons/produtos.png'
+import dinheiroIcon from '../assets/icons/dinheiro.svg'
 
 const dashboardQuickActions = [
   { to: '/app/pdv', label: 'Vendas', icon: pdvIcon },
-  { to: '/app/produtos', label: 'Produtos', icon: estoqueIcon },
-  { to: '/app/caixa', label: 'Caixa', icon: relatoriosIcon },
+  { to: '/app/produtos', label: 'Produtos', icon: produtosIcon },
+  { to: '/app/caixa', label: 'Caixa', icon: dinheiroIcon },
 ]
 
 const TZ_BRASILIA = 'America/Sao_Paulo'
