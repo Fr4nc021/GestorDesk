@@ -318,6 +318,7 @@ const ORDEM_SYNC = [
   'vendas',
   'vendas_itens',
   'vendas_pagamentos',
+  'notas_fiscais',
   'movimentacoes_estoque',
   'movimentacoes_caixa',
 ]
@@ -582,6 +583,13 @@ try {
     db.exec(`ALTER TABLE notas_fiscais ADD COLUMN autorizada_em TEXT`)
     db.exec(`UPDATE notas_fiscais SET autorizada_em = updated_at WHERE status IN ('autorizado', 'cancelado')`)
   }
+  // A tabela é criada depois do laço de ORDEM_SYNC: as colunas de sync entram aqui.
+  if (!tabelaTemColuna(db, 'notas_fiscais', 'sync_status')) {
+    db.exec(`ALTER TABLE notas_fiscais ADD COLUMN sync_status TEXT DEFAULT 'pending'`)
+  }
+  if (!tabelaTemColuna(db, 'notas_fiscais', 'deleted_at')) {
+    db.exec(`ALTER TABLE notas_fiscais ADD COLUMN deleted_at TEXT`)
+  }
 } catch (_) {}
 
 // Devolução/troca de cliente: NF-e de entrada da loja referenciando o cupom da venda.
@@ -663,7 +671,9 @@ function getPendingRecordsForSync(tabela) {
   if (!tabelaTemColuna(db, tabela, 'sync_status')) {
     return db.prepare(`SELECT * FROM ${tabela}`).all()
   }
-  return db.prepare(`SELECT * FROM ${tabela} WHERE sync_status = 'pending'`).all()
+  // Notas de homologação são testes do próprio PC: não vão para a nuvem.
+  const filtroExtra = tabela === 'notas_fiscais' ? " AND ambiente = '1'" : ''
+  return db.prepare(`SELECT * FROM ${tabela} WHERE sync_status = 'pending'${filtroExtra}`).all()
 }
 
 function markAsSynced(tabela, ids) {
@@ -2865,7 +2875,7 @@ function atualizarNotaFiscal(id, dados) {
   if (campos.length > 0) {
     const sets = campos.map((c) => `${c} = ?`).join(', ')
     const valores = campos.map((c) => (c === 'resposta' && dados[c] && typeof dados[c] !== 'string' ? JSON.stringify(dados[c]) : dados[c]))
-    db.prepare(`UPDATE notas_fiscais SET ${sets}, updated_at = datetime('now', 'localtime') WHERE id = ?`).run(...valores, id)
+    db.prepare(`UPDATE notas_fiscais SET ${sets}, updated_at = datetime('now', 'localtime'), sync_status = 'pending' WHERE id = ?`).run(...valores, id)
   }
   return obterNotaFiscal(id)
 }

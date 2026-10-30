@@ -441,7 +441,7 @@ export default function Vendas() {
 
           {mensagem.texto && <p className={`config-feedback ${mensagem.tipo}`}>{mensagem.texto}</p>}
 
-          <div className="produtos-table-wrapper">
+          <div className="produtos-table-wrapper vendas-tabela-wrapper">
             <table className="pdv-products-table">
               <thead>
                 <tr>
@@ -510,7 +510,7 @@ export default function Vendas() {
                         <td>
                           <SeloPrazo limite={limite} agora={agora} prazoMin={prazoMin} />
                         </td>
-                        <td>
+                        <td className="vendas-acoes">
                           <div className="caixa-acoes-cell">
                             <BotaoAcao icone="imprimir" onClick={() => abrirDetalhe(v)}>
                               Ver venda
