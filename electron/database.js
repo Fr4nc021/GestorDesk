@@ -2483,7 +2483,7 @@ function registrarDevolucaoArtesao({ nota_entrada_id, itens, observacao = null }
   if (pedidos.length === 0) throw new Error('Informe a quantidade de pelo menos uma peça.')
 
   const getItem = db.prepare(`
-    SELECT i.id, i.produto_id, i.quantidade_estoque, i.valor_unitario, p.nome, p.estoque,
+    SELECT i.id, i.produto_id, i.quantidade_estoque, i.quantidade, i.valor_unitario, p.nome, p.estoque,
            (SELECT COALESCE(SUM(di.quantidade), 0) FROM devolucoes_artesao_itens di
               JOIN devolucoes_artesao d ON d.id = di.devolucao_id AND d.deleted_at IS NULL
               WHERE di.nota_item_id = i.id) as devolvida
@@ -2508,7 +2508,9 @@ function registrarDevolucaoArtesao({ nota_entrada_id, itens, observacao = null }
     const linhas = pedidos.map((pedido) => {
       const item = getItem.get(pedido.nota_item_id, nota.id)
       if (!item) throw new Error('Item da nota não encontrado ou sem produto vinculado.')
-      const restante = item.quantidade_estoque - item.devolvida
+      // Peças vinculadas sem "Somar ao estoque" já estavam no estoque: contam pela quantidade da nota.
+      const recebidas = Math.max(Number(item.quantidade_estoque) || 0, Math.round(Number(item.quantidade) || 0))
+      const restante = recebidas - item.devolvida
       if (pedido.quantidade > restante) {
         throw new Error(`"${item.nome}": só ${restante} peça(s) desta nota ainda podem ser devolvidas.`)
       }

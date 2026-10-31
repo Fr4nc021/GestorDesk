@@ -426,15 +426,21 @@ export default function NotasEntrada() {
     }
   }
 
+  // Peças vinculadas sem "Somar ao estoque" já estavam no estoque: contam pela quantidade da nota.
+  function quantidadeDevolvivel(item) {
+    return Math.max(Number(item.quantidade_estoque) || 0, Math.round(Number(item.quantidade) || 0))
+  }
+
   async function abrirDevolucao(nota) {
     setMensagem({ tipo: '', texto: '' })
     setErroDevolucao('')
     try {
       const itens = await window.electronAPI.listarItensNotaEntrada(nota.id)
       const linhas = (itens || [])
-        .filter((item) => item.produto_id && item.quantidade_estoque > 0)
+        .map((item) => ({ ...item, recebidas: quantidadeDevolvivel(item) }))
+        .filter((item) => item.produto_id && item.recebidas > 0)
         .map((item) => {
-          const restante = item.quantidade_estoque - Number(item.quantidade_devolvida || 0)
+          const restante = item.recebidas - Number(item.quantidade_devolvida || 0)
           return {
             ...item,
             maximo: Math.max(0, Math.min(restante, Number(item.produto_estoque) || 0)),
@@ -1140,7 +1146,7 @@ export default function NotasEntrada() {
                         {linha.produto_nome}
                         {linha.produto_variacao ? ` (${linha.produto_variacao})` : ''}
                       </td>
-                      <td>{linha.quantidade_estoque}</td>
+                      <td>{linha.recebidas}</td>
                       <td>{linha.quantidade_devolvida || 0}</td>
                       <td>{linha.produto_estoque}</td>
                       <td>{formatarMoeda(linha.valor_unitario)}</td>
