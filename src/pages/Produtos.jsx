@@ -32,6 +32,7 @@ export default function Produtos() {
   const [valoresVariacao, setValoresVariacao] = useState(['P', 'M', 'G', 'GG'])
   const [loading, setLoading] = useState(true)
   const [busca, setBusca] = useState('')
+  const [filtroStatus, setFiltroStatus] = useState('ativos')
 
   const [modalAberto, setModalAberto] = useState(false)
   const [modalVariacoesAberto, setModalVariacoesAberto] = useState(false)
@@ -946,6 +947,19 @@ export default function Produtos() {
     }
   }
 
+  async function alternarAtivoProduto(produto) {
+    if (!window.electronAPI?.definirProdutoAtivo) return
+    const ativar = produto.ativo === 0
+    try {
+      await window.electronAPI.definirProdutoAtivo(produto.id, ativar)
+      carregarProdutos()
+      mostrarToast(ativar ? 'Produto ativado.' : 'Produto inativado. Ele não aparece mais no PDV.', 'success')
+    } catch (err) {
+      console.error(err)
+      mostrarToast(`Erro ao alterar status do produto: ${err?.message || err}`, 'error')
+    }
+  }
+
   async function handleExcluirProduto() {
     if (!produtoParaExcluir) return
     if (!window.electronAPI) return
@@ -1551,12 +1565,15 @@ ${chunk.join('\n')}
 
   const produtosFiltrados = useMemo(() => {
     const termo = busca.toLowerCase().trim()
-    if (!termo) return produtos
-    return produtos.filter((produto) => {
+    const porStatus = produtos.filter((p) =>
+      filtroStatus === 'todos' ? true : filtroStatus === 'inativos' ? p.ativo === 0 : p.ativo !== 0
+    )
+    if (!termo) return porStatus
+    return porStatus.filter((produto) => {
       const codigoOk = produto.codigo_barras && String(produto.codigo_barras).includes(termo)
       return textoInclui(termo, produto.nome, produto.artesao_nome, produto.artesao_razao_social, produto.artesao_nome_fantasia) || codigoOk
     })
-  }, [produtos, busca])
+  }, [produtos, busca, filtroStatus])
 
   const resumoCatalogo = useMemo(() => {
     const cadastrados = produtos.length
@@ -1745,6 +1762,16 @@ ${chunk.join('\n')}
                 onChange={(e) => setBusca(e.target.value)}
               />
             </div>
+            <select
+              className="filtro-status-select"
+              value={filtroStatus}
+              onChange={(e) => setFiltroStatus(e.target.value)}
+              aria-label="Filtrar por status"
+            >
+              <option value="ativos">Ativos</option>
+              <option value="inativos">Inativos</option>
+              <option value="todos">Todos</option>
+            </select>
             <button type="button" className="produtos-filter-btn">
               <img src={filterIcon} alt="" className="produtos-filter-icon" />
             </button>
@@ -1793,23 +1820,24 @@ ${chunk.join('\n')}
               <th>Fornecedor</th>
               <th>Estoque</th>
               <th>Preço</th>
+              <th>Status</th>
               <th>Ações</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={6}>Carregando...</td>
+                <td colSpan={7}>Carregando...</td>
               </tr>
             ) : produtosFiltrados.length === 0 ? (
               <tr>
-                <td colSpan={6}>
+                <td colSpan={7}>
                   {busca ? 'Nenhum produto encontrado.' : 'Nenhum produto cadastrado.'}
                 </td>
               </tr>
             ) : (
               produtosFiltrados.map((p) => (
-                <tr key={p.id}>
+                <tr key={p.id} className={p.ativo === 0 ? 'linha-inativa' : undefined}>
                   <td>{p.codigo_barras}</td>
                   <td>
                     {p.nome}{p.variacao ? ` (${p.variacao})` : ''}
@@ -1818,6 +1846,17 @@ ${chunk.join('\n')}
                   <td>{rotuloNomeFantasia(p.artesao_nome_fantasia, p.artesao_razao_social, p.artesao_nome, '-')}</td>
                   <td>{p.estoque}</td>
                   <td>R$ {p.preco_venda?.toFixed(2).replace('.', ',')}</td>
+                  <td>
+                    <button
+                      type="button"
+                      className={`artesaos-status-badge ${p.ativo === 0 ? 'inativo' : 'ativo'}`}
+                      title={p.ativo === 0 ? 'Clique para ativar' : 'Clique para inativar'}
+                      onClick={() => alternarAtivoProduto(p)}
+                    >
+                      {p.ativo === 0 ? 'Inativo' : 'Ativo'}
+                    </button>
+                    {p.artesao_ativo === 0 && <span className="produto-tag-proprio">Fornecedor inativo</span>}
+                  </td>
                   <td>
                     <div className="artesaos-acoes">
                       <button
@@ -2123,7 +2162,7 @@ ${chunk.join('\n')}
                     required
                   >
                     <option value="">Selecione um fornecedor...</option>
-                    {artesoes.map((a) => (
+                    {artesoes.filter((a) => a.ativo !== 0 || String(a.id) === artesaoId).map((a) => (
                       <option key={a.id} value={a.id}>
                         {rotuloNomeFantasia(a.nome_fantasia, a.razao_social, a.nome)}
                       </option>

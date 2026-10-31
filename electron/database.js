@@ -432,6 +432,15 @@ try {
   }
 } catch (_) {}
 
+// Fornecedor e produto podem ser inativados sem excluir: somem do PDV e dos cadastros novos (idempotente).
+try {
+  for (const tabela of ['artesoes', 'produtos']) {
+    if (!tabelaTemColuna(db, tabela, 'ativo')) {
+      db.exec(`ALTER TABLE ${tabela} ADD COLUMN ativo INTEGER DEFAULT 1`)
+    }
+  }
+} catch (_) {}
+
 // Código IBGE do município do fornecedor, exigido nas notas de devolução (idempotente).
 try {
   if (!tabelaTemColuna(db, 'artesoes', 'codigo_municipio')) {
@@ -829,6 +838,11 @@ function atualizarArtesao(
   return { id }
 }
 
+function definirArtesaoAtivo(id, ativo) {
+  db.prepare("UPDATE artesoes SET ativo = ?, sync_status = 'pending' WHERE id = ?").run(ativo ? 1 : 0, id)
+  return { id, ativo: ativo ? 1 : 0 }
+}
+
 function excluirArtesao(id) {
   const stmt = db.prepare(
     "UPDATE artesoes SET deleted_at = datetime('now', 'localtime'), sync_status = 'pending' WHERE id = ?",
@@ -953,7 +967,7 @@ function criarProduto({ nome, variacao = null, preco_custo = 0, preco_venda = 0,
 
 function listarProdutos() {
   const stmt = db.prepare(`
-    SELECT p.*, a.nome as artesao_nome, a.razao_social as artesao_razao_social, a.nome_fantasia as artesao_nome_fantasia
+    SELECT p.*, a.nome as artesao_nome, a.razao_social as artesao_razao_social, a.nome_fantasia as artesao_nome_fantasia, a.ativo as artesao_ativo
     FROM produtos p
     LEFT JOIN artesoes a ON a.id = p.artesao_id
     WHERE p.deleted_at IS NULL
@@ -994,6 +1008,11 @@ function atualizarProduto(id, { nome, variacao = null, preco_custo = 0, preco_ve
   return { id }
 }
 
+function definirProdutoAtivo(id, ativo) {
+  db.prepare("UPDATE produtos SET ativo = ?, sync_status = 'pending' WHERE id = ?").run(ativo ? 1 : 0, id)
+  return { id, ativo: ativo ? 1 : 0 }
+}
+
 function excluirProduto(id) {
   const stmt = db.prepare(
     "UPDATE produtos SET deleted_at = datetime('now', 'localtime'), sync_status = 'pending' WHERE id = ?",
@@ -1004,7 +1023,7 @@ function excluirProduto(id) {
 
 function buscarProdutoPorCodigo(codigo_barras) {
   const stmt = db.prepare(`
-    SELECT p.*, a.nome as artesao_nome, a.razao_social as artesao_razao_social, a.nome_fantasia as artesao_nome_fantasia
+    SELECT p.*, a.nome as artesao_nome, a.razao_social as artesao_razao_social, a.nome_fantasia as artesao_nome_fantasia, a.ativo as artesao_ativo
     FROM produtos p
     LEFT JOIN artesoes a ON a.id = p.artesao_id
     WHERE p.codigo_barras = ? AND p.deleted_at IS NULL
@@ -3390,11 +3409,13 @@ module.exports = {
   listarArtesoes,
   atualizarArtesao,
   excluirArtesao,
+  definirArtesaoAtivo,
   criarProduto,
   listarProdutos,
   atualizarProduto,
   atualizarFiscalEmLote,
   excluirProduto,
+  definirProdutoAtivo,
   buscarProdutoPorCodigo,
   refazerCodigoBarras,
   criarVenda,

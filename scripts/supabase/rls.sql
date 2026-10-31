@@ -40,6 +40,10 @@ ALTER TABLE public.produtos
   ADD COLUMN IF NOT EXISTS origem TEXT DEFAULT '0',
   ADD COLUMN IF NOT EXISTS icms_st INTEGER DEFAULT 0;
 
+-- Fornecedor e produto inativos (somem do PDV sem serem excluídos).
+ALTER TABLE public.artesoes ADD COLUMN IF NOT EXISTS ativo INTEGER DEFAULT 1;
+ALTER TABLE public.produtos ADD COLUMN IF NOT EXISTS ativo INTEGER DEFAULT 1;
+
 -- Desconto e troco gravados na venda.
 ALTER TABLE public.vendas
   ADD COLUMN IF NOT EXISTS desconto NUMERIC DEFAULT 0,

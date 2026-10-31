@@ -4,6 +4,7 @@ import codeIcon from '../assets/complements/code.png'
 import ProdutoSearchModal from '../components/ProdutoSearchModal'
 import { recoverInputFocus } from '../utils/focusRecovery'
 import { mensagemErro } from '../utils/erros'
+import { produtoVendavel } from '../utils/artesao'
 
 const FORMAS_PAGAMENTO = [
   { id: 'credito', label: 'Cartão de Crédito', icon: 'credit' },
@@ -194,6 +195,10 @@ export default function PDV() {
 
   function adicionarItemNaVenda(produto) {
     if (!produto) return
+    if (!produtoVendavel(produto)) {
+      setToast({ tipo: 'erro', mensagem: produto.ativo === 0 ? 'Produto inativo.' : 'Fornecedor deste produto está inativo.' })
+      return
+    }
 
     let toastParaExibir = null
 

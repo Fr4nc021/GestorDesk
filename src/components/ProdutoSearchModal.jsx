@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { textoInclui } from '../utils/artesao'
+import { produtoVendavel, textoInclui } from '../utils/artesao'
 
 function formatarPrecoVenda(valor) {
   if (valor == null) return '-'
@@ -32,9 +32,10 @@ export default function ProdutoSearchModal({
       try {
         if (!window.electronAPI?.listarProdutos) return
         const lista = await window.electronAPI.listarProdutos()
+        const vendaveis = (lista || []).filter(produtoVendavel)
         const filtrados = apenasComEstoque
-          ? (lista || []).filter((produto) => (produto.estoque ?? 0) > 0)
-          : lista || []
+          ? vendaveis.filter((produto) => (produto.estoque ?? 0) > 0)
+          : vendaveis
         setProdutos(filtrados)
       } catch (err) {
         console.error('[ProdutoSearchModal] Erro ao carregar produtos:', err)

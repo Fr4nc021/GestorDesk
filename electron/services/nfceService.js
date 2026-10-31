@@ -384,8 +384,17 @@ function buracosNumeracao() {
 }
 
 /** Endereço do DANFE/DANFCe de uma nota autorizada. */
-function urlDanfe(notaId) {
-  const nota = obterNotaFiscal(notaId)
+async function urlDanfe(notaId) {
+  let nota = obterNotaFiscal(notaId)
+  if (!nota) throw new Error('Nota não encontrada.')
+  // Notas vindas de outro PC podem chegar sem o caminho: busca na Focus e guarda.
+  if (!nota.caminho_danfe && ['autorizado', 'cancelado'].includes(nota.status)) {
+    const config = { ...obterConfigFiscal(), ambiente: nota.ambiente }
+    const { http, dados } = await API[nota.modelo].consultar(config, nota.ref)
+    if (http >= 200 && http < 300 && dados?.caminho_danfe) {
+      nota = atualizarNotaFiscal(nota.id, { caminho_danfe: dados.caminho_danfe })
+    }
+  }
   if (!nota?.caminho_danfe) throw new Error('Esta nota não tem documento para imprimir.')
   return { url: focus.urlCompleta({ ambiente: nota.ambiente }, nota.caminho_danfe), modelo: nota.modelo }
 }
