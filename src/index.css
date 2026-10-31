@@ -2649,6 +2649,21 @@ button.caixa-btn-filtro-periodo {
   gap: 8px;
 }
 
+/* Ações da tabela de Vendas: mesmo visual preto da barra de cupom. */
+.vendas-acoes .caixa-btn-editar,
+.vendas-acoes .caixa-btn-excluir {
+  background: #111;
+  color: #fff;
+  border-color: #111;
+}
+
+.vendas-acoes .caixa-btn-editar:hover:not(:disabled),
+.vendas-acoes .caixa-btn-excluir:hover:not(:disabled) {
+  background: #333;
+  color: #fff;
+  border-color: #333;
+}
+
 .vendas-barra-acoes button {
   background: #111;
   color: #fff;

@@ -3240,7 +3240,10 @@ function listarVendasComCupom({ dataInicio, dataFim } = {}) {
               FROM vendas_pagamentos vp WHERE vp.venda_id = v.id AND vp.deleted_at IS NULL) as formas_pagamento,
            n.id as nota_id, n.status as nota_status, n.numero as nota_numero, n.serie as nota_serie,
            n.mensagem as nota_mensagem, n.ambiente as nota_ambiente, n.caminho_danfe as nota_caminho_danfe,
-           n.autorizada_em as nota_autorizada_em, n.cancelada_em as nota_cancelada_em
+           n.autorizada_em as nota_autorizada_em, n.cancelada_em as nota_cancelada_em,
+           (SELECT MAX(nd.id) FROM notas_fiscais nd
+              JOIN devolucoes_cliente d ON d.id = nd.devolucao_cliente_id AND d.deleted_at IS NULL
+              WHERE d.venda_id = v.id AND nd.status = 'autorizado') as nota_devolucao_id
     FROM vendas v
     LEFT JOIN notas_fiscais n ON n.id = (SELECT MAX(t.id) FROM notas_fiscais t WHERE t.venda_id = v.id)
     WHERE v.deleted_at IS NULL
