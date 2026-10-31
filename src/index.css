@@ -1364,9 +1364,23 @@ button.artesaos-status-badge {
   font-family: inherit;
 }
 
+button.artesaos-status-badge.ativo {
+  background: #dcfce7;
+  color: #15803d;
+}
+
 .artesaos-status-badge.inativo {
-  background: #e0e0e0;
-  color: #616161;
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.filtro-status-select {
+  padding: 9px 12px;
+  border: 1px solid #e0e0e0;
+  border-radius: 10px;
+  background: #fff;
+  font-size: 14px;
+  cursor: pointer;
 }
 
 tr.linha-inativa td {
