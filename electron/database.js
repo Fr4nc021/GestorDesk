@@ -319,6 +319,8 @@ const ORDEM_SYNC = [
   'vendas_itens',
   'vendas_pagamentos',
   'notas_fiscais',
+  'notas_entrada',
+  'notas_entrada_itens',
   'movimentacoes_estoque',
   'movimentacoes_caixa',
 ]
@@ -432,6 +434,15 @@ try {
   }
 } catch (_) {}
 
+// Fornecedor e produto podem ser inativados sem excluir: somem do PDV e dos cadastros novos (idempotente).
+try {
+  for (const tabela of ['artesoes', 'produtos']) {
+    if (!tabelaTemColuna(db, tabela, 'ativo')) {
+      db.exec(`ALTER TABLE ${tabela} ADD COLUMN ativo INTEGER DEFAULT 1`)
+    }
+  }
+} catch (_) {}
+
 // Código IBGE do município do fornecedor, exigido nas notas de devolução (idempotente).
 try {
   if (!tabelaTemColuna(db, 'artesoes', 'codigo_municipio')) {
@@ -463,7 +474,7 @@ try {
   }
 } catch (_) {}
 
-// Notas de entrada (XML de NF-e do fornecedor). Ficam só neste computador por enquanto.
+// Notas de entrada (XML de NF-e do fornecedor). Sincronizadas entre os PCs (ver migração abaixo).
 db.exec(`
   CREATE TABLE IF NOT EXISTS notas_entrada (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -672,6 +683,58 @@ try {
   }
 } catch (_) {}
 
+// Ids de notas de entrada gerados por PC (timestamp + aleatório): dois PCs importando
+// notas diferentes não disputam o mesmo id no Supabase.
+const ID_SYNC_MINIMO = 1e12
+let ultimoIdSync = 0
+function novoIdSync() {
+  // Vários itens no mesmo milissegundo: segue em sequência a partir do último.
+  ultimoIdSync = Math.max(ultimoIdSync + 1, Date.now() * 1000 + Math.floor(Math.random() * 1000))
+  return ultimoIdSync
+}
+
+try {
+  // As tabelas são criadas depois do laço de ORDEM_SYNC: as colunas de sync entram aqui.
+  for (const tabela of ['notas_entrada', 'notas_entrada_itens']) {
+    if (!tabelaTemColuna(db, tabela, 'sync_status')) {
+      db.exec(`ALTER TABLE ${tabela} ADD COLUMN sync_status TEXT DEFAULT 'pending'`)
+    }
+    if (!tabelaTemColuna(db, tabela, 'deleted_at')) {
+      db.exec(`ALTER TABLE ${tabela} ADD COLUMN deleted_at TEXT`)
+    }
+  }
+  renumerarNotasEntradaParaSync()
+} catch (err) {
+  console.error('[DB] Erro ao preparar notas de entrada para sincronização:', err?.message || err)
+}
+
+/** Troca os ids sequenciais antigos (1, 2, 3…) por ids únicos, levando junto as referências. */
+function renumerarNotasEntradaParaSync() {
+  const notas = db.prepare('SELECT id FROM notas_entrada WHERE id < ?').all(ID_SYNC_MINIMO)
+  const itens = db.prepare('SELECT id FROM notas_entrada_itens WHERE id < ?').all(ID_SYNC_MINIMO)
+  if (notas.length === 0 && itens.length === 0) return
+
+  db.pragma('foreign_keys = OFF')
+  try {
+    db.transaction(() => {
+      let proximo = novoIdSync()
+      for (const { id } of notas) {
+        const novo = proximo++
+        db.prepare("UPDATE notas_entrada SET id = ?, sync_status = 'pending' WHERE id = ?").run(novo, id)
+        db.prepare('UPDATE notas_entrada_itens SET nota_id = ? WHERE nota_id = ?').run(novo, id)
+        db.prepare('UPDATE devolucoes_artesao SET nota_entrada_id = ? WHERE nota_entrada_id = ?').run(novo, id)
+      }
+      for (const { id } of itens) {
+        const novo = proximo++
+        db.prepare("UPDATE notas_entrada_itens SET id = ?, sync_status = 'pending' WHERE id = ?").run(novo, id)
+        db.prepare('UPDATE devolucoes_artesao_itens SET nota_item_id = ? WHERE nota_item_id = ?').run(novo, id)
+      }
+    })()
+  } finally {
+    db.pragma('foreign_keys = ON')
+  }
+}
+
 function getPendingRecordsForSync(tabela) {
   if (!tabelaTemColuna(db, tabela, 'sync_status')) {
     return db.prepare(`SELECT * FROM ${tabela}`).all()
@@ -829,6 +892,11 @@ function atualizarArtesao(
   return { id }
 }
 
+function definirArtesaoAtivo(id, ativo) {
+  db.prepare("UPDATE artesoes SET ativo = ?, sync_status = 'pending' WHERE id = ?").run(ativo ? 1 : 0, id)
+  return { id, ativo: ativo ? 1 : 0 }
+}
+
 function excluirArtesao(id) {
   const stmt = db.prepare(
     "UPDATE artesoes SET deleted_at = datetime('now', 'localtime'), sync_status = 'pending' WHERE id = ?",
@@ -953,7 +1021,7 @@ function criarProduto({ nome, variacao = null, preco_custo = 0, preco_venda = 0,
 
 function listarProdutos() {
   const stmt = db.prepare(`
-    SELECT p.*, a.nome as artesao_nome, a.razao_social as artesao_razao_social, a.nome_fantasia as artesao_nome_fantasia
+    SELECT p.*, a.nome as artesao_nome, a.razao_social as artesao_razao_social, a.nome_fantasia as artesao_nome_fantasia, a.ativo as artesao_ativo
     FROM produtos p
     LEFT JOIN artesoes a ON a.id = p.artesao_id
     WHERE p.deleted_at IS NULL
@@ -994,6 +1062,11 @@ function atualizarProduto(id, { nome, variacao = null, preco_custo = 0, preco_ve
   return { id }
 }
 
+function definirProdutoAtivo(id, ativo) {
+  db.prepare("UPDATE produtos SET ativo = ?, sync_status = 'pending' WHERE id = ?").run(ativo ? 1 : 0, id)
+  return { id, ativo: ativo ? 1 : 0 }
+}
+
 function excluirProduto(id) {
   const stmt = db.prepare(
     "UPDATE produtos SET deleted_at = datetime('now', 'localtime'), sync_status = 'pending' WHERE id = ?",
@@ -1004,7 +1077,7 @@ function excluirProduto(id) {
 
 function buscarProdutoPorCodigo(codigo_barras) {
   const stmt = db.prepare(`
-    SELECT p.*, a.nome as artesao_nome, a.razao_social as artesao_razao_social, a.nome_fantasia as artesao_nome_fantasia
+    SELECT p.*, a.nome as artesao_nome, a.razao_social as artesao_razao_social, a.nome_fantasia as artesao_nome_fantasia, a.ativo as artesao_ativo
     FROM produtos p
     LEFT JOIN artesoes a ON a.id = p.artesao_id
     WHERE p.codigo_barras = ? AND p.deleted_at IS NULL
@@ -2181,16 +2254,16 @@ function importarNotaEntrada({ nota, itens, artesao_id = null, novo_artesao = nu
 
   const insertNota = db.prepare(`
     INSERT INTO notas_entrada (
-      chave, modelo, serie, numero, data_emissao, natureza_operacao, cfop, tipo,
+      id, chave, modelo, serie, numero, data_emissao, natureza_operacao, cfop, tipo,
       emitente_cpf_cnpj, emitente_nome, artesao_id, valor_total, movimentou_estoque, xml,
       acerto_inicio, acerto_fim
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `)
   const insertItem = db.prepare(`
     INSERT INTO notas_entrada_itens (
-      nota_id, numero_item, codigo, descricao, ncm, cest, cfop, unidade,
+      id, nota_id, numero_item, codigo, descricao, ncm, cest, cfop, unidade,
       quantidade, valor_unitario, valor_total, produto_id, quantidade_estoque
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `)
   const getProduto = db.prepare('SELECT * FROM produtos WHERE id = ? AND deleted_at IS NULL')
   const updateFiscalProduto = db.prepare(`
@@ -2219,7 +2292,9 @@ function importarNotaEntrada({ nota, itens, artesao_id = null, novo_artesao = nu
       throw new Error('Selecione o fornecedor para cadastrar as peças.')
     }
 
-    const notaId = insertNota.run(
+    const notaId = novoIdSync()
+    insertNota.run(
+      notaId,
       chave,
       nota.modelo || '55',
       nota.serie || null,
@@ -2236,7 +2311,7 @@ function importarNotaEntrada({ nota, itens, artesao_id = null, novo_artesao = nu
       xml,
       nota.tipo === 'faturamento_consignacao' ? nota.acerto_inicio || null : null,
       nota.tipo === 'faturamento_consignacao' ? nota.acerto_fim || null : null,
-    ).lastInsertRowid
+    )
 
     let produtosCriados = 0
     let unidadesEntrada = 0
@@ -2287,6 +2362,7 @@ function importarNotaEntrada({ nota, itens, artesao_id = null, novo_artesao = nu
       }
 
       insertItem.run(
+        novoIdSync(),
         notaId,
         item.numero_item || null,
         item.codigo || null,
@@ -2384,7 +2460,7 @@ function excluirNotaEntrada(id) {
       )
       insertMov.run(item.produto_id, item.quantidade_estoque)
     }
-    db.prepare("UPDATE notas_entrada SET deleted_at = datetime('now', 'localtime') WHERE id = ?").run(id)
+    db.prepare("UPDATE notas_entrada SET deleted_at = datetime('now', 'localtime'), sync_status = 'pending' WHERE id = ?").run(id)
   })()
   return { id }
 }
@@ -3390,11 +3466,13 @@ module.exports = {
   listarArtesoes,
   atualizarArtesao,
   excluirArtesao,
+  definirArtesaoAtivo,
   criarProduto,
   listarProdutos,
   atualizarProduto,
   atualizarFiscalEmLote,
   excluirProduto,
+  definirProdutoAtivo,
   buscarProdutoPorCodigo,
   refazerCodigoBarras,
   criarVenda,

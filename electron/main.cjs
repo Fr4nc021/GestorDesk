@@ -91,11 +91,13 @@ const {
   listarArtesoes,
   atualizarArtesao,
   excluirArtesao,
+  definirArtesaoAtivo,
   criarProduto,
   listarProdutos,
   atualizarProduto,
   atualizarFiscalEmLote,
   excluirProduto,
+  definirProdutoAtivo,
   buscarProdutoPorCodigo,
   refazerCodigoBarras,
   criarVenda,
@@ -267,12 +269,14 @@ ipcMain.handle('criar-artesao', (_, data) => criarArtesao(data))
 ipcMain.handle('listar-artesoes', () => listarArtesoes())
 ipcMain.handle('atualizar-artesao', (_, id, data) => atualizarArtesao(id, data))
 ipcMain.handle('excluir-artesao', (_, id) => excluirArtesao(id))
+ipcMain.handle('definir-artesao-ativo', (_, id, ativo) => definirArtesaoAtivo(id, ativo))
 
 ipcMain.handle('criar-produto', (_, data) => criarProduto(data))
 ipcMain.handle('listar-produtos', () => listarProdutos())
 ipcMain.handle('atualizar-produto', (_, id, data) => atualizarProduto(id, data))
 ipcMain.handle('atualizar-fiscal-em-lote', (_, ids, data) => atualizarFiscalEmLote(ids, data))
 ipcMain.handle('excluir-produto', (_, id) => excluirProduto(id))
+ipcMain.handle('definir-produto-ativo', (_, id, ativo) => definirProdutoAtivo(id, ativo))
 ipcMain.handle('buscar-produto-por-codigo', (_, codigo) => buscarProdutoPorCodigo(codigo))
 ipcMain.handle('refazer-codigo-barras', (_, id) => refazerCodigoBarras(id))
 
@@ -384,7 +388,7 @@ ipcMain.handle('importar-tabela-ibpt', async (event) => {
 })
 /** Abre o DANFCe/DANFE só para ver, sem imprimir. */
 ipcMain.handle('visualizar-nota', async (event, notaId) => {
-  const { url, modelo } = urlDanfe(notaId)
+  const { url, modelo } = await urlDanfe(notaId)
   if (modelo === '55') {
     await shell.openExternal(url)
     return { ok: true }
@@ -403,7 +407,7 @@ ipcMain.handle('visualizar-nota', async (event, notaId) => {
 ipcMain.handle('buscar-notas-recebidas', () => buscarNotasRecebidas())
 ipcMain.handle('baixar-xml-nota-recebida', (_, chave) => baixarXmlNotaRecebida(chave))
 ipcMain.handle('imprimir-nfce', async (event, notaId) => {
-  const { url, modelo } = urlDanfe(notaId)
+  const { url, modelo } = await urlDanfe(notaId)
   // DANFE da NF-e é PDF: abre no visualizador do computador.
   if (modelo === '55') {
     await shell.openExternal(url)

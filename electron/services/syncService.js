@@ -142,7 +142,7 @@ const COLUNAS_SO_LOCAIS = {
 }
 
 // Tabela ainda não criada no Supabase não pode travar a sincronização das demais.
-const TABELAS_OPCIONAIS = ['notas_fiscais']
+const TABELAS_OPCIONAIS = ['notas_fiscais', 'notas_entrada', 'notas_entrada_itens']
 
 async function enviarUpsert(supabase, tabela, registros) {
   if (registros.length === 0) return { count: 0 }
@@ -183,6 +183,26 @@ function createUpsertFromRemoteStmt(tabela) {
   return { stmt: db.prepare(sql), colunas }
 }
 
+/**
+ * Linhas remotas que não podem entrar no SQLite local:
+ * - nota de entrada com a mesma chave já importada aqui com outro id (os dois PCs importaram a mesma nota);
+ * - item cuja nota não existe aqui (nota ignorada acima).
+ */
+function criarFiltroPull(tabela) {
+  if (tabela === 'notas_entrada') {
+    const porChave = db.prepare('SELECT id FROM notas_entrada WHERE chave = ?')
+    return (row) => {
+      const local = porChave.get(row.chave)
+      return Boolean(local && local.id !== row.id)
+    }
+  }
+  if (tabela === 'notas_entrada_itens') {
+    const nota = db.prepare('SELECT 1 FROM notas_entrada WHERE id = ?')
+    return (row) => !nota.get(row.nota_id)
+  }
+  return () => false
+}
+
 async function pullTabelaDoSupabase(supabase, tabela) {
   const batch = 1000
   let from = 0
@@ -198,6 +218,7 @@ async function pullTabelaDoSupabase(supabase, tabela) {
   // Coluna que ainda não existe no Supabase (SQL de schema não rodado) mantém o valor local
   // em vez de ser apagada pelo pull.
   const getLocalRow = db.prepare(`SELECT * FROM ${tabela} WHERE id = ?`)
+  const deveIgnorar = criarFiltroPull(tabela)
 
   while (true) {
     const { data, error } = await supabase
@@ -211,6 +232,7 @@ async function pullTabelaDoSupabase(supabase, tabela) {
 
     db.transaction(() => {
       for (const row of data) {
+        if (deveIgnorar(row)) continue
         const values = []
         for (const c of colunas) {
           const colunaNoRemoto = Object.prototype.hasOwnProperty.call(row, c)

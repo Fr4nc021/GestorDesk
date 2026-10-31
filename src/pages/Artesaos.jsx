@@ -149,6 +149,7 @@ export default function Artesaos() {
   const [loading, setLoading] = useState(true)
 
   const [termoBusca, setTermoBusca] = useState('')
+  const [filtroStatus, setFiltroStatus] = useState('ativos')
 
 
 
@@ -618,9 +619,12 @@ export default function Artesaos() {
 
   const buscaNome = termoBusca.trim().toLowerCase()
 
+  const artesoesPorStatus = artesoes.filter((a) =>
+    filtroStatus === 'todos' ? true : filtroStatus === 'inativos' ? a.ativo === 0 : a.ativo !== 0
+  )
   const artesoesFiltrados = buscaNome
 
-    ? artesoes.filter((artesao) =>
+    ? artesoesPorStatus.filter((artesao) =>
 
         [
 
@@ -646,7 +650,22 @@ export default function Artesaos() {
 
       )
 
-    : artesoes
+    : artesoesPorStatus
+
+
+
+  async function alternarAtivoArtesao(artesao) {
+    if (!window.electronAPI?.definirArtesaoAtivo) return
+    const ativar = artesao.ativo === 0
+    if (!ativar && !confirm('Inativar este fornecedor? Os produtos dele não poderão ser vendidos até reativá-lo.')) return
+    try {
+      await window.electronAPI.definirArtesaoAtivo(artesao.id, ativar)
+      carregarArtesoes()
+    } catch (err) {
+      console.error('[Fornecedores] Erro ao alterar status:', err)
+      alert(`Erro ao alterar status do fornecedor: ${err?.message || err}`)
+    }
+  }
 
 
 
@@ -723,6 +742,16 @@ export default function Artesaos() {
               />
 
             </div>
+            <select
+              className="filtro-status-select"
+              value={filtroStatus}
+              onChange={(e) => setFiltroStatus(e.target.value)}
+              aria-label="Filtrar por status"
+            >
+              <option value="ativos">Ativos</option>
+              <option value="inativos">Inativos</option>
+              <option value="todos">Todos</option>
+            </select>
 
           </div>
 
@@ -782,9 +811,9 @@ export default function Artesaos() {
 
                 <td colSpan={6}>
 
-                  {buscaNome
+                  {buscaNome || filtroStatus !== 'todos'
 
-                    ? 'Nenhum fornecedor encontrado com esse nome.'
+                    ? 'Nenhum fornecedor encontrado.'
 
                     : 'Nenhum fornecedor cadastrado.'}
 
@@ -796,7 +825,7 @@ export default function Artesaos() {
 
               artesoesFiltrados.map((artesao) => (
 
-                <tr key={artesao.id}>
+                <tr key={artesao.id} className={artesao.ativo === 0 ? 'linha-inativa' : undefined}>
 
                   <td>{(artesao.razao_social || '').trim() || artesao.nome || '—'}</td>
 
@@ -850,7 +879,14 @@ export default function Artesaos() {
 
                   <td>
 
-                    <span className="artesaos-status-badge">Ativo</span>
+                    <button
+                      type="button"
+                      className={`artesaos-status-badge ${artesao.ativo === 0 ? 'inativo' : 'ativo'}`}
+                      title={artesao.ativo === 0 ? 'Clique para ativar' : 'Clique para inativar'}
+                      onClick={() => alternarAtivoArtesao(artesao)}
+                    >
+                      {artesao.ativo === 0 ? 'Inativo' : 'Ativo'}
+                    </button>
 
                   </td>
 

@@ -18,3 +18,8 @@ export function textoInclui(termoLower, ...partes) {
   if (!termoLower) return true
   return partes.some((parte) => String(parte || '').toLowerCase().includes(termoLower))
 }
+
+/** Produto inativo, ou de fornecedor inativo, não pode ser vendido. */
+export function produtoVendavel(produto) {
+  return produto?.ativo !== 0 && produto?.artesao_ativo !== 0
+}
