@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   listarArtesoes: () => invoke('listar-artesoes'),
   atualizarArtesao: (id, data) => invoke('atualizar-artesao', id, data),
   excluirArtesao: (id) => invoke('excluir-artesao', id),
+  definirArtesaoAtivo: (id, ativo) => invoke('definir-artesao-ativo', id, ativo),
 
   // Produtos
   criarProduto: (data) => invoke('criar-produto', data),
@@ -22,6 +23,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   atualizarProduto: (id, data) => invoke('atualizar-produto', id, data),
   atualizarFiscalEmLote: (ids, data) => invoke('atualizar-fiscal-em-lote', ids, data),
   excluirProduto: (id) => invoke('excluir-produto', id),
+  definirProdutoAtivo: (id, ativo) => invoke('definir-produto-ativo', id, ativo),
   buscarProdutoPorCodigo: (codigo) => invoke('buscar-produto-por-codigo', codigo),
   refazerCodigoBarras: (id) => invoke('refazer-codigo-barras', id),
 

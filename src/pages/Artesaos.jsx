@@ -650,6 +650,21 @@ export default function Artesaos() {
 
 
 
+  async function alternarAtivoArtesao(artesao) {
+    if (!window.electronAPI?.definirArtesaoAtivo) return
+    const ativar = artesao.ativo === 0
+    if (!ativar && !confirm('Inativar este fornecedor? Os produtos dele não poderão ser vendidos até reativá-lo.')) return
+    try {
+      await window.electronAPI.definirArtesaoAtivo(artesao.id, ativar)
+      carregarArtesoes()
+    } catch (err) {
+      console.error('[Fornecedores] Erro ao alterar status:', err)
+      alert(`Erro ao alterar status do fornecedor: ${err?.message || err}`)
+    }
+  }
+
+
+
   async function handleExcluirArtesao() {
 
     if (!artesaoParaExcluir) return
@@ -796,7 +811,7 @@ export default function Artesaos() {
 
               artesoesFiltrados.map((artesao) => (
 
-                <tr key={artesao.id}>
+                <tr key={artesao.id} className={artesao.ativo === 0 ? 'linha-inativa' : undefined}>
 
                   <td>{(artesao.razao_social || '').trim() || artesao.nome || '—'}</td>
 
@@ -850,7 +865,14 @@ export default function Artesaos() {
 
                   <td>
 
-                    <span className="artesaos-status-badge">Ativo</span>
+                    <button
+                      type="button"
+                      className={`artesaos-status-badge${artesao.ativo === 0 ? ' inativo' : ''}`}
+                      title={artesao.ativo === 0 ? 'Clique para ativar' : 'Clique para inativar'}
+                      onClick={() => alternarAtivoArtesao(artesao)}
+                    >
+                      {artesao.ativo === 0 ? 'Inativo' : 'Ativo'}
+                    </button>
 
                   </td>
 
