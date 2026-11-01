@@ -1085,22 +1085,26 @@ export default function Relatorios() {
       y += 14
       doc.setFont('helvetica', 'bold')
       doc.setFontSize(10)
-      doc.text('Nota fiscal de acerto (a emitir pelo fornecedor)', margin, y)
+      doc.text('Nota fiscal de acerto', margin, y)
       y += 6
       doc.setFont('helvetica', 'normal')
       doc.setFontSize(9)
       const linhasNota = [
-        'CFOP 5113 - venda de produção remetida anteriormente em consignação',
-        `Valor da nota: ${formatBRL(totalCusto)} (custo das peças vendidas, sem descontar o aluguel)`,
+        'CFOP para MEI: usar 5102',
+        'CFOP para ARTESANATO GAÚCHO: usar 5101',
+        'Escrever no campo Dados Adicionais/Informações Complementares: VENDA DE PARTE DA NOTA FISCAL DE CONSIGNAÇÃO N° (aqui colocar o número da sua nota consignada) DO DIA _/_/___.',
+        `Valor da nota: ${formatBRL(totalCusto)}`,
       ]
       if (dadosLoja?.cnpj) {
         linhasNota.push(
           `Destinatário: ${dadosLoja.razao_social || dadosLoja.nome_fantasia || ''} - CNPJ ${formatarCnpj(dadosLoja.cnpj)}`
         )
       }
+      const larguraNota = doc.internal.pageSize.getWidth() - margin * 2
       for (const linha of linhasNota) {
-        doc.text(limitarTextoPdf(doc, linha, doc.internal.pageSize.getWidth() - margin * 2), margin, y)
-        y += 5
+        const partes = doc.splitTextToSize(linha, larguraNota)
+        doc.text(partes, margin, y, { align: 'justify', maxWidth: larguraNota })
+        y += partes.length * 5
       }
     }
 
@@ -2027,7 +2031,7 @@ export default function Relatorios() {
                       {artesaoId && totalCustoBaseRel > 0 && (
                         <tr>
                           <td colSpan={colSpanRotuloCusto}>
-                            Nota fiscal de acerto que o fornecedor deve emitir (CFOP 5113, sem descontar o aluguel)
+                            Nota fiscal de acerto (CFOP 5102 para MEI, 5101 para Artesanato Gaúcho, sem descontar o aluguel)
                           </td>
                           <td>{formatBRL(totalCustoBaseRel)}</td>
                         </tr>
