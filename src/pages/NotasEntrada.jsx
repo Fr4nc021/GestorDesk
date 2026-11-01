@@ -582,7 +582,7 @@ export default function NotasEntrada() {
           </p>
         </div>
         <div className="produtos-actions">
-          <button type="button" className="produtos-btn-quiet" onClick={buscarRecebidas}>
+          <button type="button" className="notas-entrada-btn-sefaz" onClick={buscarRecebidas}>
             Buscar na SEFAZ
           </button>
           <button type="button" className="produtos-btn-primary" onClick={escolherArquivo}>

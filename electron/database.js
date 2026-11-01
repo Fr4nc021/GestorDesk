@@ -3026,7 +3026,7 @@ function listarNotasFiscais({ dataInicio, dataFim } = {}) {
   const where = filtros.length ? `AND ${filtros.join(' AND ')}` : ''
   return db.prepare(`
     SELECT n.id, n.venda_id, n.devolucao_id, n.modelo, n.ref, n.ambiente, n.status, n.numero, n.serie, n.chave,
-           n.mensagem, n.valor_total, n.caminho_danfe, n.cancelada_em, n.created_at, n.updated_at,
+           n.mensagem, n.valor_total, n.caminho_danfe, n.cancelada_em, n.autorizada_em, n.created_at, n.updated_at,
            v.data as venda_data, v.deleted_at as venda_excluida_em, d.deleted_at as devolucao_excluida_em,
            d.tipo as devolucao_tipo, d.cfop as devolucao_cfop,
            a.razao_social as artesao_razao_social, a.nome_fantasia as artesao_nome_fantasia, a.nome as artesao_nome,

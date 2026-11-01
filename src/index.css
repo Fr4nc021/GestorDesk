@@ -1252,6 +1252,20 @@
   color: #212121;
 }
 
+.notas-entrada-btn-sefaz {
+  padding: 11px 20px;
+  background: #fff;
+  color: #212121;
+  border: 1px solid #212121;
+  border-radius: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.notas-entrada-btn-sefaz:hover {
+  background: #f5f5f5;
+}
+
 .produtos-table-wrapper {
   margin-top: 24px;
   border: 1px solid #e0e0e0;
@@ -2605,6 +2619,11 @@ button.caixa-btn-filtro-periodo {
   background: #fff;
 }
 
+.notas-fiscais-abas {
+  width: fit-content;
+  margin-bottom: 16px;
+}
+
 .vendas-abas {
   display: flex;
   gap: 4px;
@@ -2614,7 +2633,7 @@ button.caixa-btn-filtro-periodo {
 }
 
 .vendas-abas button {
-  border: none;
+  border: 1px solid #d4d4d4;
   background: transparent;
   padding: 8px 14px;
   border-radius: 8px;
@@ -2624,6 +2643,7 @@ button.caixa-btn-filtro-periodo {
 }
 
 .vendas-abas button.ativa {
+  border-color: #bbb;
   background: #fff;
   color: #222;
   font-weight: 600;
@@ -2649,22 +2669,8 @@ button.caixa-btn-filtro-periodo {
   gap: 8px;
 }
 
-/* Ações da tabela de Vendas: mesmo visual preto da barra de cupom. */
-.vendas-acoes .caixa-btn-editar,
-.vendas-acoes .caixa-btn-excluir {
-  background: #111;
-  color: #fff;
-  border-color: #111;
-}
-
-.vendas-acoes .caixa-btn-editar:hover:not(:disabled),
-.vendas-acoes .caixa-btn-excluir:hover:not(:disabled) {
-  background: #333;
-  color: #fff;
-  border-color: #333;
-}
-
-.vendas-barra-acoes button {
+.vendas-barra-acoes button,
+.vendas-barra-acoes button:hover {
   background: #111;
   color: #fff;
   border-color: #111;
@@ -2678,7 +2684,8 @@ button.caixa-btn-filtro-periodo {
 
 .vendas-barra-acoes button:disabled {
   background: #111;
-  opacity: 0.45;
+  color: #fff;
+  opacity: 0.6;
   cursor: not-allowed;
 }
 

@@ -8,7 +8,7 @@ import Artesaos from './pages/Artesaos'
 import Estoque from './pages/Estoque'
 import Caixa from './pages/Caixa'
 import Configuracoes from './pages/Configuracoes'
-import NotasEntrada from './pages/NotasEntrada'
+import NotasFiscais from './pages/NotasFiscais'
 import Vendas from './pages/Vendas'
 import Layout from './Layout'
 
@@ -56,7 +56,8 @@ export default function App() {
           <Route path="pdv" element={<PDV />} />
           <Route path="artesaos" element={<Artesaos />} />
           <Route path="estoque" element={<Estoque />} />
-          <Route path="notas-entrada" element={<NotasEntrada />} />
+          <Route path="notas-fiscais" element={<NotasFiscais />} />
+          <Route path="notas-entrada" element={<Navigate to="/app/notas-fiscais" replace />} />
           <Route path="vendas" element={<Vendas />} />
           <Route path="notas-emitidas" element={<Navigate to="/app/vendas" replace />} />
           <Route path="caixa" element={<Caixa />} />

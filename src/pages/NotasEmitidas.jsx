@@ -28,6 +28,16 @@ function rotuloOrigem(nota) {
   return `Venda #${nota.venda_id}`
 }
 
+// A SEFAZ aceita cancelar NF-e até 24 h depois da autorização.
+const PRAZO_CANCELAMENTO_NFE_MS = 24 * 60 * 60 * 1000
+
+function dentroDoPrazoCancelamento(nota) {
+  if (nota.modelo !== '55') return true
+  const autorizada = new Date(String(nota.autorizada_em || nota.updated_at || '').replace(' ', 'T'))
+  if (Number.isNaN(autorizada.getTime())) return true
+  return Date.now() - autorizada.getTime() <= PRAZO_CANCELAMENTO_NFE_MS
+}
+
 function hojeIso() {
   const d = new Date()
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
@@ -107,6 +117,14 @@ export default function NotasEmitidas({ somenteDevolucoes = false }) {
       setMensagem({ tipo: 'error', texto: mensagemErro(err, 'Erro ao consultar a nota.') })
     } finally {
       setProcessandoId(null)
+    }
+  }
+
+  async function visualizar(nota) {
+    try {
+      await window.electronAPI.visualizarNota(nota.id)
+    } catch (err) {
+      setMensagem({ tipo: 'error', texto: mensagemErro(err, 'Não foi possível abrir a nota.') })
     }
   }
 
@@ -200,16 +218,28 @@ export default function NotasEmitidas({ somenteDevolucoes = false }) {
                       <div className="caixa-acoes-cell">
                         {nota.status === 'autorizado' && (
                           <>
-                            <BotaoAcao icone="imprimir" onClick={() => imprimir(nota)}>
-                              Imprimir
-                            </BotaoAcao>
-                            <BotaoAcao
-                              icone="cancelar"
-                              perigo
-                              onClick={() => setCancelamento({ nota, justificativa: '', erro: '', salvando: false })}
-                            >
-                              Cancelar
-                            </BotaoAcao>
+                            {somenteDevolucoes ? (
+                              <BotaoAcao icone="ver" onClick={() => visualizar(nota)}>
+                                Visualizar
+                              </BotaoAcao>
+                            ) : (
+                              <BotaoAcao icone="imprimir" onClick={() => imprimir(nota)}>
+                                Imprimir
+                              </BotaoAcao>
+                            )}
+                            {dentroDoPrazoCancelamento(nota) ? (
+                              <BotaoAcao
+                                icone="cancelar"
+                                perigo
+                                onClick={() => setCancelamento({ nota, justificativa: '', erro: '', salvando: false })}
+                              >
+                                Cancelar
+                              </BotaoAcao>
+                            ) : (
+                              <span className="notas-entrada-cfop" title="A SEFAZ só aceita cancelar NF-e até 24 h depois da autorização.">
+                                Fora do prazo de cancelamento
+                              </span>
+                            )}
                           </>
                         )}
                         {nota.status === 'processando_autorizacao' && (
