@@ -180,6 +180,7 @@ const {
   buracosNumeracao,
   reenviarPendentes,
   gerarZipXmls,
+  cuponsParaPdf,
   urlDanfe,
 } = require('./services/nfceService')
 const { buscarNotasRecebidas, baixarXmlNotaRecebida } = require('./services/notasRecebidasService')
@@ -369,6 +370,60 @@ ipcMain.handle('exportar-xmls-periodo', async (event, dataInicio, dataFim) => {
   if (result.canceled || !result.filePath) return null
   fs.writeFileSync(result.filePath, buffer)
   return { total, faltando, caminho: result.filePath }
+})
+/** Junta o DANFCe de todos os cupons autorizados do período num único PDF (um cupom por página). */
+ipcMain.handle('exportar-cupons-pdf', async (event, dataInicio, dataFim) => {
+  const { cupons, faltando } = await cuponsParaPdf(dataInicio, dataFim)
+  if (cupons.length === 0) throw new Error('Nenhum cupom autorizado no período.')
+  const win = BrowserWindow.fromWebContents(event.sender)
+  const result = await dialog.showSaveDialog(win, {
+    title: 'Salvar cupons do período',
+    defaultPath: `Cupons ${dataInicio} a ${dataFim}.pdf`,
+    filters: [{ name: 'PDF', extensions: ['pdf'] }],
+  })
+  if (result.canceled || !result.filePath) return null
+
+  const { PDFDocument } = require('pdf-lib')
+  const final = await PDFDocument.create()
+  const janela = new BrowserWindow({
+    show: false,
+    width: 420,
+    height: 760,
+    webPreferences: { contextIsolation: true, nodeIntegration: false },
+  })
+  let falhas = faltando
+  try {
+    for (const cupom of cupons) {
+      try {
+        await janela.loadURL(cupom.url)
+        const { largura, altura } = await janela.webContents.executeJavaScript(`
+          Promise.all([...document.images].map((img) => img.complete ? null
+            : new Promise((ok) => { img.onload = img.onerror = ok })))
+            .then(() => ({
+              largura: document.documentElement.scrollWidth,
+              altura: document.documentElement.scrollHeight,
+            }))
+        `)
+        // 80mm de largura, altura proporcional ao cupom (em polegadas).
+        const larguraPol = 80 / 25.4
+        const pdf = await janela.webContents.printToPDF({
+          printBackground: true,
+          margins: { top: 0, bottom: 0, left: 0, right: 0 },
+          pageSize: { width: larguraPol, height: (altura / largura) * larguraPol + 0.2 },
+        })
+        const doc = await PDFDocument.load(pdf)
+        const paginas = await final.copyPages(doc, doc.getPageIndices())
+        paginas.forEach((p) => final.addPage(p))
+      } catch {
+        falhas += 1
+      }
+    }
+  } finally {
+    janela.destroy()
+  }
+  if (final.getPageCount() === 0) throw new Error('Não foi possível baixar nenhum cupom.')
+  fs.writeFileSync(result.filePath, await final.save())
+  return { total: cupons.length - (falhas - faltando), faltando: falhas, caminho: result.filePath }
 })
 ipcMain.handle('inutilizar-numeracao', (_, dados) => inutilizarNumeracao(dados || {}))
 ipcMain.handle('listar-inutilizacoes', () => listarInutilizacoes())
