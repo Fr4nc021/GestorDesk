@@ -87,6 +87,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   importarTabelaIbpt: () => invoke('importar-tabela-ibpt'),
   visualizarNota: (notaId) => invoke('visualizar-nota', notaId),
   imprimirNfce: (notaId) => invoke('imprimir-nfce', notaId),
+  abrirDanfeNotaEntrada: (chave) => invoke('abrir-danfe-nota-entrada', chave),
   buscarNotasRecebidas: () => invoke('buscar-notas-recebidas'),
   baixarXmlNotaRecebida: (chave) => invoke('baixar-xml-nota-recebida', chave),
 

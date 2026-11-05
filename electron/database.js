@@ -2231,6 +2231,14 @@ function buscarArtesaoPorDocumento(documento) {
   )
 }
 
+/** XML guardado na importação da nota de entrada (para gerar o DANFE sem depender da Focus). */
+function obterXmlNotaEntrada(chave) {
+  const row = db
+    .prepare('SELECT xml FROM notas_entrada WHERE chave = ? AND deleted_at IS NULL')
+    .get(String(chave ?? '').replace(/\D/g, ''))
+  return row?.xml || null
+}
+
 function buscarNotaEntradaPorChave(chave) {
   return (
     db
@@ -3560,6 +3568,7 @@ module.exports = {
   registrarDevolucaoCliente,
   listarNotasParaXml,
   listarXmlsEntrada,
+  obterXmlNotaEntrada,
   resumoFiscalPeriodo,
   obterDevolucaoClienteParaNfe,
   ultimaNotaFiscalDaDevolucaoCliente,

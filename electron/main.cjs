@@ -169,6 +169,7 @@ const {
   obterVendaParaDevolucaoCliente,
   registrarDevolucaoCliente,
   resumoFiscalPeriodo,
+  obterXmlNotaEntrada,
 } = require('./database')
 const {
   emitirNfceDaVenda,
@@ -183,7 +184,11 @@ const {
   cuponsParaPdf,
   urlDanfe,
 } = require('./services/nfceService')
-const { buscarNotasRecebidas, baixarXmlNotaRecebida } = require('./services/notasRecebidasService')
+const {
+  buscarNotasRecebidas,
+  baixarXmlNotaRecebida,
+  baixarDanfeNotaRecebida,
+} = require('./services/notasRecebidasService')
 
 // CLI: criar usuário e sair — node electron/main.cjs não funciona; use: npx electron . criar-usuario LOGIN SENHA
 if (process.argv[2] === 'criar-usuario' && process.argv[3] && process.argv[4]) {
@@ -461,6 +466,51 @@ ipcMain.handle('visualizar-nota', async (event, notaId) => {
 })
 ipcMain.handle('buscar-notas-recebidas', () => buscarNotasRecebidas())
 ipcMain.handle('baixar-xml-nota-recebida', (_, chave) => baixarXmlNotaRecebida(chave))
+/** Abre o DANFE da nota de entrada no visualizador de PDF do computador (de lá dá para imprimir). */
+// Primeiro tenta o DANFE oficial da Focus; se a nota não estiver lá (XML importado de arquivo),
+// monta o DANFE a partir do XML guardado na importação.
+async function gerarDanfeDoXml(xml, pasta, nomeBase) {
+  const { htmlDanfe } = require('./services/danfeLocal')
+  const arquivoHtml = path.join(pasta, `${nomeBase}.html`)
+  fs.writeFileSync(arquivoHtml, htmlDanfe(xml), 'utf8')
+  const janela = new BrowserWindow({
+    show: false,
+    width: 900,
+    height: 1200,
+    webPreferences: { contextIsolation: true, nodeIntegration: false },
+  })
+  try {
+    await janela.loadFile(arquivoHtml)
+    const titulo = await janela.webContents.executeJavaScript('document.title')
+    if (titulo !== 'DANFE pronto') {
+      const texto = await janela.webContents.executeJavaScript('document.body.innerText')
+      throw new Error(texto || 'Não foi possível montar o DANFE a partir do XML.')
+    }
+    return await janela.webContents.printToPDF({ printBackground: true, pageSize: 'A4' })
+  } finally {
+    janela.destroy()
+    fs.rmSync(arquivoHtml, { force: true })
+  }
+}
+
+ipcMain.handle('abrir-danfe-nota-entrada', async (_, chave) => {
+  const pasta = path.join(app.getPath('temp'), 'gestordesk-danfe')
+  fs.mkdirSync(pasta, { recursive: true })
+  const nomeBase = `NFe-${String(chave).replace(/\D/g, '')}`
+  let pdf
+  try {
+    pdf = await baixarDanfeNotaRecebida(chave)
+  } catch (errFocus) {
+    const xml = obterXmlNotaEntrada(chave)
+    if (!xml) throw errFocus
+    pdf = await gerarDanfeDoXml(xml, pasta, nomeBase)
+  }
+  const arquivo = path.join(pasta, `${nomeBase}.pdf`)
+  fs.writeFileSync(arquivo, pdf)
+  const erro = await shell.openPath(arquivo)
+  if (erro) throw new Error(`Não foi possível abrir o PDF: ${erro}`)
+  return { ok: true }
+})
 ipcMain.handle('imprimir-nfce', async (event, notaId) => {
   const { url, modelo } = await urlDanfe(notaId)
   // DANFE da NF-e é PDF: abre no visualizador do computador.

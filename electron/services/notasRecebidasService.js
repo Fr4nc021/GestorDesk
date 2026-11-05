@@ -91,4 +91,18 @@ async function baixarXmlNotaRecebida(chave) {
   return xml
 }
 
-module.exports = { buscarNotasRecebidas, baixarXmlNotaRecebida }
+/** DANFE (PDF) de uma nota recebida, gerado pela Focus a partir da chave. */
+async function baixarDanfeNotaRecebida(chave) {
+  const { config } = configProducao()
+  const digitos = String(chave || '').replace(/\D/g, '')
+  if (digitos.length !== 44) throw new Error('Chave de acesso inválida.')
+  const pdf = await focus.baixarArquivoBinario(config, `/v2/nfes_recebidas/${digitos}.pdf`)
+  if (!pdf || pdf.subarray(0, 4).toString() !== '%PDF') {
+    throw new Error(
+      'A Focus não tem o PDF desta nota. Ele só existe para notas emitidas para o CNPJ da loja, depois que o XML é liberado.',
+    )
+  }
+  return pdf
+}
+
+module.exports = { buscarNotasRecebidas, baixarXmlNotaRecebida, baixarDanfeNotaRecebida }

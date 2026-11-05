@@ -104,6 +104,7 @@ export default function NotasEntrada() {
   const [salvandoDevolucao, setSalvandoDevolucao] = useState(false)
   const [erroDevolucao, setErroDevolucao] = useState('')
   const [emitindoDevolucaoId, setEmitindoDevolucaoId] = useState(null)
+  const [abrindoDanfe, setAbrindoDanfe] = useState(null)
   const [mensagem, setMensagem] = useState({ tipo: '', texto: '' })
   const inputArquivoRef = useRef(null)
 
@@ -541,6 +542,17 @@ export default function NotasEntrada() {
     }
   }
 
+  async function abrirDanfe(nota) {
+    setAbrindoDanfe(nota.chave)
+    try {
+      await window.electronAPI.abrirDanfeNotaEntrada(nota.chave)
+    } catch (err) {
+      setMensagem({ tipo: 'error', texto: mensagemErro(err, 'Não foi possível abrir o PDF da nota.') })
+    } finally {
+      setAbrindoDanfe(null)
+    }
+  }
+
   async function cancelarDevolucao(dev) {
     if (!window.confirm('Cancelar esta devolução? As peças voltam para o estoque.')) return
     try {
@@ -660,6 +672,9 @@ export default function NotasEntrada() {
                     <div className="caixa-acoes-cell">
                       <BotaoAcao icone="ver" onClick={() => abrirDetalhe(nota)}>
                         Ver itens
+                      </BotaoAcao>
+                      <BotaoAcao icone="imprimir" onClick={() => abrirDanfe(nota)}>
+                        {abrindoDanfe === nota.chave ? 'Abrindo...' : 'PDF / Imprimir'}
                       </BotaoAcao>
                       {nota.tipo === 'remessa_consignacao' && (
                         <BotaoAcao icone="devolver" onClick={() => abrirDevolucao(nota)}>
