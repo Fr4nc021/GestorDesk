@@ -17,6 +17,7 @@ export default function RelatorioFiscal({ dataInicio, dataFim }) {
   const [inutilizacoes, setInutilizacoes] = useState([])
   const [mensagem, setMensagem] = useState({ tipo: '', texto: '' })
   const [exportando, setExportando] = useState(false)
+  const [exportandoCupons, setExportandoCupons] = useState(false)
   const [inutilizando, setInutilizando] = useState(null)
 
   const carregar = useCallback(async () => {
@@ -53,6 +54,24 @@ export default function RelatorioFiscal({ dataInicio, dataFim }) {
       setMensagem({ tipo: 'error', texto: mensagemErro(err, 'Erro ao exportar os XMLs.') })
     } finally {
       setExportando(false)
+    }
+  }
+
+  async function exportarCupons() {
+    setExportandoCupons(true)
+    setMensagem({ tipo: '', texto: '' })
+    try {
+      const r = await window.electronAPI.exportarCuponsPdf(dataInicio, dataFim)
+      if (r) {
+        setMensagem({
+          tipo: 'success',
+          texto: `${r.total} cupom(ns) salvos em ${r.caminho}.${r.faltando ? ` ${r.faltando} cupom(ns) não puderam ser baixados.` : ''}`,
+        })
+      }
+    } catch (err) {
+      setMensagem({ tipo: 'error', texto: mensagemErro(err, 'Erro ao gerar o PDF dos cupons.') })
+    } finally {
+      setExportandoCupons(false)
     }
   }
 
@@ -134,6 +153,15 @@ export default function RelatorioFiscal({ dataInicio, dataFim }) {
       </p>
       <button type="button" className="btn-sync-manual" onClick={exportar} disabled={exportando}>
         {exportando ? 'Gerando...' : 'Baixar XMLs do período (.zip)'}
+      </button>
+
+      <h3>Cupons fiscais em PDF</h3>
+      <p className="modal-field-hint">
+        Junta o DANFCe de todos os cupons autorizados do período num único PDF, um cupom por página. Pode demorar
+        um pouco: cada cupom é baixado da Focus.
+      </p>
+      <button type="button" className="btn-sync-manual" onClick={exportarCupons} disabled={exportandoCupons}>
+        {exportandoCupons ? 'Gerando PDF...' : 'Baixar cupons do período (.pdf)'}
       </button>
 
       <h3>Inutilização de numeração</h3>

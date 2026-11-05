@@ -319,6 +319,14 @@ export default function Vendas() {
     }
   }
 
+  async function visualizarDevolucao(venda) {
+    try {
+      await window.electronAPI.visualizarNota(venda.nota_devolucao_id)
+    } catch (err) {
+      setMensagem({ tipo: 'error', texto: mensagemErro(err, 'Não foi possível abrir a NF de devolução.') })
+    }
+  }
+
   async function atualizarSituacao(venda) {
     setProcessandoId(venda.id)
     try {
@@ -528,6 +536,11 @@ export default function Vendas() {
                             {s === 'autorizado' && (
                               <BotaoAcao icone="atualizar" onClick={() => setDevolucaoVendaId(v.id)}>
                                 Devolução do cliente
+                              </BotaoAcao>
+                            )}
+                            {v.nota_devolucao_id && (
+                              <BotaoAcao icone="nota" onClick={() => visualizarDevolucao(v)}>
+                                NF de devolução
                               </BotaoAcao>
                             )}
                             {s === 'processando_autorizacao' && (

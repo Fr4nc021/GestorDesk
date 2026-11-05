@@ -399,7 +399,26 @@ async function urlDanfe(notaId) {
   return { url: focus.urlCompleta({ ambiente: nota.ambiente }, nota.caminho_danfe), modelo: nota.modelo }
 }
 
+/** Endereços do DANFCe de cada cupom autorizado no período (em ordem de emissão). */
+async function cuponsParaPdf(dataInicio, dataFim) {
+  const config = obterConfigFiscal()
+  const notas = listarNotasParaXml({ dataInicio, dataFim, ambiente: config.ambiente })
+    .filter((n) => String(n.modelo) === '65' && n.status === 'autorizado')
+  const cupons = []
+  let faltando = 0
+  for (const nota of notas) {
+    try {
+      const { url } = await urlDanfe(nota.id)
+      cupons.push({ id: nota.id, numero: nota.numero, url })
+    } catch {
+      faltando += 1
+    }
+  }
+  return { cupons, faltando }
+}
+
 module.exports = {
+  cuponsParaPdf,
   emitirNfceDaVenda,
   emitirNfeDevolucao,
   emitirNfeDevolucaoCliente,

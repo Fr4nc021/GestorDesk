@@ -104,6 +104,7 @@ export default function NotasEntrada() {
   const [salvandoDevolucao, setSalvandoDevolucao] = useState(false)
   const [erroDevolucao, setErroDevolucao] = useState('')
   const [emitindoDevolucaoId, setEmitindoDevolucaoId] = useState(null)
+  const [abrindoDanfe, setAbrindoDanfe] = useState(null)
   const [mensagem, setMensagem] = useState({ tipo: '', texto: '' })
   const inputArquivoRef = useRef(null)
 
@@ -426,15 +427,21 @@ export default function NotasEntrada() {
     }
   }
 
+  // Peças vinculadas sem "Somar ao estoque" já estavam no estoque: contam pela quantidade da nota.
+  function quantidadeDevolvivel(item) {
+    return Math.max(Number(item.quantidade_estoque) || 0, Math.round(Number(item.quantidade) || 0))
+  }
+
   async function abrirDevolucao(nota) {
     setMensagem({ tipo: '', texto: '' })
     setErroDevolucao('')
     try {
       const itens = await window.electronAPI.listarItensNotaEntrada(nota.id)
       const linhas = (itens || [])
-        .filter((item) => item.produto_id && item.quantidade_estoque > 0)
+        .map((item) => ({ ...item, recebidas: quantidadeDevolvivel(item) }))
+        .filter((item) => item.produto_id && item.recebidas > 0)
         .map((item) => {
-          const restante = item.quantidade_estoque - Number(item.quantidade_devolvida || 0)
+          const restante = item.recebidas - Number(item.quantidade_devolvida || 0)
           return {
             ...item,
             maximo: Math.max(0, Math.min(restante, Number(item.produto_estoque) || 0)),
@@ -535,6 +542,17 @@ export default function NotasEntrada() {
     }
   }
 
+  async function abrirDanfe(nota) {
+    setAbrindoDanfe(nota.chave)
+    try {
+      await window.electronAPI.abrirDanfeNotaEntrada(nota.chave)
+    } catch (err) {
+      setMensagem({ tipo: 'error', texto: mensagemErro(err, 'Não foi possível abrir o PDF da nota.') })
+    } finally {
+      setAbrindoDanfe(null)
+    }
+  }
+
   async function cancelarDevolucao(dev) {
     if (!window.confirm('Cancelar esta devolução? As peças voltam para o estoque.')) return
     try {
@@ -576,7 +594,7 @@ export default function NotasEntrada() {
           </p>
         </div>
         <div className="produtos-actions">
-          <button type="button" className="produtos-btn-quiet" onClick={buscarRecebidas}>
+          <button type="button" className="notas-entrada-btn-sefaz" onClick={buscarRecebidas}>
             Buscar na SEFAZ
           </button>
           <button type="button" className="produtos-btn-primary" onClick={escolherArquivo}>
@@ -654,6 +672,9 @@ export default function NotasEntrada() {
                     <div className="caixa-acoes-cell">
                       <BotaoAcao icone="ver" onClick={() => abrirDetalhe(nota)}>
                         Ver itens
+                      </BotaoAcao>
+                      <BotaoAcao icone="imprimir" onClick={() => abrirDanfe(nota)}>
+                        {abrindoDanfe === nota.chave ? 'Abrindo...' : 'PDF / Imprimir'}
                       </BotaoAcao>
                       {nota.tipo === 'remessa_consignacao' && (
                         <BotaoAcao icone="devolver" onClick={() => abrirDevolucao(nota)}>
@@ -1140,7 +1161,7 @@ export default function NotasEntrada() {
                         {linha.produto_nome}
                         {linha.produto_variacao ? ` (${linha.produto_variacao})` : ''}
                       </td>
-                      <td>{linha.quantidade_estoque}</td>
+                      <td>{linha.recebidas}</td>
                       <td>{linha.quantidade_devolvida || 0}</td>
                       <td>{linha.produto_estoque}</td>
                       <td>{formatarMoeda(linha.valor_unitario)}</td>

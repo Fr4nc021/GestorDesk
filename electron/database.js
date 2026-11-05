@@ -2231,6 +2231,14 @@ function buscarArtesaoPorDocumento(documento) {
   )
 }
 
+/** XML guardado na importação da nota de entrada (para gerar o DANFE sem depender da Focus). */
+function obterXmlNotaEntrada(chave) {
+  const row = db
+    .prepare('SELECT xml FROM notas_entrada WHERE chave = ? AND deleted_at IS NULL')
+    .get(String(chave ?? '').replace(/\D/g, ''))
+  return row?.xml || null
+}
+
 function buscarNotaEntradaPorChave(chave) {
   return (
     db
@@ -2483,7 +2491,7 @@ function registrarDevolucaoArtesao({ nota_entrada_id, itens, observacao = null }
   if (pedidos.length === 0) throw new Error('Informe a quantidade de pelo menos uma peça.')
 
   const getItem = db.prepare(`
-    SELECT i.id, i.produto_id, i.quantidade_estoque, i.valor_unitario, p.nome, p.estoque,
+    SELECT i.id, i.produto_id, i.quantidade_estoque, i.quantidade, i.valor_unitario, p.nome, p.estoque,
            (SELECT COALESCE(SUM(di.quantidade), 0) FROM devolucoes_artesao_itens di
               JOIN devolucoes_artesao d ON d.id = di.devolucao_id AND d.deleted_at IS NULL
               WHERE di.nota_item_id = i.id) as devolvida
@@ -2508,7 +2516,9 @@ function registrarDevolucaoArtesao({ nota_entrada_id, itens, observacao = null }
     const linhas = pedidos.map((pedido) => {
       const item = getItem.get(pedido.nota_item_id, nota.id)
       if (!item) throw new Error('Item da nota não encontrado ou sem produto vinculado.')
-      const restante = item.quantidade_estoque - item.devolvida
+      // Peças vinculadas sem "Somar ao estoque" já estavam no estoque: contam pela quantidade da nota.
+      const recebidas = Math.max(Number(item.quantidade_estoque) || 0, Math.round(Number(item.quantidade) || 0))
+      const restante = recebidas - item.devolvida
       if (pedido.quantidade > restante) {
         throw new Error(`"${item.nome}": só ${restante} peça(s) desta nota ainda podem ser devolvidas.`)
       }
@@ -3024,7 +3034,7 @@ function listarNotasFiscais({ dataInicio, dataFim } = {}) {
   const where = filtros.length ? `AND ${filtros.join(' AND ')}` : ''
   return db.prepare(`
     SELECT n.id, n.venda_id, n.devolucao_id, n.modelo, n.ref, n.ambiente, n.status, n.numero, n.serie, n.chave,
-           n.mensagem, n.valor_total, n.caminho_danfe, n.cancelada_em, n.created_at, n.updated_at,
+           n.mensagem, n.valor_total, n.caminho_danfe, n.cancelada_em, n.autorizada_em, n.created_at, n.updated_at,
            v.data as venda_data, v.deleted_at as venda_excluida_em, d.deleted_at as devolucao_excluida_em,
            d.tipo as devolucao_tipo, d.cfop as devolucao_cfop,
            a.razao_social as artesao_razao_social, a.nome_fantasia as artesao_nome_fantasia, a.nome as artesao_nome,
@@ -3238,7 +3248,10 @@ function listarVendasComCupom({ dataInicio, dataFim } = {}) {
               FROM vendas_pagamentos vp WHERE vp.venda_id = v.id AND vp.deleted_at IS NULL) as formas_pagamento,
            n.id as nota_id, n.status as nota_status, n.numero as nota_numero, n.serie as nota_serie,
            n.mensagem as nota_mensagem, n.ambiente as nota_ambiente, n.caminho_danfe as nota_caminho_danfe,
-           n.autorizada_em as nota_autorizada_em, n.cancelada_em as nota_cancelada_em
+           n.autorizada_em as nota_autorizada_em, n.cancelada_em as nota_cancelada_em,
+           (SELECT MAX(nd.id) FROM notas_fiscais nd
+              JOIN devolucoes_cliente d ON d.id = nd.devolucao_cliente_id AND d.deleted_at IS NULL
+              WHERE d.venda_id = v.id AND nd.status = 'autorizado') as nota_devolucao_id
     FROM vendas v
     LEFT JOIN notas_fiscais n ON n.id = (SELECT MAX(t.id) FROM notas_fiscais t WHERE t.venda_id = v.id)
     WHERE v.deleted_at IS NULL
@@ -3555,6 +3568,7 @@ module.exports = {
   registrarDevolucaoCliente,
   listarNotasParaXml,
   listarXmlsEntrada,
+  obterXmlNotaEntrada,
   resumoFiscalPeriodo,
   obterDevolucaoClienteParaNfe,
   ultimaNotaFiscalDaDevolucaoCliente,

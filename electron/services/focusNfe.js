@@ -518,6 +518,18 @@ async function baixarArquivo(config, caminho) {
   return resposta.text()
 }
 
+/** Baixa um arquivo binário da Focus (ex.: DANFE em PDF). Devolve null se a Focus não tiver o arquivo. */
+async function baixarArquivoBinario(config, caminho) {
+  const url = urlCompleta(config, caminho)
+  if (!url) return null
+  const { token } = tokenDoAmbiente(config)
+  const resposta = await fetch(url, {
+    headers: { Authorization: `Basic ${Buffer.from(`${token}:`).toString('base64')}` },
+  })
+  if (!resposta.ok) return null
+  return Buffer.from(await resposta.arrayBuffer())
+}
+
 /** Mensagem legível de uma resposta de erro da Focus. */
 function mensagemDaResposta({ http, dados }) {
   if (dados?.mensagem_sefaz) return `SEFAZ: ${dados.mensagem_sefaz}`
@@ -542,6 +554,7 @@ module.exports = {
   manifestarCiencia,
   inutilizar,
   baixarArquivo,
+  baixarArquivoBinario,
   urlCompleta,
   mensagemDaResposta,
   regraFiscalVenda,

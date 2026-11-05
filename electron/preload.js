@@ -79,6 +79,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   registrarDevolucaoCliente: (dados) => invoke('registrar-devolucao-cliente', dados),
   emitirNfeDevolucaoCliente: (id) => invoke('emitir-nfe-devolucao-cliente', id),
   resumoFiscalPeriodo: (dataInicio, dataFim) => invoke('resumo-fiscal-periodo', dataInicio, dataFim),
+  exportarCuponsPdf: (dataInicio, dataFim) => invoke('exportar-cupons-pdf', dataInicio, dataFim),
   exportarXmlsPeriodo: (dataInicio, dataFim) => invoke('exportar-xmls-periodo', dataInicio, dataFim),
   inutilizarNumeracao: (dados) => invoke('inutilizar-numeracao', dados),
   listarInutilizacoes: () => invoke('listar-inutilizacoes'),
@@ -86,6 +87,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   importarTabelaIbpt: () => invoke('importar-tabela-ibpt'),
   visualizarNota: (notaId) => invoke('visualizar-nota', notaId),
   imprimirNfce: (notaId) => invoke('imprimir-nfce', notaId),
+  abrirDanfeNotaEntrada: (chave) => invoke('abrir-danfe-nota-entrada', chave),
   buscarNotasRecebidas: () => invoke('buscar-notas-recebidas'),
   baixarXmlNotaRecebida: (chave) => invoke('baixar-xml-nota-recebida', chave),
 

@@ -169,6 +169,7 @@ const {
   obterVendaParaDevolucaoCliente,
   registrarDevolucaoCliente,
   resumoFiscalPeriodo,
+  obterXmlNotaEntrada,
 } = require('./database')
 const {
   emitirNfceDaVenda,
@@ -180,9 +181,14 @@ const {
   buracosNumeracao,
   reenviarPendentes,
   gerarZipXmls,
+  cuponsParaPdf,
   urlDanfe,
 } = require('./services/nfceService')
-const { buscarNotasRecebidas, baixarXmlNotaRecebida } = require('./services/notasRecebidasService')
+const {
+  buscarNotasRecebidas,
+  baixarXmlNotaRecebida,
+  baixarDanfeNotaRecebida,
+} = require('./services/notasRecebidasService')
 
 // CLI: criar usuário e sair — node electron/main.cjs não funciona; use: npx electron . criar-usuario LOGIN SENHA
 if (process.argv[2] === 'criar-usuario' && process.argv[3] && process.argv[4]) {
@@ -370,6 +376,60 @@ ipcMain.handle('exportar-xmls-periodo', async (event, dataInicio, dataFim) => {
   fs.writeFileSync(result.filePath, buffer)
   return { total, faltando, caminho: result.filePath }
 })
+/** Junta o DANFCe de todos os cupons autorizados do período num único PDF (um cupom por página). */
+ipcMain.handle('exportar-cupons-pdf', async (event, dataInicio, dataFim) => {
+  const { cupons, faltando } = await cuponsParaPdf(dataInicio, dataFim)
+  if (cupons.length === 0) throw new Error('Nenhum cupom autorizado no período.')
+  const win = BrowserWindow.fromWebContents(event.sender)
+  const result = await dialog.showSaveDialog(win, {
+    title: 'Salvar cupons do período',
+    defaultPath: `Cupons ${dataInicio} a ${dataFim}.pdf`,
+    filters: [{ name: 'PDF', extensions: ['pdf'] }],
+  })
+  if (result.canceled || !result.filePath) return null
+
+  const { PDFDocument } = require('pdf-lib')
+  const final = await PDFDocument.create()
+  const janela = new BrowserWindow({
+    show: false,
+    width: 420,
+    height: 760,
+    webPreferences: { contextIsolation: true, nodeIntegration: false },
+  })
+  let falhas = faltando
+  try {
+    for (const cupom of cupons) {
+      try {
+        await janela.loadURL(cupom.url)
+        const { largura, altura } = await janela.webContents.executeJavaScript(`
+          Promise.all([...document.images].map((img) => img.complete ? null
+            : new Promise((ok) => { img.onload = img.onerror = ok })))
+            .then(() => ({
+              largura: document.documentElement.scrollWidth,
+              altura: document.documentElement.scrollHeight,
+            }))
+        `)
+        // 80mm de largura, altura proporcional ao cupom (em polegadas).
+        const larguraPol = 80 / 25.4
+        const pdf = await janela.webContents.printToPDF({
+          printBackground: true,
+          margins: { top: 0, bottom: 0, left: 0, right: 0 },
+          pageSize: { width: larguraPol, height: (altura / largura) * larguraPol + 0.2 },
+        })
+        const doc = await PDFDocument.load(pdf)
+        const paginas = await final.copyPages(doc, doc.getPageIndices())
+        paginas.forEach((p) => final.addPage(p))
+      } catch {
+        falhas += 1
+      }
+    }
+  } finally {
+    janela.destroy()
+  }
+  if (final.getPageCount() === 0) throw new Error('Não foi possível baixar nenhum cupom.')
+  fs.writeFileSync(result.filePath, await final.save())
+  return { total: cupons.length - (falhas - faltando), faltando: falhas, caminho: result.filePath }
+})
 ipcMain.handle('inutilizar-numeracao', (_, dados) => inutilizarNumeracao(dados || {}))
 ipcMain.handle('listar-inutilizacoes', () => listarInutilizacoes())
 ipcMain.handle('situacao-tabela-ibpt', () => situacaoTabelaIbpt())
@@ -406,6 +466,51 @@ ipcMain.handle('visualizar-nota', async (event, notaId) => {
 })
 ipcMain.handle('buscar-notas-recebidas', () => buscarNotasRecebidas())
 ipcMain.handle('baixar-xml-nota-recebida', (_, chave) => baixarXmlNotaRecebida(chave))
+/** Abre o DANFE da nota de entrada no visualizador de PDF do computador (de lá dá para imprimir). */
+// Primeiro tenta o DANFE oficial da Focus; se a nota não estiver lá (XML importado de arquivo),
+// monta o DANFE a partir do XML guardado na importação.
+async function gerarDanfeDoXml(xml, pasta, nomeBase) {
+  const { htmlDanfe } = require('./services/danfeLocal')
+  const arquivoHtml = path.join(pasta, `${nomeBase}.html`)
+  fs.writeFileSync(arquivoHtml, htmlDanfe(xml), 'utf8')
+  const janela = new BrowserWindow({
+    show: false,
+    width: 900,
+    height: 1200,
+    webPreferences: { contextIsolation: true, nodeIntegration: false },
+  })
+  try {
+    await janela.loadFile(arquivoHtml)
+    const titulo = await janela.webContents.executeJavaScript('document.title')
+    if (titulo !== 'DANFE pronto') {
+      const texto = await janela.webContents.executeJavaScript('document.body.innerText')
+      throw new Error(texto || 'Não foi possível montar o DANFE a partir do XML.')
+    }
+    return await janela.webContents.printToPDF({ printBackground: true, pageSize: 'A4' })
+  } finally {
+    janela.destroy()
+    fs.rmSync(arquivoHtml, { force: true })
+  }
+}
+
+ipcMain.handle('abrir-danfe-nota-entrada', async (_, chave) => {
+  const pasta = path.join(app.getPath('temp'), 'gestordesk-danfe')
+  fs.mkdirSync(pasta, { recursive: true })
+  const nomeBase = `NFe-${String(chave).replace(/\D/g, '')}`
+  let pdf
+  try {
+    pdf = await baixarDanfeNotaRecebida(chave)
+  } catch (errFocus) {
+    const xml = obterXmlNotaEntrada(chave)
+    if (!xml) throw errFocus
+    pdf = await gerarDanfeDoXml(xml, pasta, nomeBase)
+  }
+  const arquivo = path.join(pasta, `${nomeBase}.pdf`)
+  fs.writeFileSync(arquivo, pdf)
+  const erro = await shell.openPath(arquivo)
+  if (erro) throw new Error(`Não foi possível abrir o PDF: ${erro}`)
+  return { ok: true }
+})
 ipcMain.handle('imprimir-nfce', async (event, notaId) => {
   const { url, modelo } = await urlDanfe(notaId)
   // DANFE da NF-e é PDF: abre no visualizador do computador.
