@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { formatarMoeda } from '../utils/formacaoPreco'
 import { mensagemErro } from '../utils/erros'
+import RelatorioCupons from './RelatorioCupons'
 
 const CATEGORIAS = {
   normal: { titulo: 'Revenda normal', detalhe: 'Produto próprio sem ST (CFOP 5102)' },
@@ -10,8 +11,39 @@ const CATEGORIAS = {
 
 const MODELOS = { 65: 'NFC-e', 55: 'NF-e' }
 
-/** Aba Fiscal de Relatórios: resumo para o PGDAS, XMLs do período e inutilização de numeração. */
+const SUBABAS = [
+  { id: 'resumo', label: 'Resumo e XMLs' },
+  { id: 'cupons', label: 'Cupons' },
+]
+
+/** Aba Fiscal de Relatórios, com as subabas Resumo e XMLs e Cupons. */
 export default function RelatorioFiscal({ dataInicio, dataFim }) {
+  const [subaba, setSubaba] = useState('resumo')
+  return (
+    <>
+      <div className="config-tabs">
+        {SUBABAS.map((s) => (
+          <button
+            key={s.id}
+            type="button"
+            className={`config-tab ${subaba === s.id ? 'active' : ''}`}
+            onClick={() => setSubaba(s.id)}
+          >
+            {s.label}
+          </button>
+        ))}
+      </div>
+      {subaba === 'cupons' ? (
+        <RelatorioCupons dataInicio={dataInicio} dataFim={dataFim} />
+      ) : (
+        <ResumoFiscal dataInicio={dataInicio} dataFim={dataFim} />
+      )}
+    </>
+  )
+}
+
+/** Resumo para o PGDAS, XMLs do período e inutilização de numeração. */
+function ResumoFiscal({ dataInicio, dataFim }) {
   const [resumo, setResumo] = useState(null)
   const [buracos, setBuracos] = useState([])
   const [inutilizacoes, setInutilizacoes] = useState([])

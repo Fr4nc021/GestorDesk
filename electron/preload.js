@@ -80,6 +80,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   emitirNfeDevolucaoCliente: (id) => invoke('emitir-nfe-devolucao-cliente', id),
   resumoFiscalPeriodo: (dataInicio, dataFim) => invoke('resumo-fiscal-periodo', dataInicio, dataFim),
   exportarCuponsPdf: (dataInicio, dataFim) => invoke('exportar-cupons-pdf', dataInicio, dataFim),
+  listarCuponsPeriodo: (dataInicio, dataFim) => invoke('listar-cupons-periodo', dataInicio, dataFim),
+  exportarCuponsPlanilha: (dataInicio, dataFim) => invoke('exportar-cupons-planilha', dataInicio, dataFim),
   exportarXmlsPeriodo: (dataInicio, dataFim) => invoke('exportar-xmls-periodo', dataInicio, dataFim),
   inutilizarNumeracao: (dados) => invoke('inutilizar-numeracao', dados),
   listarInutilizacoes: () => invoke('listar-inutilizacoes'),

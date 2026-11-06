@@ -5692,3 +5692,48 @@ button.caixa-btn-filtro-periodo {
   margin-bottom: 8px;
   color: #212121;
 }
+
+/* Relatórios > Fiscal > Cupons */
+.relatorio-cupons-topo {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.relatorio-cupons-topo h3 {
+  margin-top: 0;
+}
+
+.relatorio-cupons-tabela .relatorio-cupons-valor {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.relatorio-cupons-tabela td {
+  padding: 8px 16px;
+}
+
+.relatorio-cupons-tabela tbody tr:nth-child(even) {
+  background: #fafafa;
+}
+
+.relatorio-cupons-tabela tfoot td {
+  background: #f8f8f8;
+  border-top: 2px solid #e0e0e0;
+}
+
+.relatorio-cupons-serie {
+  color: #999;
+  font-size: 12px;
+}
+
+.relatorio-cupons-cancelado td {
+  color: #999;
+}
+
+.relatorio-cupons-cancelado .relatorio-cupons-valor {
+  text-decoration: line-through;
+}
