@@ -169,6 +169,7 @@ const {
   obterVendaParaDevolucaoCliente,
   registrarDevolucaoCliente,
   resumoFiscalPeriodo,
+  listarCuponsPeriodo,
   obterXmlNotaEntrada,
 } = require('./database')
 const {
@@ -364,6 +365,85 @@ ipcMain.handle('obter-venda-para-devolucao-cliente', (_, vendaId) => obterVendaP
 ipcMain.handle('registrar-devolucao-cliente', (_, dados) => registrarDevolucaoCliente(dados || {}))
 ipcMain.handle('emitir-nfe-devolucao-cliente', (_, id) => emitirNfeDevolucaoCliente(id))
 ipcMain.handle('resumo-fiscal-periodo', (_, dataInicio, dataFim) => resumoFiscalPeriodo(dataInicio, dataFim))
+ipcMain.handle('listar-cupons-periodo', (_, dataInicio, dataFim) =>
+  listarCuponsPeriodo({ dataInicio, dataFim, ambiente: obterConfigFiscal().ambiente })
+)
+/** Relação dos cupons do período em planilha (.xlsx): nº, emissão, valor e forma de recebimento. */
+ipcMain.handle('exportar-cupons-planilha', async (event, dataInicio, dataFim) => {
+  const { criarXlsx } = require('./services/planilha')
+  const cupons = listarCuponsPeriodo({ dataInicio, dataFim, ambiente: obterConfigFiscal().ambiente })
+  if (cupons.length === 0) throw new Error('Nenhum cupom emitido no período.')
+  const win = BrowserWindow.fromWebContents(event.sender)
+  const result = await dialog.showSaveDialog(win, {
+    title: 'Salvar relação de cupons',
+    defaultPath: `Cupons ${dataInicio} a ${dataFim}.xlsx`,
+    filters: [{ name: 'Planilha do Excel', extensions: ['xlsx'] }],
+  })
+  if (result.canceled || !result.filePath) return null
+
+  const formas = [
+    ['dinheiro', 'Dinheiro'],
+    ['credito', 'Cartão de crédito'],
+    ['debito', 'Cartão de débito'],
+    ['pix', 'Pix'],
+  ]
+  const nomeForma = (f) => formas.find(([id]) => id === f)?.[1] || f
+  const linhas = cupons.map((c) => {
+    const valorDe = (f) => c.pagamentos.filter((p) => p.forma === f).reduce((s, p) => s + p.valor, 0)
+    return [
+      Number(c.numero) || c.numero,
+      c.serie,
+      c.emitido_em,
+      c.valor_total,
+      c.pagamentos.map((p) => nomeForma(p.forma)).join(' + '),
+      ...formas.map(([f]) => valorDe(f) || null),
+      c.status === 'cancelado' ? 'Cancelado' : 'Autorizado',
+      c.chave,
+    ]
+  })
+  const fim = linhas.length + 1
+  const autorizados = cupons.filter((c) => c.status === 'autorizado')
+  const somaAutorizada = (coluna, valor) => ({
+    formula: `SUMIF($J$2:$J$${fim},"Autorizado",${coluna}2:${coluna}${fim})`,
+    valor: Math.round(valor * 100) / 100,
+    tipo: 'moeda',
+    negrito: true,
+  })
+  const soma = (f) => autorizados.reduce((s, c) => s + c.pagamentos.filter((p) => p.forma === f).reduce((x, p) => x + p.valor, 0), 0)
+  const rodape = [
+    [
+      { valor: 'Total (só autorizados)', negrito: true },
+      null,
+      null,
+      somaAutorizada('D', autorizados.reduce((s, c) => s + c.valor_total, 0)),
+      null,
+      ...formas.map(([f], i) => somaAutorizada(String.fromCharCode(70 + i), soma(f))),
+    ],
+    [
+      { valor: 'Cupons autorizados', negrito: true },
+      null,
+      null,
+      { formula: `COUNTIF($J$2:$J$${fim},"Autorizado")`, valor: autorizados.length },
+    ],
+  ]
+  const buffer = criarXlsx({
+    nomeAba: 'Cupons',
+    colunas: [
+      { titulo: 'Cupom nº', largura: 10, tipo: 'inteiro' },
+      { titulo: 'Série', largura: 7 },
+      { titulo: 'Data de emissão', largura: 17, tipo: 'data' },
+      { titulo: 'Valor', largura: 13, tipo: 'moeda' },
+      { titulo: 'Forma de recebimento', largura: 30 },
+      ...formas.map(([, titulo]) => ({ titulo, largura: 16, tipo: 'moeda' })),
+      { titulo: 'Situação', largura: 12 },
+      { titulo: 'Chave de acesso', largura: 48 },
+    ],
+    linhas,
+    rodape,
+  })
+  fs.writeFileSync(result.filePath, buffer)
+  return { total: cupons.length, caminho: result.filePath }
+})
 ipcMain.handle('exportar-xmls-periodo', async (event, dataInicio, dataFim) => {
   const { buffer, total, faltando } = await gerarZipXmls(dataInicio, dataFim)
   const win = BrowserWindow.fromWebContents(event.sender)

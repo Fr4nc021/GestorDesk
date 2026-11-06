@@ -2910,6 +2910,49 @@ function resumoFiscalPeriodo(dataInicio, dataFim) {
   return { linhas, cupons }
 }
 
+/**
+ * Cupons (NFC-e) emitidos no período, pela data de emissão, com as formas de recebimento da venda.
+ * O troco sai do dinheiro, para a soma das formas fechar com o valor do cupom.
+ */
+function listarCuponsPeriodo({ dataInicio, dataFim, ambiente }) {
+  const cupons = db.prepare(`
+    SELECT n.id, n.numero, n.serie, n.chave, n.status, n.valor_total, n.created_at as emitido_em,
+           n.cancelada_em, n.venda_id, v.forma_pagamento, v.troco
+    FROM notas_fiscais n
+    LEFT JOIN vendas v ON v.id = n.venda_id
+    WHERE n.modelo = '65' AND n.status IN ('autorizado', 'cancelado') AND n.ambiente = ?
+      AND n.venda_id IS NOT NULL
+      AND date(n.created_at) >= date(?) AND date(n.created_at) <= date(?)
+    ORDER BY n.created_at, n.id
+  `).all(String(ambiente), dataInicio, dataFim)
+  const pagamentosDaVenda = db.prepare(
+    'SELECT forma_pagamento, valor FROM vendas_pagamentos WHERE venda_id = ? AND deleted_at IS NULL ORDER BY id'
+  )
+  const centavos = (v) => Math.round(Number(v || 0) * 100)
+  return cupons.map(({ forma_pagamento: formaVenda, troco, ...cupom }) => {
+    const lidos = pagamentosDaVenda.all(cupom.venda_id)
+    const pagamentos = (lidos.length ? lidos : [{ forma_pagamento: formaVenda, valor: cupom.valor_total }])
+      .map((p) => ({ forma: p.forma_pagamento, centavos: centavos(p.valor) }))
+      .filter((p) => p.forma)
+    let excedente = pagamentos.reduce((s, p) => s + p.centavos, 0) - centavos(cupom.valor_total)
+    if (excedente > 0 && centavos(troco) > 0) {
+      for (const p of pagamentos.filter((x) => x.forma === 'dinheiro')) {
+        const tirar = Math.min(p.centavos, excedente)
+        p.centavos -= tirar
+        excedente -= tirar
+      }
+    }
+    const porForma = new Map()
+    for (const p of pagamentos) {
+      if (p.centavos > 0) porForma.set(p.forma, (porForma.get(p.forma) || 0) + p.centavos)
+    }
+    return {
+      ...cupom,
+      pagamentos: [...porForma].map(([forma, c]) => ({ forma, valor: c / 100 })),
+    }
+  })
+}
+
 // --- NFC-e emitidas (Focus NFe) ---
 
 /** Venda com os dados fiscais de cada produto, para montar a NFC-e. */
@@ -3570,6 +3613,7 @@ module.exports = {
   listarXmlsEntrada,
   obterXmlNotaEntrada,
   resumoFiscalPeriodo,
+  listarCuponsPeriodo,
   obterDevolucaoClienteParaNfe,
   ultimaNotaFiscalDaDevolucaoCliente,
   contarTentativasNotaFiscalDevolucaoCliente,
