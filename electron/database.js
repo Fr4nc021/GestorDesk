@@ -1378,6 +1378,16 @@ function atribuirSequenciaPagamentosCaixa(rows) {
   return result
 }
 
+const SQL_NOTA_STATUS_VENDA = `(SELECT n.status FROM notas_fiscais n WHERE n.venda_id = v.id ORDER BY n.id DESC LIMIT 1)`
+
+/** Venda cuja última NF-e/NFC-e não está cancelada (ou que ainda não tem nota). */
+const SQL_VENDA_SEM_NF_CANCELADA = `NOT EXISTS (
+      SELECT 1 FROM notas_fiscais n
+      WHERE n.venda_id = v.id
+        AND n.id = (SELECT MAX(t.id) FROM notas_fiscais t WHERE t.venda_id = v.id)
+        AND n.status = 'cancelado'
+    )`
+
 const SQL_PAGAMENTOS_CAIXA_BASE = `
     SELECT
       v.id as venda_id,
@@ -1385,6 +1395,7 @@ const SQL_PAGAMENTOS_CAIXA_BASE = `
       v.valor_total,
       vp.forma_pagamento,
       vp.valor,
+      ${SQL_NOTA_STATUS_VENDA} as nota_status,
       (SELECT GROUP_CONCAT(p.nome || ' x' || vi.quantidade) FROM vendas_itens vi JOIN produtos p ON p.id = vi.produto_id WHERE vi.venda_id = v.id AND vi.deleted_at IS NULL) as itens_resumo,
       (SELECT COALESCE(SUM(vi.quantidade), 0) FROM vendas_itens vi WHERE vi.venda_id = v.id AND vi.deleted_at IS NULL) as qtd_itens
     FROM vendas_pagamentos vp
@@ -1436,6 +1447,7 @@ function listarPagamentosCaixaPorPeriodoEProduto(dataInicio, dataFim, produtoId)
       v.valor_total,
       vp.forma_pagamento,
       vp.valor,
+      ${SQL_NOTA_STATUS_VENDA} as nota_status,
       (SELECT GROUP_CONCAT(p.nome || ' x' || vi.quantidade)
        FROM vendas_itens vi
        JOIN produtos p ON p.id = vi.produto_id
@@ -2014,6 +2026,7 @@ function obterRelatorioCustoVendasPeriodo(dataInicio, dataFim, artesaoId = null)
 
 /**
  * Totais por forma de pagamento no período, considerando vendas_pagamentos.
+ * Vendas cuja última nota está cancelada não entram no total nem na quantidade.
  * @param {string} dataInicio - YYYY-MM-DD
  * @param {string} dataFim - YYYY-MM-DD
  * @returns {Array<{ forma_pagamento: string, total: number, qtd_transacoes: number }>}
@@ -2029,6 +2042,7 @@ function obterTotaisPagamentosPorPeriodo(dataInicio, dataFim) {
     WHERE v.deleted_at IS NULL
       AND vp.deleted_at IS NULL
       AND date(v.data) >= date(?) AND date(v.data) <= date(?)
+      AND ${SQL_VENDA_SEM_NF_CANCELADA}
     GROUP BY vp.forma_pagamento
   `).all(dataInicio, dataFim)
   // Reembolsos de devolução de cliente saem do total da forma usada.

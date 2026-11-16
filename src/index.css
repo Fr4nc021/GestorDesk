@@ -2289,6 +2289,22 @@ button.caixa-btn-filtro-periodo {
   background: #fafafa;
 }
 
+.caixa-transacoes-table tbody tr.caixa-transacao-cancelada {
+  color: #9a9a9a;
+}
+
+.caixa-nf-cancelada {
+  display: inline-block;
+  font-weight: 700;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  color: #c62828;
+  background: #fdecea;
+  border: 1px solid #f5c6c2;
+  border-radius: 6px;
+  padding: 4px 8px;
+}
+
 .caixa-pagamento-badge {
   display: inline-flex;
   align-items: center;

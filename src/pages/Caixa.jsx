@@ -72,6 +72,10 @@ function filtrosCaixaPadrao(dataIso) {
   }
 }
 
+function notaFiscalCancelada(item) {
+  return item?.nota_status === 'cancelado'
+}
+
 function montarTotaisPorForma(totaisDb) {
   const totaisPorForma = {}
   for (const forma of FORMAS_PAGAMENTO_ORDEM) {
@@ -256,7 +260,10 @@ export default function Caixa() {
     return transacoes.filter((transacao) => transacao.forma_pagamento === formaPagamentoFiltro)
   }, [transacoes, formaPagamentoFiltro])
 
-  const totalFiltrado = transacoesVisiveis.reduce((acc, transacao) => acc + (transacao.valor || 0), 0)
+  const totalFiltrado = transacoesVisiveis.reduce(
+    (acc, transacao) => (notaFiscalCancelada(transacao) ? acc : acc + (transacao.valor || 0)),
+    0
+  )
 
   function irParaHoje() {
     setPeriodoDe(hoje)
@@ -323,16 +330,22 @@ export default function Caixa() {
         : null
     const formasNoRelatorio = filtroForma ? [filtroForma] : FORMAS_PAGAMENTO_ORDEM
 
-    let vendas = []
+    let pagamentos = []
     let totaisDb = []
     try {
-      vendas = await window.electronAPI.listarVendasPorPeriodo(dataDe, dataAte)
+      pagamentos = await window.electronAPI.listarPagamentosCaixaPorPeriodo(dataDe, dataAte)
       totaisDb = await window.electronAPI.obterTotaisPagamentosPorPeriodo(dataDe, dataAte)
     } catch (err) {
       console.error(err)
       alert('Erro ao carregar vendas.')
       return null
     }
+
+    if (filtroForma) {
+      pagamentos = pagamentos.filter((p) => p.forma_pagamento === filtroForma)
+    }
+    const notasCanceladas = pagamentos.filter((p) => notaFiscalCancelada(p))
+    const qtdTransacoesAtivas = pagamentos.length - notasCanceladas.length
 
     const totaisPorForma = montarTotaisPorForma(totaisDb)
     let totalGeral = 0
@@ -342,7 +355,15 @@ export default function Caixa() {
 
     const doc = new jsPDF()
     const margin = 20
+    const alturaPagina = doc.internal.pageSize.getHeight()
+    const limiteY = alturaPagina - 20
     let y = 20
+
+    function garantirEspaco(altura) {
+      if (y + altura <= limiteY) return
+      doc.addPage()
+      y = 20
+    }
 
     doc.setFontSize(18)
     doc.text('Relatório de Caixa', margin, y)
@@ -373,6 +394,7 @@ export default function Caixa() {
 
     doc.setFontSize(10)
     for (const forma of formasNoRelatorio) {
+      garantirEspaco(8)
       const { total, qtd } = totaisPorForma[forma]
       const label = LABEL_PAGAMENTO[forma]
       doc.text(`${label}:`, margin, y)
@@ -381,7 +403,30 @@ export default function Caixa() {
       y += 8
     }
 
+    if (notasCanceladas.length > 0) {
+      y += 5
+      garantirEspaco(18)
+      doc.setFontSize(12)
+      doc.setTextColor(0, 0, 0)
+      doc.text('Notas canceladas', margin, y)
+      y += 8
+      doc.setFontSize(10)
+      for (const nota of notasCanceladas) {
+        garantirEspaco(8)
+        const quando = dataDe === dataAte ? formatHora(nota.data) : formatDataHoraCaixa(nota.data)
+        const idVenda = `#${String(nota.venda_id).padStart(4, '0')}`
+        const forma = LABEL_PAGAMENTO[nota.forma_pagamento] ?? nota.forma_pagamento
+        doc.setTextColor(80, 80, 80)
+        doc.text(`${quando}  ${idVenda}  ${forma}`, margin, y)
+        doc.setTextColor(180, 0, 0)
+        doc.text('NF CANCELADA', 120, y)
+        y += 8
+      }
+      doc.setTextColor(0, 0, 0)
+    }
+
     y += 5
+    garantirEspaco(16)
     doc.setFontSize(12)
     doc.setFont('helvetica', 'bold')
     doc.text('Total geral:', margin, y)
@@ -389,8 +434,10 @@ export default function Caixa() {
     doc.setFont('helvetica', 'normal')
     y += 8
     doc.setFontSize(10)
-    const qtdTransacoesRodape = filtroForma ? totaisPorForma[filtroForma].qtd : vendas.length
-    doc.text(`Total de ${qtdTransacoesRodape} transação(ões)`, margin, y)
+    const rodapeCanceladas = notasCanceladas.length
+      ? ` · ${notasCanceladas.length} NF cancelada(s) não somada(s)`
+      : ''
+    doc.text(`Total de ${qtdTransacoesAtivas} transação(ões)${rodapeCanceladas}`, margin, y)
 
     const sufixoForma = filtroForma ? `-${filtroForma}` : ''
     const filename =
@@ -605,7 +652,10 @@ export default function Caixa() {
                 </tr>
               ) : (
                 transacoesVisiveis.map((transacao) => (
-                  <tr key={`${transacao.venda_id}-${transacao.sequencia}`}>
+                  <tr
+                    key={`${transacao.venda_id}-${transacao.sequencia}`}
+                    className={notaFiscalCancelada(transacao) ? 'caixa-transacao-cancelada' : undefined}
+                  >
                     <td>{periodoUmDia ? formatHora(transacao.data) : formatDataHoraCaixa(transacao.data)}</td>
                     <td>#{String(transacao.venda_id).padStart(4, '0')}/{transacao.sequencia}</td>
                     <td title={transacao.itens_resumo || undefined}>
@@ -620,7 +670,13 @@ export default function Caixa() {
                         {LABEL_PAGAMENTO[transacao.forma_pagamento] ?? transacao.forma_pagamento}
                       </span>
                     </td>
-                    <td>{formatBRL(transacao.valor)}</td>
+                    <td>
+                      {notaFiscalCancelada(transacao) ? (
+                        <span className="caixa-nf-cancelada">NF CANCELADA</span>
+                      ) : (
+                        formatBRL(transacao.valor)
+                      )}
+                    </td>
                     <td>
                       {!transacao.estorno && <div className="caixa-acoes-cell">
                         {transacao.sequencia === 1 && (
