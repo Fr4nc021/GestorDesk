@@ -2809,6 +2809,16 @@ button.caixa-btn-filtro-periodo {
   align-items: flex-start;
 }
 
+.devolucao-fornecedor-fechado {
+  align-items: flex-end;
+}
+
+.devolucao-fornecedor .devolucao-fornecedor-botao {
+  width: auto;
+  padding: 6px 14px;
+  font-size: 13px;
+}
+
 .devolucao-fornecedor > .produtos-table-wrapper,
 .devolucao-fornecedor > textarea {
   width: 100%;

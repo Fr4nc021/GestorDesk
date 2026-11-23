@@ -120,8 +120,8 @@ export default function DevolucaoFornecedor({ onGerada }) {
 
   if (!aberto) {
     return (
-      <div className="devolucao-fornecedor">
-        <button type="button" className="modal-submit" onClick={() => { setMensagem({ tipo: '', texto: '' }); setAberto(true) }}>
+      <div className="devolucao-fornecedor devolucao-fornecedor-fechado">
+        <button type="button" className="modal-submit devolucao-fornecedor-botao" onClick={() => { setMensagem({ tipo: '', texto: '' }); setAberto(true) }}>
           Nova devolução ao fornecedor
         </button>
         {mensagem.texto && <p className={`config-feedback ${mensagem.tipo}`}>{mensagem.texto}</p>}
