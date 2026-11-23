@@ -2509,7 +2509,7 @@ function registrarDevolucaoArtesao({ nota_entrada_id, itens, observacao = null }
 }
 
 /**
- * Devolução ao artesão com peças de várias notas de remessa dele (uma NF-e 5918 referenciando todas as remessas).
+ * Devolução ao artesão com peças de várias notas de remessa dele (uma devolução e uma NF-e 5918 por remessa).
  * @param {{ artesao_id: number, itens: Array<{ nota_item_id: number, quantidade: number }>, observacao?: string }} dados
  */
 function registrarDevolucaoArtesaoAvulsa({ artesao_id, itens, observacao = null, cfop = '5918' }) {
@@ -2600,23 +2600,33 @@ function gravarDevolucaoArtesao({ artesao_id, nota_entrada_id, itens, observacao
         valor_unitario: Number(item.valor_unitario) || 0,
       }
     })
-    const valorTotal = Math.round(linhas.reduce((acc, l) => acc + l.quantidade * l.valor_unitario, 0) * 100) / 100
-    // Várias remessas: a devolução fica presa à mais antiga; a NF-e referencia todas (pelas notas dos itens).
-    const notaPrincipal =
-      nota_entrada_id ??
-      [...linhas].sort((a, b) => String(a.nota_data || '').localeCompare(String(b.nota_data || '')) || a.nota_id - b.nota_id)[0]
-        .nota_id
-    const devolucaoId = insertDevolucao.run(notaPrincipal, artesao_id, valorTotal, observacao || null, cfop).lastInsertRowid
-    for (const linha of linhas) {
-      insertItem.run(devolucaoId, linha.nota_item_id, linha.produto_id, linha.quantidade, linha.valor_unitario)
-      assertUmaLinhaProdutoEstoque(
-        updateEstoque.run(linha.quantidade, linha.produto_id),
-        linha.produto_id,
-        'Devolução ao artesão',
-      )
-      insertMov.run(linha.produto_id, linha.quantidade)
+    const somar = (ls) => Math.round(ls.reduce((acc, l) => acc + l.quantidade * l.valor_unitario, 0) * 100) / 100
+    // A SEFAZ rejeita NF-e de devolução com mais de uma nota referenciada (rejeição 255):
+    // peças de várias remessas viram uma devolução (e uma NF-e) por remessa, da mais antiga para a mais nova.
+    const grupos = new Map()
+    for (const linha of [...linhas].sort(
+      (a, b) => String(a.nota_data || '').localeCompare(String(b.nota_data || '')) || a.nota_id - b.nota_id,
+    )) {
+      const chave = nota_entrada_id ?? linha.nota_id
+      if (!grupos.has(chave)) grupos.set(chave, [])
+      grupos.get(chave).push(linha)
     }
-    return { id: devolucaoId, valor_total: valorTotal }
+    const devolucoes = []
+    for (const [notaId, grupo] of grupos) {
+      const valor = somar(grupo)
+      const devolucaoId = insertDevolucao.run(notaId, artesao_id, valor, observacao || null, cfop).lastInsertRowid
+      for (const linha of grupo) {
+        insertItem.run(devolucaoId, linha.nota_item_id, linha.produto_id, linha.quantidade, linha.valor_unitario)
+        assertUmaLinhaProdutoEstoque(
+          updateEstoque.run(linha.quantidade, linha.produto_id),
+          linha.produto_id,
+          'Devolução ao artesão',
+        )
+        insertMov.run(linha.produto_id, linha.quantidade)
+      }
+      devolucoes.push({ id: devolucaoId, valor_total: valor })
+    }
+    return { id: devolucoes[0].id, ids: devolucoes.map((d) => d.id), valor_total: somar(linhas) }
   })()
 }
 

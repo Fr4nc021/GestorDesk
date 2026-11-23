@@ -239,6 +239,13 @@ function montarNfeDevolucao({ devolucao, itens, chaveRemessa, remessa, remessas,
   }))
   const semChave = origens.find((r) => r.chave.length !== 44)
   if (semChave) throw new Error(`A nota de remessa nº ${semChave.numero || '—'} não tem chave de acesso válida.`)
+  // A SEFAZ aceita só uma nota referenciada na NF-e de devolução (rejeição 255).
+  if (new Set(origens.map((r) => r.chave)).size > 1) {
+    throw new Error(
+      'Esta devolução tem peças de mais de uma remessa e a SEFAZ só aceita uma nota referenciada. ' +
+        'Cancele esta devolução e registre de novo: o sistema gera uma NF-e por remessa.',
+    )
+  }
   if (!artesao) throw new Error('A devolução não tem fornecedor.')
 
   const documento = somenteDigitos(artesao.cpf_cnpj)
