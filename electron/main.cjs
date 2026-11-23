@@ -152,6 +152,8 @@ const {
   excluirNotaEntrada,
   listarVinculosNotaEntrada,
   registrarDevolucaoArtesao,
+  registrarDevolucaoArtesaoAvulsa,
+  listarPecasDevolviveisArtesao,
   listarDevolucoesArtesao,
   cancelarDevolucaoArtesao,
   listarNotasFiscais,
@@ -345,6 +347,8 @@ ipcMain.handle('listar-itens-nota-entrada', (_, notaId) => listarItensNotaEntrad
 ipcMain.handle('excluir-nota-entrada', (_, id) => excluirNotaEntrada(id))
 ipcMain.handle('listar-vinculos-nota-entrada', (_, artesaoId) => listarVinculosNotaEntrada(artesaoId))
 ipcMain.handle('registrar-devolucao-artesao', (_, dados) => registrarDevolucaoArtesao(dados))
+ipcMain.handle('registrar-devolucao-artesao-avulsa', (_, dados) => registrarDevolucaoArtesaoAvulsa(dados))
+ipcMain.handle('listar-pecas-devolviveis-artesao', (_, artesaoId) => listarPecasDevolviveisArtesao(artesaoId))
 ipcMain.handle('listar-devolucoes-artesao', (_, notaEntradaId) => listarDevolucoesArtesao(notaEntradaId ?? null))
 ipcMain.handle('cancelar-devolucao-artesao', (_, id) => cancelarDevolucaoArtesao(id))
 ipcMain.handle('emitir-nfce-venda', (_, vendaId, opcoes) => emitirNfceDaVenda(vendaId, opcoes || {}))

@@ -226,12 +226,19 @@ function montarNfce({ venda, itens, pagamentos, config, cpf = '', ibpt = null })
  * CSOSN 400, PIS/COFINS 49, referenciando a chave da nota de remessa.
  * @param {object} dados - { devolucao, itens, chaveRemessa, artesao, config }
  */
-function montarNfeDevolucao({ devolucao, itens, chaveRemessa, remessa, artesao, config }) {
+function montarNfeDevolucao({ devolucao, itens, chaveRemessa, remessa, remessas, artesao, config }) {
   const cnpj = somenteDigitos(config.cnpj)
   if (cnpj.length !== 14) throw new Error('Cadastre o CNPJ da loja em Configurações › Fiscal.')
   if (!Array.isArray(itens) || itens.length === 0) throw new Error('A devolução não tem itens.')
   const chave = somenteDigitos(chaveRemessa)
   if (chave.length !== 44) throw new Error('A nota de remessa não tem chave de acesso válida.')
+  // Devolução com peças de várias remessas: referencia todas (NFref aceita até 500 chaves).
+  const origens = (Array.isArray(remessas) && remessas.length > 0 ? remessas : [{ ...remessa, chave }]).map((r) => ({
+    ...r,
+    chave: somenteDigitos(r.chave),
+  }))
+  const semChave = origens.find((r) => r.chave.length !== 44)
+  if (semChave) throw new Error(`A nota de remessa nº ${semChave.numero || '—'} não tem chave de acesso válida.`)
   if (!artesao) throw new Error('A devolução não tem fornecedor.')
 
   const documento = somenteDigitos(artesao.cpf_cnpj)
@@ -257,7 +264,8 @@ function montarNfeDevolucao({ devolucao, itens, chaveRemessa, remessa, artesao, 
   const inscricao = somenteDigitos(artesao.inscricao_estadual)
   // Simbólica (5919/6919): peças vendidas pela loja; física (5918): peças que voltam ao artesão.
   const simbolica = devolucao.tipo === 'simbolica'
-  const cfop = simbolica ? String(devolucao.cfop || '5919') : '5918'
+  // Física: 5918 dentro do estado, 6918 para fornecedor de outro estado.
+  const cfop = simbolica ? String(devolucao.cfop || '5919') : String(devolucao.cfop || '5918')
   const nota = {
     cnpj_emitente: cnpj,
     data_emissao: agoraBrasilia(),
@@ -272,7 +280,7 @@ function montarNfeDevolucao({ devolucao, itens, chaveRemessa, remessa, artesao, 
     consumidor_final: inscricao ? '0' : '1',
     presenca_comprador: '9',
     modalidade_frete: '9',
-    notas_referenciadas: [{ chave_nfe: chave }],
+    notas_referenciadas: origens.map((r) => ({ chave_nfe: r.chave })),
     nome_destinatario: String(artesao.razao_social || artesao.nome || '').slice(0, 60),
     logradouro_destinatario: artesao.logradouro,
     numero_destinatario: artesao.numero,
@@ -315,14 +323,16 @@ function montarNfeDevolucao({ devolucao, itens, chaveRemessa, remessa, artesao, 
   const telefone = somenteDigitos(artesao.telefone_whats)
   if (telefone.length >= 10) nota.telefone_destinatario = telefone
   // Texto pedido pelo manual do contador para a devolução.
-  const dataRemessa = String(remessa?.data_emissao || '').slice(0, 10).split('-').reverse().join('/')
+  const dataBr = (d) => String(d || '').slice(0, 10).split('-').reverse().join('/')
+  const refNota = (r) => `nº ${r.numero || r.chave.slice(25, 34)}${r.data_emissao ? `, de ${dataBr(r.data_emissao)}` : ''}`
+  const textoRemessas =
+    origens.length > 1 ? `pelas NF-e ${origens.map(refNota).join('; ')}` : `pela NF-e ${refNota(origens[0])}`
   const periodo = [devolucao.periodo_inicio, devolucao.periodo_fim]
     .map((d) => String(d || '').slice(0, 10).split('-').reverse().join('/'))
     .join(' a ')
   const complementar = [
     `${simbolica ? 'Devolução simbólica de mercadoria vendida no período de ' + periodo + ', recebida' : 'Devolução de mercadoria recebida'}` +
-      ` em consignação mercantil pela NF-e nº ${remessa?.numero || chave.slice(25, 34)}` +
-      `${dataRemessa ? `, de ${dataRemessa}` : ''}, nos termos do Ajuste SINIEF 02/93.`,
+      ` em consignação mercantil ${textoRemessas}, nos termos do Ajuste SINIEF 02/93.`,
     'Documento emitido por ME/EPP optante pelo Simples Nacional. Não gera direito a crédito fiscal de ICMS e IPI.',
     devolucao.observacao ? String(devolucao.observacao) : '',
   ]

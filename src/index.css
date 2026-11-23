@@ -2801,6 +2801,19 @@ button.caixa-btn-filtro-periodo {
   width: 70px;
 }
 
+.devolucao-fornecedor {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 16px;
+  align-items: flex-start;
+}
+
+.devolucao-fornecedor > .produtos-table-wrapper,
+.devolucao-fornecedor > textarea {
+  width: 100%;
+}
+
 .devolucao-simbolica {
   display: flex;
   flex-direction: column;

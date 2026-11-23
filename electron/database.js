@@ -2454,8 +2454,14 @@ function excluirNotaEntrada(id) {
   const nota = db.prepare('SELECT id FROM notas_entrada WHERE id = ? AND deleted_at IS NULL').get(id)
   if (!nota) throw new Error('Nota não encontrada.')
   const devolucao = db
-    .prepare('SELECT id FROM devolucoes_artesao WHERE nota_entrada_id = ? AND deleted_at IS NULL LIMIT 1')
-    .get(id)
+    .prepare(`
+      SELECT d.id FROM devolucoes_artesao d
+      WHERE d.deleted_at IS NULL AND (d.nota_entrada_id = ? OR EXISTS (
+        SELECT 1 FROM devolucoes_artesao_itens di JOIN notas_entrada_itens i ON i.id = di.nota_item_id
+        WHERE di.devolucao_id = d.id AND i.nota_id = ?))
+      LIMIT 1
+    `)
+    .get(id, id)
   if (devolucao) throw new Error('Não é possível excluir: esta nota tem devolução registrada. Cancele a devolução antes.')
   const itens = db
     .prepare('SELECT produto_id, quantidade_estoque FROM notas_entrada_itens WHERE nota_id = ? AND quantidade_estoque > 0')
@@ -2499,22 +2505,60 @@ function registrarDevolucaoArtesao({ nota_entrada_id, itens, observacao = null }
     .get(nota_entrada_id)
   if (!nota) throw new Error('Nota não encontrada.')
   if (nota.tipo !== 'remessa_consignacao') throw new Error('Só é possível devolver peças de uma nota de remessa em consignação.')
+  return gravarDevolucaoArtesao({ artesao_id: nota.artesao_id, nota_entrada_id: nota.id, itens, observacao })
+}
+
+/**
+ * Devolução ao artesão com peças de várias notas de remessa dele (uma NF-e 5918 referenciando todas as remessas).
+ * @param {{ artesao_id: number, itens: Array<{ nota_item_id: number, quantidade: number }>, observacao?: string }} dados
+ */
+function registrarDevolucaoArtesaoAvulsa({ artesao_id, itens, observacao = null, cfop = '5918' }) {
+  const artesaoId = Number(artesao_id)
+  if (!artesaoId) throw new Error('Selecione o fornecedor.')
+  if (!['5918', '6918'].includes(String(cfop))) throw new Error('CFOP de devolução inválido (use 5918 ou 6918).')
+  return gravarDevolucaoArtesao({ artesao_id: artesaoId, nota_entrada_id: null, itens, observacao, cfop: String(cfop) })
+}
+
+/** Peças do artesão que ainda podem voltar para ele, de todas as notas de remessa em consignação. */
+function listarPecasDevolviveisArtesao(artesaoId) {
+  return db.prepare(`
+    SELECT * FROM (
+      SELECT i.id as nota_item_id, i.nota_id, n.numero as nota_numero, n.data_emissao as nota_data,
+             i.produto_id, i.descricao, i.valor_unitario, p.nome as produto_nome, p.variacao as produto_variacao,
+             p.estoque as produto_estoque,
+             MAX(COALESCE(i.quantidade_estoque, 0), CAST(ROUND(COALESCE(i.quantidade, 0)) AS INTEGER)) -
+             (SELECT COALESCE(SUM(di.quantidade), 0) FROM devolucoes_artesao_itens di
+                JOIN devolucoes_artesao d ON d.id = di.devolucao_id AND d.deleted_at IS NULL
+                WHERE di.nota_item_id = i.id) as restante
+      FROM notas_entrada_itens i
+      JOIN notas_entrada n ON n.id = i.nota_id
+      JOIN produtos p ON p.id = i.produto_id
+      WHERE n.artesao_id = ? AND n.tipo = 'remessa_consignacao' AND n.deleted_at IS NULL
+    )
+    WHERE restante > 0 AND produto_estoque > 0
+    ORDER BY produto_nome COLLATE NOCASE, nota_data, nota_item_id
+  `).all(Number(artesaoId))
+}
+
+function gravarDevolucaoArtesao({ artesao_id, nota_entrada_id, itens, observacao, cfop = null }) {
   const pedidos = (Array.isArray(itens) ? itens : [])
     .map((i) => ({ nota_item_id: Number(i.nota_item_id), quantidade: Math.round(Number(i.quantidade) || 0) }))
     .filter((i) => i.quantidade > 0)
   if (pedidos.length === 0) throw new Error('Informe a quantidade de pelo menos uma peça.')
 
   const getItem = db.prepare(`
-    SELECT i.id, i.produto_id, i.quantidade_estoque, i.quantidade, i.valor_unitario, p.nome, p.estoque,
+    SELECT i.id, i.nota_id, n.data_emissao as nota_data, i.produto_id, i.quantidade_estoque, i.quantidade,
+           i.valor_unitario, p.nome, p.estoque,
            (SELECT COALESCE(SUM(di.quantidade), 0) FROM devolucoes_artesao_itens di
               JOIN devolucoes_artesao d ON d.id = di.devolucao_id AND d.deleted_at IS NULL
               WHERE di.nota_item_id = i.id) as devolvida
     FROM notas_entrada_itens i
+    JOIN notas_entrada n ON n.id = i.nota_id AND n.deleted_at IS NULL AND n.tipo = 'remessa_consignacao'
     JOIN produtos p ON p.id = i.produto_id
-    WHERE i.id = ? AND i.nota_id = ?
+    WHERE i.id = ? AND n.artesao_id IS ? AND (? IS NULL OR i.nota_id = ?)
   `)
   const insertDevolucao = db.prepare(`
-    INSERT INTO devolucoes_artesao (nota_entrada_id, artesao_id, valor_total, observacao) VALUES (?, ?, ?, ?)
+    INSERT INTO devolucoes_artesao (nota_entrada_id, artesao_id, valor_total, observacao, cfop) VALUES (?, ?, ?, ?, ?)
   `)
   const insertItem = db.prepare(`
     INSERT INTO devolucoes_artesao_itens (devolucao_id, nota_item_id, produto_id, quantidade, valor_unitario)
@@ -2527,9 +2571,18 @@ function registrarDevolucaoArtesao({ nota_entrada_id, itens, observacao = null }
   `)
 
   return db.transaction(() => {
+    const vistos = new Set()
+    // O mesmo produto pode vir em várias remessas: o estoque é checado pelo total pedido do produto.
+    const porProduto = new Map()
     const linhas = pedidos.map((pedido) => {
-      const item = getItem.get(pedido.nota_item_id, nota.id)
-      if (!item) throw new Error('Item da nota não encontrado ou sem produto vinculado.')
+      if (vistos.has(pedido.nota_item_id)) throw new Error('Item repetido na devolução.')
+      vistos.add(pedido.nota_item_id)
+      const item = getItem.get(pedido.nota_item_id, artesao_id, nota_entrada_id, nota_entrada_id)
+      if (!item) throw new Error('Item da nota não encontrado, sem produto vinculado ou de outro fornecedor.')
+      porProduto.set(item.produto_id, (porProduto.get(item.produto_id) || 0) + pedido.quantidade)
+      if (porProduto.get(item.produto_id) > Number(item.estoque)) {
+        throw new Error(`"${item.nome}": o estoque atual é ${item.estoque}.`)
+      }
       // Peças vinculadas sem "Somar ao estoque" já estavam no estoque: contam pela quantidade da nota.
       const recebidas = Math.max(Number(item.quantidade_estoque) || 0, Math.round(Number(item.quantidade) || 0))
       const restante = recebidas - item.devolvida
@@ -2539,10 +2592,21 @@ function registrarDevolucaoArtesao({ nota_entrada_id, itens, observacao = null }
       if (pedido.quantidade > Number(item.estoque)) {
         throw new Error(`"${item.nome}": o estoque atual é ${item.estoque}.`)
       }
-      return { ...pedido, produto_id: item.produto_id, valor_unitario: Number(item.valor_unitario) || 0 }
+      return {
+        ...pedido,
+        nota_id: item.nota_id,
+        nota_data: item.nota_data,
+        produto_id: item.produto_id,
+        valor_unitario: Number(item.valor_unitario) || 0,
+      }
     })
     const valorTotal = Math.round(linhas.reduce((acc, l) => acc + l.quantidade * l.valor_unitario, 0) * 100) / 100
-    const devolucaoId = insertDevolucao.run(nota.id, nota.artesao_id, valorTotal, observacao || null).lastInsertRowid
+    // Várias remessas: a devolução fica presa à mais antiga; a NF-e referencia todas (pelas notas dos itens).
+    const notaPrincipal =
+      nota_entrada_id ??
+      [...linhas].sort((a, b) => String(a.nota_data || '').localeCompare(String(b.nota_data || '')) || a.nota_id - b.nota_id)[0]
+        .nota_id
+    const devolucaoId = insertDevolucao.run(notaPrincipal, artesao_id, valorTotal, observacao || null, cfop).lastInsertRowid
     for (const linha of linhas) {
       insertItem.run(devolucaoId, linha.nota_item_id, linha.produto_id, linha.quantidade, linha.valor_unitario)
       assertUmaLinhaProdutoEstoque(
@@ -3068,7 +3132,16 @@ function obterDevolucaoParaNfe(devolucaoId) {
     WHERE di.devolucao_id = ?
     ORDER BY di.id
   `).all(devolucaoId)
-  return { devolucao, itens, chaveRemessa: remessa?.chave, remessa, artesao }
+  // Todas as remessas de onde as peças saíram (a devolução avulsa junta várias).
+  const remessas = db.prepare(`
+    SELECT DISTINCT n.id, n.chave, n.numero, n.data_emissao
+    FROM devolucoes_artesao_itens di
+    JOIN notas_entrada_itens i ON i.id = di.nota_item_id
+    JOIN notas_entrada n ON n.id = i.nota_id
+    WHERE di.devolucao_id = ?
+    ORDER BY n.data_emissao, n.id
+  `).all(devolucaoId)
+  return { devolucao, itens, chaveRemessa: remessa?.chave, remessa, remessas, artesao }
 }
 
 /** Status da devolução acompanha a NF-e: 'nf_emitida' trava o cancelamento da devolução. */
@@ -3597,6 +3670,8 @@ module.exports = {
   excluirNotaEntrada,
   listarVinculosNotaEntrada,
   registrarDevolucaoArtesao,
+  registrarDevolucaoArtesaoAvulsa,
+  listarPecasDevolviveisArtesao,
   listarDevolucoesArtesao,
   cancelarDevolucaoArtesao,
   obterVendaParaNfce,

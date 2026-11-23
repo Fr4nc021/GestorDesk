@@ -22,7 +22,7 @@ function rotuloOrigem(nota) {
   }
   if (nota.devolucao_id) {
     const artesao = nota.artesao_nome_fantasia || nota.artesao_razao_social || nota.artesao_nome
-    const tipo = nota.devolucao_tipo === 'simbolica' ? `Devolução simbólica ${nota.devolucao_cfop || '5919'}` : 'Devolução 5918'
+    const tipo = nota.devolucao_tipo === 'simbolica' ? `Devolução simbólica ${nota.devolucao_cfop || '5919'}` : `Devolução ${nota.devolucao_cfop || '5918'}`
     return `${tipo}${artesao ? ` · ${artesao}` : ''}`
   }
   return `Venda #${nota.venda_id}`

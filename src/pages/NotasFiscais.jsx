@@ -1,10 +1,12 @@
 import { useState } from 'react'
 import NotasEntrada from './NotasEntrada'
 import NotasEmitidas from './NotasEmitidas'
+import DevolucaoFornecedor from '../components/DevolucaoFornecedor'
 
-/** Notas fiscais: notas de entrada (importação/SEFAZ) e as NF-e de devolução já emitidas. */
+/** Notas fiscais: notas de entrada (importação/SEFAZ) e as NF-e de devolução (emissão e lista). */
 export default function NotasFiscais() {
   const [aba, setAba] = useState('entrada')
+  const [versao, setVersao] = useState(0)
 
   return (
     <div className="notas-fiscais">
@@ -16,7 +18,14 @@ export default function NotasFiscais() {
           Notas de devolução
         </button>
       </div>
-      {aba === 'entrada' ? <NotasEntrada /> : <NotasEmitidas somenteDevolucoes />}
+      {aba === 'entrada' ? (
+        <NotasEntrada />
+      ) : (
+        <>
+          <DevolucaoFornecedor onGerada={() => setVersao((v) => v + 1)} />
+          <NotasEmitidas key={versao} somenteDevolucoes />
+        </>
+      )}
     </div>
   )
 }
