@@ -9,7 +9,7 @@ function dataBr(iso) {
 
 /**
  * Devolução ao fornecedor (NF-e 5918) escolhendo peças de qualquer nota de remessa dele.
- * Uma NF-e só, referenciando todas as remessas de onde as peças vieram.
+ * Uma NF-e por remessa de onde as peças vieram (a SEFAZ aceita só uma nota referenciada).
  */
 export default function DevolucaoFornecedor({ onGerada }) {
   const [aberto, setAberto] = useState(false)
@@ -94,19 +94,23 @@ export default function DevolucaoFornecedor({ onGerada }) {
         observacao: observacao.trim() || null,
         cfop,
       })
+      const ids = dev.ids?.length ? dev.ids : [dev.id]
       let texto = `Devolução registrada: ${totalPecas} peça(s), ${formatarMoeda(dev.valor_total)}. As peças saíram do estoque.`
+      if (ids.length > 1) texto += ` As peças vieram de ${ids.length} remessas: uma NF-e para cada.`
       let tipo = 'success'
-      try {
-        const nota = await window.electronAPI.emitirNfeDevolucao(dev.id)
-        if (nota?.status === 'autorizado') texto += ` NF-e nº ${nota.numero} autorizada.`
-        else if (nota?.status === 'processando_autorizacao') texto += ' NF-e em processamento na SEFAZ.'
-        else {
+      for (const id of ids) {
+        try {
+          const nota = await window.electronAPI.emitirNfeDevolucao(id)
+          if (nota?.status === 'autorizado') texto += ` NF-e nº ${nota.numero} autorizada.`
+          else if (nota?.status === 'processando_autorizacao') texto += ' NF-e em processamento na SEFAZ.'
+          else {
+            tipo = 'error'
+            texto += ` Uma NF-e não foi autorizada: ${nota?.mensagem || 'confira abaixo e reenvie.'}`
+          }
+        } catch (err) {
           tipo = 'error'
-          texto += ` A NF-e não foi autorizada: ${nota?.mensagem || 'confira abaixo e reenvie.'}`
+          texto += ` Erro ao emitir uma NF-e: ${mensagemErro(err, 'reenvie pela lista abaixo.')}`
         }
-      } catch (err) {
-        tipo = 'error'
-        texto += ` Erro ao emitir a NF-e: ${mensagemErro(err, 'reenvie pela lista abaixo.')}`
       }
       fechar()
       setMensagem({ tipo, texto })
@@ -226,7 +230,7 @@ export default function DevolucaoFornecedor({ onGerada }) {
           {salvando
             ? 'Emitindo...'
             : totalPecas > 0
-              ? `Emitir NF-e: ${totalPecas} peça(s) de ${remessasEnvolvidas} remessa(s) · ${formatarMoeda(totalValor)}`
+              ? `Emitir ${remessasEnvolvidas > 1 ? `${remessasEnvolvidas} NF-e (uma por remessa)` : 'NF-e'}: ${totalPecas} peça(s) · ${formatarMoeda(totalValor)}`
               : 'Selecione as peças'}
         </button>
       </div>

@@ -108,6 +108,22 @@ export default function NotasEmitidas({ somenteDevolucoes = false }) {
     }
   }
 
+  // NF-e rejeitada não existe na SEFAZ: cancelar a devolução só desfaz o registro e devolve as peças ao estoque.
+  async function cancelarDevolucao(nota) {
+    if (!window.confirm('Cancelar esta devolução? As peças voltam para o estoque e você pode registrar de novo.')) return
+    setProcessandoId(nota.id)
+    setMensagem({ tipo: '', texto: '' })
+    try {
+      await window.electronAPI.cancelarDevolucaoArtesao(nota.devolucao_id)
+      setMensagem({ tipo: 'success', texto: 'Devolução cancelada. As peças voltaram para o estoque.' })
+      await carregar()
+    } catch (err) {
+      setMensagem({ tipo: 'error', texto: mensagemErro(err, 'Erro ao cancelar a devolução.') })
+    } finally {
+      setProcessandoId(null)
+    }
+  }
+
   async function atualizarSituacao(nota) {
     setProcessandoId(nota.id)
     try {
@@ -254,6 +270,11 @@ export default function NotasEmitidas({ somenteDevolucoes = false }) {
                         {STATUS_REENVIAR.includes(nota.status) && !nota.venda_excluida_em && !nota.devolucao_excluida_em && !nota.devolucao_cliente_excluida_em && (
                           <BotaoAcao icone="atualizar" onClick={() => reenviar(nota)} disabled={processandoId === nota.id}>
                             {processandoId === nota.id ? 'Enviando...' : 'Tentar de novo'}
+                          </BotaoAcao>
+                        )}
+                        {nota.devolucao_id && nota.status !== 'enviando' && STATUS_REENVIAR.includes(nota.status) && !nota.devolucao_excluida_em && (
+                          <BotaoAcao icone="cancelar" perigo onClick={() => cancelarDevolucao(nota)} disabled={processandoId === nota.id}>
+                            Cancelar devolução
                           </BotaoAcao>
                         )}
                       </div>
