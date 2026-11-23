@@ -35,7 +35,7 @@ try {
     $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::HighQuality
     $g.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
     $g.CompositingQuality = [System.Drawing.Drawing2D.CompositingQuality]::HighQuality
-    $g.Clear([System.Drawing.Color]::FromArgb(255, 0, 0, 0))
+    $g.Clear([System.Drawing.Color]::Transparent)
     $g.DrawImage($src, 0, 0, $s, $s)
     $g.Dispose()
     $dest = Join-Path '${tmpPs}' ("icon-$s.bmp")
