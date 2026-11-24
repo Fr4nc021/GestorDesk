@@ -37,6 +37,7 @@ export default function Produtos() {
   const [modalAberto, setModalAberto] = useState(false)
   const [modalVariacoesAberto, setModalVariacoesAberto] = useState(false)
   const [modalExcluirAberto, setModalExcluirAberto] = useState(false)
+  const [juntar, setJuntar] = useState(null)
   const [produtoEmEdicao, setProdutoEmEdicao] = useState(null)
   const [produtoParaExcluir, setProdutoParaExcluir] = useState(null)
   const [modalRefazerCodigoAberto, setModalRefazerCodigoAberto] = useState(false)
@@ -957,6 +958,22 @@ export default function Produtos() {
     } catch (err) {
       console.error(err)
       mostrarToast(`Erro ao alterar status do produto: ${err?.message || err}`, 'error')
+    }
+  }
+
+  async function handleJuntarProdutos() {
+    if (!juntar?.destinoId) return
+    setJuntar((j) => ({ ...j, salvando: true, erro: '' }))
+    try {
+      const r = await window.electronAPI.juntarProdutos({ origem_id: juntar.origem.id, destino_id: Number(juntar.destinoId) })
+      setJuntar(null)
+      carregarProdutos()
+      mostrarToast(
+        `Produtos juntados. ${r.estoque_transferido} peça(s) de estoque, vendas e notas passaram para o produto escolhido.`,
+        'success',
+      )
+    } catch (err) {
+      setJuntar((j) => j && { ...j, salvando: false, erro: err?.message || String(err) })
     }
   }
 
@@ -1881,6 +1898,19 @@ ${chunk.join('\n')}
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                           <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
                           <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                        </svg>
+                      </button>
+                      <button
+                        type="button"
+                        className="artesaos-btn-edit"
+                        title="Juntar com outro produto (duplicado)"
+                        aria-label="Juntar com outro produto"
+                        onClick={() => setJuntar({ origem: p, destinoId: '', erro: '', salvando: false })}
+                      >
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M8 6l4-4 4 4" />
+                          <path d="M12 2v10.3a4 4 0 0 1-1.17 2.87L4 22" />
+                          <path d="M20 22l-5-5" />
                         </svg>
                       </button>
                       <button
@@ -3026,6 +3056,61 @@ ${chunk.join('\n')}
             >
               Fechar
             </button>
+          </div>
+        </div>
+      )}
+
+      {juntar && (
+        <div className="modal-overlay" onClick={() => !juntar.salvando && setJuntar(null)}>
+          <div className="modal-content modal-confirm" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Juntar produto duplicado</h3>
+              <button type="button" className="modal-close" onClick={() => !juntar.salvando && setJuntar(null)} aria-label="Fechar">
+                ×
+              </button>
+            </div>
+            <p>
+              <strong>
+                {juntar.origem.nome}
+                {juntar.origem.variacao ? ` (${juntar.origem.variacao})` : ''}
+              </strong>{' '}
+              (estoque {juntar.origem.estoque ?? 0}) será juntado ao produto abaixo e depois excluído. O estoque, as
+              vendas, as notas de entrada e as devoluções passam para o produto escolhido. O código de barras dele deixa
+              de funcionar.
+            </p>
+            <div className="modal-field">
+              <label htmlFor="juntarDestino">Produto certo (que fica)</label>
+              <select
+                id="juntarDestino"
+                value={juntar.destinoId}
+                onChange={(e) => setJuntar((j) => ({ ...j, destinoId: e.target.value, erro: '' }))}
+              >
+                <option value="">Escolha o produto...</option>
+                {produtos
+                  .filter((p) => p.id !== juntar.origem.id && (!juntar.origem.artesao_id || p.artesao_id === juntar.origem.artesao_id))
+                  .sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'))
+                  .map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.nome}
+                      {p.variacao ? ` (${p.variacao})` : ''} · estoque {p.estoque ?? 0}
+                    </option>
+                  ))}
+              </select>
+            </div>
+            {juntar.erro && <p className="config-feedback error">{juntar.erro}</p>}
+            <div className="modal-confirm-acoes">
+              <button type="button" className="modal-btn-cancelar" onClick={() => setJuntar(null)} disabled={juntar.salvando}>
+                Cancelar
+              </button>
+              <button
+                type="button"
+                className="modal-btn-excluir"
+                onClick={handleJuntarProdutos}
+                disabled={!juntar.destinoId || juntar.salvando}
+              >
+                {juntar.salvando ? 'Juntando...' : 'Juntar'}
+              </button>
+            </div>
           </div>
         </div>
       )}

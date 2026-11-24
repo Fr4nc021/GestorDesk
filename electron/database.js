@@ -2449,6 +2449,143 @@ function listarItensNotaEntrada(notaId) {
   `).all(notaId)
 }
 
+/** Ajusta o estoque de um produto (delta positivo = entrada) e registra a movimentação. Use dentro de transação. */
+function ajustarEstoqueProduto(produtoId, delta, origem, contexto) {
+  if (!delta) return
+  assertUmaLinhaProdutoEstoque(
+    db.prepare(`UPDATE produtos SET estoque = estoque + ?, sync_status = 'pending' WHERE id = ?`).run(delta, produtoId),
+    produtoId,
+    contexto,
+  )
+  db.prepare(`
+    INSERT INTO movimentacoes_estoque (produto_id, tipo, quantidade, origem, data)
+    VALUES (?, ?, ?, ?, datetime('now', 'localtime'))
+  `).run(produtoId, delta > 0 ? 'entrada' : 'saida', Math.abs(delta), origem)
+}
+
+/**
+ * Corrige o produto de um item de nota já importada, podendo dividi-lo entre vários produtos
+ * (ex.: 6 peças na nota que são 3 do produto A e 3 do B). Cada parte vira uma linha do mesmo item da nota,
+ * então a devolução e a NF-e de devolução continuam usando o código e a descrição do fornecedor.
+ * Se o item tinha somado ao estoque, o estoque é transferido entre os produtos.
+ * @param {{ nota_item_id: number, partes: Array<{ produto_id: number, quantidade: number }> }} dados
+ */
+function corrigirItemNotaEntrada({ nota_item_id, partes }) {
+  const item = db.prepare(`
+    SELECT i.* FROM notas_entrada_itens i
+    JOIN notas_entrada n ON n.id = i.nota_id AND n.deleted_at IS NULL
+    WHERE i.id = ?
+  `).get(Number(nota_item_id))
+  if (!item) throw new Error('Item da nota não encontrado.')
+  const lista = (Array.isArray(partes) ? partes : [])
+    .map((p) => ({ produto_id: Number(p.produto_id), quantidade: Math.round(Number(p.quantidade) || 0) }))
+    .filter((p) => p.quantidade > 0)
+  if (lista.length === 0) throw new Error('Informe pelo menos um produto com quantidade.')
+  if (lista.some((p) => !p.produto_id)) throw new Error('Escolha o produto de cada parte.')
+  if (new Set(lista.map((p) => p.produto_id)).size !== lista.length) throw new Error('O mesmo produto aparece duas vezes.')
+  const total = Math.round(Number(item.quantidade) || 0)
+  const soma = lista.reduce((s, p) => s + p.quantidade, 0)
+  if (soma !== total) throw new Error(`A soma das partes (${soma}) precisa ser igual à quantidade do item na nota (${total}).`)
+
+  const devolvido = db.prepare(`
+    SELECT 1 FROM devolucoes_artesao_itens di
+    JOIN devolucoes_artesao d ON d.id = di.devolucao_id AND d.deleted_at IS NULL
+    WHERE di.nota_item_id = ? LIMIT 1
+  `).get(item.id)
+  if (devolvido) throw new Error('Este item já tem devolução registrada. Cancele a devolução antes de corrigir.')
+
+  const getProduto = db.prepare('SELECT id, nome, estoque FROM produtos WHERE id = ? AND deleted_at IS NULL')
+  for (const p of lista) if (!getProduto.get(p.produto_id)) throw new Error('Produto não encontrado.')
+
+  const somouEstoque = Number(item.quantidade_estoque) > 0
+  return db.transaction(() => {
+    if (somouEstoque) {
+      // Saldo líquido por produto: tira do antigo o que a nota tinha lançado e põe em cada parte.
+      const delta = new Map()
+      if (item.produto_id) delta.set(item.produto_id, -Number(item.quantidade_estoque))
+      for (const p of lista) delta.set(p.produto_id, (delta.get(p.produto_id) || 0) + p.quantidade)
+      for (const [produtoId, d] of delta) {
+        if (d >= 0) continue
+        const produto = getProduto.get(produtoId)
+        if (produto && Number(produto.estoque) + d < 0) {
+          throw new Error(
+            `"${produto.nome}" tem ${produto.estoque} no estoque e precisaria sair ${-d}. Ajuste o estoque antes de corrigir.`,
+          )
+        }
+      }
+      for (const [produtoId, d] of delta) ajustarEstoqueProduto(produtoId, d, 'correcao_nfe', 'Correção de item da nota')
+    }
+    const unitario = Number(item.valor_unitario) || 0
+    const valorParte = (q) => Math.round(q * unitario * 100) / 100
+    const [primeira, ...resto] = lista
+    db.prepare(`
+      UPDATE notas_entrada_itens SET produto_id = ?, quantidade = ?, valor_total = ?, quantidade_estoque = ?,
+        sync_status = 'pending' WHERE id = ?
+    `).run(
+      primeira.produto_id,
+      primeira.quantidade,
+      lista.length === 1 ? Number(item.valor_total) || valorParte(primeira.quantidade) : valorParte(primeira.quantidade),
+      somouEstoque ? primeira.quantidade : 0,
+      item.id,
+    )
+    const insert = db.prepare(`
+      INSERT INTO notas_entrada_itens (
+        id, nota_id, numero_item, codigo, descricao, ncm, cest, cfop, unidade,
+        quantidade, valor_unitario, valor_total, produto_id, quantidade_estoque
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `)
+    for (const p of resto) {
+      insert.run(
+        novoIdSync(), item.nota_id, item.numero_item, item.codigo, item.descricao, item.ncm, item.cest, item.cfop,
+        item.unidade, p.quantidade, unitario, valorParte(p.quantidade), p.produto_id, somouEstoque ? p.quantidade : 0,
+      )
+    }
+    return { id: item.id, partes: lista.length, moveuEstoque: somouEstoque }
+  })()
+}
+
+/**
+ * Junta um produto duplicado (origem) ao produto certo (destino): estoque, vendas, movimentações, itens de notas
+ * e devoluções passam para o destino, e a origem é excluída. O código de barras da origem deixa de funcionar.
+ */
+function juntarProdutos({ origem_id, destino_id }) {
+  const origemId = Number(origem_id)
+  const destinoId = Number(destino_id)
+  if (!origemId || !destinoId) throw new Error('Escolha os dois produtos.')
+  if (origemId === destinoId) throw new Error('Escolha produtos diferentes.')
+  const getProduto = db.prepare('SELECT * FROM produtos WHERE id = ? AND deleted_at IS NULL')
+  const origem = getProduto.get(origemId)
+  const destino = getProduto.get(destinoId)
+  if (!origem || !destino) throw new Error('Produto não encontrado.')
+
+  const mover = (tabela) => {
+    const sync = tabelaTemColuna(db, tabela, 'sync_status') ? ", sync_status = 'pending'" : ''
+    return db.prepare(`UPDATE ${tabela} SET produto_id = ?${sync} WHERE produto_id = ?`).run(destinoId, origemId).changes
+  }
+  return db.transaction(() => {
+    const movidos = {}
+    for (const tabela of [
+      'vendas_itens',
+      'movimentacoes_estoque',
+      'notas_entrada_itens',
+      'devolucoes_artesao_itens',
+      'devolucoes_cliente_itens',
+    ]) {
+      movidos[tabela] = mover(tabela)
+    }
+    const estoque = Number(origem.estoque) || 0
+    assertUmaLinhaProdutoEstoque(
+      db.prepare(`UPDATE produtos SET estoque = estoque + ?, sync_status = 'pending' WHERE id = ?`).run(estoque, destinoId),
+      destinoId,
+      'Juntar produtos',
+    )
+    db.prepare(`
+      UPDATE produtos SET estoque = 0, deleted_at = datetime('now', 'localtime'), sync_status = 'pending' WHERE id = ?
+    `).run(origemId)
+    return { destino_id: destinoId, estoque_transferido: estoque, movidos }
+  })()
+}
+
 /** Exclui a importação e retira do estoque o que ela tinha lançado. Os produtos criados continuam cadastrados. */
 function excluirNotaEntrada(id) {
   const nota = db.prepare('SELECT id FROM notas_entrada WHERE id = ? AND deleted_at IS NULL').get(id)
@@ -3678,6 +3815,8 @@ module.exports = {
   listarNotasEntrada,
   listarItensNotaEntrada,
   excluirNotaEntrada,
+  corrigirItemNotaEntrada,
+  juntarProdutos,
   listarVinculosNotaEntrada,
   registrarDevolucaoArtesao,
   registrarDevolucaoArtesaoAvulsa,
