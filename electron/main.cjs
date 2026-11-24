@@ -152,6 +152,8 @@ const {
   excluirNotaEntrada,
   corrigirItemNotaEntrada,
   juntarProdutos,
+  notasEntradaEstoqueManual,
+  definirNotasEntradaEstoqueManual,
   listarVinculosNotaEntrada,
   registrarDevolucaoArtesao,
   registrarDevolucaoArtesaoAvulsa,
@@ -349,6 +351,8 @@ ipcMain.handle('listar-itens-nota-entrada', (_, notaId) => listarItensNotaEntrad
 ipcMain.handle('excluir-nota-entrada', (_, id) => excluirNotaEntrada(id))
 ipcMain.handle('corrigir-item-nota-entrada', (_, dados) => corrigirItemNotaEntrada(dados))
 ipcMain.handle('juntar-produtos', (_, dados) => juntarProdutos(dados))
+ipcMain.handle('notas-entrada-estoque-manual', () => notasEntradaEstoqueManual())
+ipcMain.handle('definir-notas-entrada-estoque-manual', (_, ativo) => definirNotasEntradaEstoqueManual(ativo))
 ipcMain.handle('listar-vinculos-nota-entrada', (_, artesaoId) => listarVinculosNotaEntrada(artesaoId))
 ipcMain.handle('registrar-devolucao-artesao', (_, dados) => registrarDevolucaoArtesao(dados))
 ipcMain.handle('registrar-devolucao-artesao-avulsa', (_, dados) => registrarDevolucaoArtesaoAvulsa(dados))

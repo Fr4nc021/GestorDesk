@@ -534,7 +534,7 @@ db.exec(`
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     devolucao_id INTEGER NOT NULL,
     nota_item_id INTEGER NOT NULL,
-    produto_id INTEGER NOT NULL,
+    produto_id INTEGER,
     quantidade INTEGER NOT NULL,
     valor_unitario REAL NOT NULL DEFAULT 0,
     FOREIGN KEY (devolucao_id) REFERENCES devolucoes_artesao(id),
@@ -706,6 +706,45 @@ try {
   renumerarNotasEntradaParaSync()
 } catch (err) {
   console.error('[DB] Erro ao preparar notas de entrada para sincronização:', err?.message || err)
+}
+
+// Devolução de item de nota sem produto vinculado (estoque manual): produto_id passa a aceitar NULL.
+try {
+  const coluna = db.prepare('PRAGMA table_info(devolucoes_artesao_itens)').all().find((c) => c.name === 'produto_id')
+  if (coluna?.notnull) {
+    const { sql } = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'devolucoes_artesao_itens'").get()
+    const novoSql = sql
+      .replace(/produto_id\s+INTEGER\s+NOT\s+NULL/i, 'produto_id INTEGER')
+      .replace(/CREATE TABLE\s+(IF NOT EXISTS\s+)?"?devolucoes_artesao_itens"?/i, 'CREATE TABLE devolucoes_artesao_itens_novo')
+    const colunas = db.prepare('PRAGMA table_info(devolucoes_artesao_itens)').all().map((c) => c.name).join(', ')
+    db.pragma('foreign_keys = OFF')
+    try {
+      db.transaction(() => {
+        db.exec(novoSql)
+        db.exec(`INSERT INTO devolucoes_artesao_itens_novo (${colunas}) SELECT ${colunas} FROM devolucoes_artesao_itens`)
+        db.exec('DROP TABLE devolucoes_artesao_itens')
+        db.exec('ALTER TABLE devolucoes_artesao_itens_novo RENAME TO devolucoes_artesao_itens')
+      })()
+    } finally {
+      db.pragma('foreign_keys = ON')
+    }
+  }
+} catch (err) {
+  console.error('[DB] Erro ao permitir devolução sem produto:', err?.message || err)
+}
+
+/** Notas de entrada não lançam estoque: a pessoa dá a entrada manual e o vínculo com produto é opcional. */
+function notasEntradaEstoqueManual() {
+  const row = db.prepare("SELECT valor FROM configuracoes WHERE chave = 'notas_entrada_estoque_manual'").get()
+  return row ? row.valor === '1' : true
+}
+
+function definirNotasEntradaEstoqueManual(ativo) {
+  db.prepare(`
+    INSERT INTO configuracoes (chave, valor) VALUES ('notas_entrada_estoque_manual', ?)
+    ON CONFLICT(chave) DO UPDATE SET valor = excluded.valor
+  `).run(ativo ? '1' : '0')
+  return { ativo: Boolean(ativo) }
 }
 
 /** Troca os ids sequenciais antigos (1, 2, 3…) por ids únicos, levando junto as referências. */
@@ -2273,6 +2312,8 @@ function importarNotaEntrada({ nota, itens, artesao_id = null, novo_artesao = nu
   const regra = TIPOS_NOTA_ENTRADA[nota.tipo]
   if (!regra) throw new Error('Tipo de nota inválido.')
   if (!Array.isArray(itens) || itens.length === 0) throw new Error('A nota não tem itens.')
+  // Estoque manual: a nota só registra itens (e vínculos, se houver); a entrada é feita à mão.
+  const lancaEstoque = regra.movimentaEstoque && !notasEntradaEstoqueManual()
 
   const insertNota = db.prepare(`
     INSERT INTO notas_entrada (
@@ -2329,7 +2370,7 @@ function importarNotaEntrada({ nota, itens, artesao_id = null, novo_artesao = nu
       nota.emitente_nome || null,
       artesaoId,
       Number(nota.valor_total) || 0,
-      regra.movimentaEstoque ? 1 : 0,
+      lancaEstoque ? 1 : 0,
       xml,
       nota.tipo === 'faturamento_consignacao' ? nota.acerto_inicio || null : null,
       nota.tipo === 'faturamento_consignacao' ? nota.acerto_fim || null : null,
@@ -2377,7 +2418,7 @@ function importarNotaEntrada({ nota, itens, artesao_id = null, novo_artesao = nu
 
       // Peça que já estava no estoque antes da importação (cadastrada no sistema antigo): só vincula, não soma.
       const somarEstoque = item.acao === 'criar' || item.somar_estoque !== false
-      const entraNoEstoque = regra.movimentaEstoque && produtoId && quantidadeEstoque > 0 && somarEstoque
+      const entraNoEstoque = lancaEstoque && produtoId && quantidadeEstoque > 0 && somarEstoque
       if (entraNoEstoque) {
         adicionarEstoque(produtoId, quantidadeEstoque, 'nfe_entrada')
         unidadesEntrada += quantidadeEstoque
@@ -2669,11 +2710,12 @@ function listarPecasDevolviveisArtesao(artesaoId) {
                 WHERE di.nota_item_id = i.id) as restante
       FROM notas_entrada_itens i
       JOIN notas_entrada n ON n.id = i.nota_id
-      JOIN produtos p ON p.id = i.produto_id
+      LEFT JOIN produtos p ON p.id = i.produto_id AND p.deleted_at IS NULL
       WHERE n.artesao_id = ? AND n.tipo = 'remessa_consignacao' AND n.deleted_at IS NULL
     )
-    WHERE restante > 0 AND produto_estoque > 0
-    ORDER BY produto_nome COLLATE NOCASE, nota_data, nota_item_id
+    -- Item sem produto vinculado (estoque manual) pode ser devolvido até a quantidade da nota.
+    WHERE restante > 0 AND (produto_nome IS NULL OR produto_estoque > 0)
+    ORDER BY COALESCE(produto_nome, descricao) COLLATE NOCASE, nota_data, nota_item_id
   `).all(Number(artesaoId))
 }
 
@@ -2685,13 +2727,13 @@ function gravarDevolucaoArtesao({ artesao_id, nota_entrada_id, itens, observacao
 
   const getItem = db.prepare(`
     SELECT i.id, i.nota_id, n.data_emissao as nota_data, i.produto_id, i.quantidade_estoque, i.quantidade,
-           i.valor_unitario, p.nome, p.estoque,
+           i.valor_unitario, COALESCE(p.nome, i.descricao) as nome, p.id as produto_existe, p.estoque,
            (SELECT COALESCE(SUM(di.quantidade), 0) FROM devolucoes_artesao_itens di
               JOIN devolucoes_artesao d ON d.id = di.devolucao_id AND d.deleted_at IS NULL
               WHERE di.nota_item_id = i.id) as devolvida
     FROM notas_entrada_itens i
     JOIN notas_entrada n ON n.id = i.nota_id AND n.deleted_at IS NULL AND n.tipo = 'remessa_consignacao'
-    JOIN produtos p ON p.id = i.produto_id
+    LEFT JOIN produtos p ON p.id = i.produto_id AND p.deleted_at IS NULL
     WHERE i.id = ? AND n.artesao_id IS ? AND (? IS NULL OR i.nota_id = ?)
   `)
   const insertDevolucao = db.prepare(`
@@ -2715,10 +2757,14 @@ function gravarDevolucaoArtesao({ artesao_id, nota_entrada_id, itens, observacao
       if (vistos.has(pedido.nota_item_id)) throw new Error('Item repetido na devolução.')
       vistos.add(pedido.nota_item_id)
       const item = getItem.get(pedido.nota_item_id, artesao_id, nota_entrada_id, nota_entrada_id)
-      if (!item) throw new Error('Item da nota não encontrado, sem produto vinculado ou de outro fornecedor.')
-      porProduto.set(item.produto_id, (porProduto.get(item.produto_id) || 0) + pedido.quantidade)
-      if (porProduto.get(item.produto_id) > Number(item.estoque)) {
-        throw new Error(`"${item.nome}": o estoque atual é ${item.estoque}.`)
+      if (!item) throw new Error('Item da nota não encontrado ou de outro fornecedor.')
+      // Sem produto vinculado: devolução só fiscal, o estoque é baixado à mão.
+      const produtoId = item.produto_existe ? item.produto_id : null
+      if (produtoId) {
+        porProduto.set(produtoId, (porProduto.get(produtoId) || 0) + pedido.quantidade)
+        if (porProduto.get(produtoId) > Number(item.estoque)) {
+          throw new Error(`"${item.nome}": o estoque atual é ${item.estoque}.`)
+        }
       }
       // Peças vinculadas sem "Somar ao estoque" já estavam no estoque: contam pela quantidade da nota.
       const recebidas = Math.max(Number(item.quantidade_estoque) || 0, Math.round(Number(item.quantidade) || 0))
@@ -2726,14 +2772,11 @@ function gravarDevolucaoArtesao({ artesao_id, nota_entrada_id, itens, observacao
       if (pedido.quantidade > restante) {
         throw new Error(`"${item.nome}": só ${restante} peça(s) desta nota ainda podem ser devolvidas.`)
       }
-      if (pedido.quantidade > Number(item.estoque)) {
-        throw new Error(`"${item.nome}": o estoque atual é ${item.estoque}.`)
-      }
       return {
         ...pedido,
         nota_id: item.nota_id,
         nota_data: item.nota_data,
-        produto_id: item.produto_id,
+        produto_id: produtoId,
         valor_unitario: Number(item.valor_unitario) || 0,
       }
     })
@@ -2754,6 +2797,7 @@ function gravarDevolucaoArtesao({ artesao_id, nota_entrada_id, itens, observacao
       const devolucaoId = insertDevolucao.run(notaId, artesao_id, valor, observacao || null, cfop).lastInsertRowid
       for (const linha of grupo) {
         insertItem.run(devolucaoId, linha.nota_item_id, linha.produto_id, linha.quantidade, linha.valor_unitario)
+        if (!linha.produto_id) continue
         assertUmaLinhaProdutoEstoque(
           updateEstoque.run(linha.quantidade, linha.produto_id),
           linha.produto_id,
@@ -2812,7 +2856,9 @@ function cancelarDevolucaoArtesao(id) {
   const simbolica = db.prepare('SELECT tipo FROM devolucoes_artesao WHERE id = ?').get(id)?.tipo === 'simbolica'
   const itens = simbolica
     ? []
-    : db.prepare('SELECT produto_id, quantidade FROM devolucoes_artesao_itens WHERE devolucao_id = ?').all(id)
+    : db
+        .prepare('SELECT produto_id, quantidade FROM devolucoes_artesao_itens WHERE devolucao_id = ? AND produto_id IS NOT NULL')
+        .all(id)
   const updateEstoque = db.prepare(`UPDATE produtos SET estoque = estoque + ?, sync_status = 'pending' WHERE id = ?`)
   const insertMov = db.prepare(`
     INSERT INTO movimentacoes_estoque (produto_id, tipo, quantidade, origem, data)
@@ -3815,6 +3861,8 @@ module.exports = {
   listarNotasEntrada,
   listarItensNotaEntrada,
   excluirNotaEntrada,
+  notasEntradaEstoqueManual,
+  definirNotasEntradaEstoqueManual,
   corrigirItemNotaEntrada,
   juntarProdutos,
   listarVinculosNotaEntrada,
