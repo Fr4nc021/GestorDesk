@@ -49,6 +49,8 @@ export default function DevolucaoFornecedor({ onGerada }) {
 
   // Estoque é do produto: várias remessas do mesmo produto dividem o mesmo saldo.
   const maximoDe = (peca) => {
+    // Item sem produto vinculado (estoque manual): limita só pelo que veio na nota.
+    if (!peca.produto_nome) return Math.max(0, Number(peca.restante))
     const usadoEmOutras = pecas
       .filter((p) => p.produto_id === peca.produto_id && p.nota_item_id !== peca.nota_item_id)
       .reduce((s, p) => s + (Number(quantidades[p.nota_item_id]) || 0), 0)
@@ -82,7 +84,7 @@ export default function DevolucaoFornecedor({ onGerada }) {
   async function emitir() {
     const acima = selecionadas.find((p) => Number(quantidades[p.nota_item_id]) > maximoDe(p))
     if (acima) {
-      setMensagem({ tipo: 'error', texto: `"${acima.produto_nome}": no máximo ${maximoDe(acima)} peça(s).` })
+      setMensagem({ tipo: 'error', texto: `"${acima.produto_nome || acima.descricao}": no máximo ${maximoDe(acima)} peça(s).` })
       return
     }
     setSalvando(true)
@@ -95,7 +97,10 @@ export default function DevolucaoFornecedor({ onGerada }) {
         cfop,
       })
       const ids = dev.ids?.length ? dev.ids : [dev.id]
-      let texto = `Devolução registrada: ${totalPecas} peça(s), ${formatarMoeda(dev.valor_total)}. As peças saíram do estoque.`
+      const semBaixa = selecionadas.some((p) => !p.produto_nome)
+      let texto = `Devolução registrada: ${totalPecas} peça(s), ${formatarMoeda(dev.valor_total)}. ${
+        semBaixa ? 'Itens sem produto vinculado não mexem no estoque: dê a baixa manual.' : 'As peças saíram do estoque.'
+      }`
       if (ids.length > 1) texto += ` As peças vieram de ${ids.length} remessas: uma NF-e para cada.`
       let tipo = 'success'
       for (const id of ids) {
@@ -181,8 +186,9 @@ export default function DevolucaoFornecedor({ onGerada }) {
                 return (
                   <tr key={p.nota_item_id}>
                     <td>
-                      {p.produto_nome}
+                      {p.produto_nome || p.descricao}
                       {p.produto_variacao ? ` · ${p.produto_variacao}` : ''}
+                      {!p.produto_nome && <span className="notas-entrada-cfop">sem produto vinculado · baixa manual</span>}
                     </td>
                     <td>
                       nº {p.nota_numero || '—'}
@@ -197,7 +203,7 @@ export default function DevolucaoFornecedor({ onGerada }) {
                         style={{ width: 60 }}
                         value={quantidades[p.nota_item_id] || ''}
                         onChange={(e) => definirQuantidade(p, e.target.value)}
-                        aria-label={`Quantidade de ${p.produto_nome}`}
+                        aria-label={`Quantidade de ${p.produto_nome || p.descricao}`}
                       />{' '}
                       <button type="button" className="link-button" onClick={() => definirQuantidade(p, maximo)} disabled={maximo === 0}>
                         todas

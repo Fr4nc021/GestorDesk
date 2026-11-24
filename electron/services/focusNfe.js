@@ -302,7 +302,7 @@ function montarNfeDevolucao({ devolucao, itens, chaveRemessa, remessa, remessas,
       const unidade = String(item.unidade || 'UN').trim().toUpperCase() || 'UN'
       const linha = {
         numero_item: String(indice + 1),
-        codigo_produto: String(item.codigo || item.codigo_barras || item.produto_id),
+        codigo_produto: String(item.codigo || item.codigo_barras || item.produto_id || indice + 1),
         descricao: String(item.descricao || item.produto_nome || '').slice(0, 120),
         codigo_ncm: somenteDigitos(item.ncm),
         cfop,

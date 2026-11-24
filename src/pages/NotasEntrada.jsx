@@ -175,6 +175,7 @@ export default function NotasEntrada() {
   const [artesoes, setArtesoes] = useState([])
   const [multiplicador, setMultiplicador] = useState(null)
   const [cnpjLoja, setCnpjLoja] = useState('')
+  const [estoqueManual, setEstoqueManual] = useState(true)
 
   const [previa, setPrevia] = useState(null)
   const [artesaoEscolhido, setArtesaoEscolhido] = useState('')
@@ -222,19 +223,26 @@ export default function NotasEntrada() {
   async function carregarCadastros() {
     if (!window.electronAPI) return
     try {
-      const [listaProdutos, listaArtesoes, formacao, fiscal] = await Promise.all([
+      const [listaProdutos, listaArtesoes, formacao, fiscal, manual] = await Promise.all([
         window.electronAPI.listarProdutos(),
         window.electronAPI.listarArtesoes(),
         window.electronAPI.obterFormacaoPreco?.(),
         window.electronAPI.obterConfigFiscal?.(),
+        window.electronAPI.notasEntradaEstoqueManual?.(),
       ])
+      if (manual !== undefined) setEstoqueManual(Boolean(manual))
       const calc = formacao ? calcularFormacao(formacao) : null
       const mult = calc?.ok ? calc.multiplicador : null
       setProdutos(listaProdutos || [])
       setArtesoes(listaArtesoes || [])
       setMultiplicador(mult)
       setCnpjLoja(String(fiscal?.cnpj || '').replace(/\D/g, ''))
-      return { produtos: listaProdutos || [], artesoes: listaArtesoes || [], multiplicador: mult }
+      return {
+        produtos: listaProdutos || [],
+        artesoes: listaArtesoes || [],
+        multiplicador: mult,
+        estoqueManual: manual === undefined ? estoqueManual : Boolean(manual),
+      }
     } catch (err) {
       console.error('[Notas de entrada] Erro ao carregar cadastros:', err)
       return { produtos, artesoes, multiplicador }
@@ -306,8 +314,12 @@ export default function NotasEntrada() {
   }
 
   /** Liga cada item da nota a um produto do fornecedor; o que não tiver par seguro fica para a pessoa decidir. */
-  function casarItens(itensNota, regra, produtosDoArtesao, vinculos, mult) {
+  function casarItens(itensNota, regra, produtosDoArtesao, vinculos, mult, manual = estoqueManual) {
     return itensNota.map((item) => {
+      // Estoque manual: nada é ligado sozinho; a nota só fica registrada para a devolução.
+      if (manual) {
+        return { ...item, acao: 'ignorar', origem: null, produto_id: '', somar_estoque: false, nome: item.descricao, preco_venda: '' }
+      }
       const { produto, origem } = encontrarProduto(item, produtosDoArtesao, vinculos)
       const sugerido = mult ? precoSugerido(item.valor_unitario, mult) : null
       let acao = 'ignorar'
@@ -347,7 +359,9 @@ export default function NotasEntrada() {
     setArtesaoEscolhido(artesao ? String(artesao.id) : 'novo')
     setErroPrevia('')
     setAcertoPeriodo(periodoAcertoPadrao(nota.data_emissao))
-    setItensPrevia(casarItens(nota.itens, regra, produtosDoArtesao, cadastros.vinculos || [], cadastros.multiplicador))
+    setItensPrevia(
+      casarItens(nota.itens, regra, produtosDoArtesao, cadastros.vinculos || [], cadastros.multiplicador, cadastros.estoqueManual),
+    )
   }
 
   /** Trocar o fornecedor refaz a ligação dos itens com os produtos dele. */
@@ -442,7 +456,7 @@ export default function NotasEntrada() {
   async function confirmarImportacao() {
     if (!previa) return
     const { nota, xml } = previa
-    const regra = TIPOS_NOTA_ENTRADA[nota.tipo]
+    const regra = regraPrevia
 
     for (const item of itensPrevia) {
       if (item.acao === 'escolher') {
@@ -639,12 +653,16 @@ export default function NotasEntrada() {
       const itens = await window.electronAPI.listarItensNotaEntrada(nota.id)
       const linhas = (itens || [])
         .map((item) => ({ ...item, recebidas: quantidadeDevolvivel(item) }))
-        .filter((item) => item.produto_id && item.recebidas > 0)
+        .filter((item) => item.recebidas > 0)
         .map((item) => {
           const restante = item.recebidas - Number(item.quantidade_devolvida || 0)
+          // Sem produto vinculado: devolve pela quantidade da nota e o estoque é baixado à mão.
+          const semProduto = !item.produto_nome
           return {
             ...item,
-            maximo: Math.max(0, Math.min(restante, Number(item.produto_estoque) || 0)),
+            semProduto,
+            produto_nome: item.produto_nome || item.descricao,
+            maximo: Math.max(0, semProduto ? restante : Math.min(restante, Number(item.produto_estoque) || 0)),
             restante,
             quantidade: '',
           }
@@ -701,11 +719,16 @@ export default function NotasEntrada() {
         observacao: devolucao.observacao.trim() || null,
       })
       const unidades = itens.reduce((acc, i) => acc + i.quantidade, 0)
+      const semBaixa = devolucao.linhas.some((l) => l.semProduto && Number(l.quantidade) > 0)
       setDevolucao(null)
       await Promise.all([carregarNotas(), carregarCadastros()])
       setMensagem({
         tipo: 'success',
-        texto: `Devolução registrada: ${unidades} peça(s), ${formatarMoeda(resultado.valor_total)}. As peças saíram do estoque e a nota fiscal de devolução (CFOP 5918) fica pendente.`,
+        texto: `Devolução registrada: ${unidades} peça(s), ${formatarMoeda(resultado.valor_total)}. ${
+          semBaixa
+            ? 'Itens sem produto vinculado não mexem no estoque: dê a baixa manual. '
+            : 'As peças saíram do estoque. '
+        }Abra "Ver itens" para emitir a NF-e de devolução.`,
       })
     } catch (err) {
       setErroDevolucao(err?.message || 'Erro ao registrar a devolução.')
@@ -780,7 +803,18 @@ export default function NotasEntrada() {
     }
   }
 
-  const regraPrevia = previa ? TIPOS_NOTA_ENTRADA[previa.nota.tipo] : null
+  async function alternarEstoqueManual(ativo) {
+    try {
+      await window.electronAPI.definirNotasEntradaEstoqueManual(ativo)
+      setEstoqueManual(ativo)
+    } catch (err) {
+      setMensagem({ tipo: 'error', texto: mensagemErro(err, 'Não foi possível salvar a opção.') })
+    }
+  }
+
+  const regraBase = previa ? TIPOS_NOTA_ENTRADA[previa.nota.tipo] : null
+  // Com estoque manual, a tela de importação se comporta como uma nota que não movimenta estoque.
+  const regraPrevia = regraBase && estoqueManual ? { ...regraBase, movimentaEstoque: false } : regraBase
   const destinoDiferente =
     previa && cnpjLoja && previa.nota.destinatario_cpf_cnpj && previa.nota.destinatario_cpf_cnpj !== cnpjLoja
 
@@ -790,10 +824,16 @@ export default function NotasEntrada() {
         <div className="produtos-header-left">
           <h2 className="dashboard-heading">Notas de entrada</h2>
           <p className="dashboard-subtitle">
-            Importe o XML da NF-e do artesão ou fornecedor para cadastrar as peças e dar entrada no estoque.
+            {estoqueManual
+              ? 'Importe o XML da NF-e do artesão ou fornecedor para registrar a nota e fazer devoluções. A entrada no estoque é manual.'
+              : 'Importe o XML da NF-e do artesão ou fornecedor para cadastrar as peças e dar entrada no estoque.'}
           </p>
         </div>
         <div className="produtos-actions">
+          <label className="notas-entrada-somar" title="Ligado: a nota só fica registrada e a entrada no estoque é feita à mão">
+            <input type="checkbox" checked={estoqueManual} onChange={(e) => alternarEstoqueManual(e.target.checked)} />
+            Estoque manual
+          </label>
           <button type="button" className="notas-entrada-btn-sefaz" onClick={buscarRecebidas}>
             Buscar na SEFAZ
           </button>
@@ -958,7 +998,9 @@ export default function NotasEntrada() {
               <p className="modal-field-hint">
                 {previa.nota.tipo === 'faturamento_consignacao'
                   ? 'Nota de acerto: as peças já saíram na venda, então o estoque não muda. A nota fica registrada para o acerto com o artesão.'
-                  : 'Esta operação não dá entrada no estoque. A nota só fica registrada.'}
+                  : estoqueManual && regraBase.movimentaEstoque
+                    ? 'Estoque manual: a nota só fica registrada (para a devolução) e não mexe no estoque. Dê a entrada das peças pelo Estoque. Vincular a um produto é opcional.'
+                    : 'Esta operação não dá entrada no estoque. A nota só fica registrada.'}
               </p>
             )}
 
@@ -1434,10 +1476,11 @@ export default function NotasEntrada() {
                       <td>
                         {linha.produto_nome}
                         {linha.produto_variacao ? ` (${linha.produto_variacao})` : ''}
+                        {linha.semProduto && <span className="notas-entrada-cfop">Item {linha.numero_item} · sem produto vinculado</span>}
                       </td>
                       <td>{linha.recebidas}</td>
                       <td>{linha.quantidade_devolvida || 0}</td>
-                      <td>{linha.produto_estoque}</td>
+                      <td>{linha.semProduto ? 'manual' : linha.produto_estoque}</td>
                       <td>{formatarMoeda(linha.valor_unitario)}</td>
                       <td>
                         <input
