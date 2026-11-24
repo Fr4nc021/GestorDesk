@@ -78,6 +78,95 @@ function novoArtesaoDoEmitente(emitente) {
   }
 }
 
+function rotuloProduto(p) {
+  return `${p.nome}${p.variacao ? ` (${p.variacao})` : ''}`
+}
+
+/** Produtos do fornecedor com nome parecido, para evitar cadastrar duplicado. */
+function produtosParecidos(nome, lista) {
+  const texto = String(nome || '').trim()
+  if (!texto) return []
+  return lista
+    .map((p) => ({ p, s: Math.max(semelhanca(p.nome, texto), semelhanca(rotuloProduto(p), texto)) }))
+    .filter((x) => x.s >= 0.5)
+    .sort((a, b) => b.s - a.s)
+    .slice(0, 3)
+    .map((x) => x.p)
+}
+
+/** Linhas "produto + quantidade" para dividir um item da nota entre vários produtos. */
+function EditorPartes({ partes, onChange, produtos, total, permitirNovo = false }) {
+  const soma = partes.reduce((s, p) => s + (Number(p.quantidade) || 0), 0)
+  const atualizar = (i, campo, valor) => onChange(partes.map((p, j) => (j === i ? { ...p, [campo]: valor } : p)))
+  return (
+    <div className="notas-entrada-partes">
+      {partes.map((parte, i) => (
+        <div key={i} className="notas-entrada-parte">
+          <select value={parte.produto_id} onChange={(e) => atualizar(i, 'produto_id', e.target.value)}>
+            <option value="">Escolha o produto...</option>
+            {permitirNovo && <option value="novo">+ Cadastrar produto novo</option>}
+            {produtos.map((p) => (
+              <option key={p.id} value={p.id}>
+                {rotuloProduto(p)} · estoque {p.estoque ?? 0}
+              </option>
+            ))}
+          </select>
+          {parte.produto_id === 'novo' && (
+            <>
+              <input
+                type="text"
+                value={parte.nome || ''}
+                onChange={(e) => atualizar(i, 'nome', e.target.value)}
+                placeholder="Nome do produto"
+              />
+              <input
+                type="text"
+                inputMode="decimal"
+                value={parte.preco_venda || ''}
+                onChange={(e) => atualizar(i, 'preco_venda', e.target.value)}
+                placeholder="Preço de venda"
+                aria-label="Preço de venda"
+              />
+            </>
+          )}
+          <input
+            type="text"
+            inputMode="numeric"
+            className="notas-entrada-qtd"
+            value={parte.quantidade}
+            onChange={(e) => atualizar(i, 'quantidade', e.target.value.replace(/\D/g, ''))}
+            placeholder="Qtd"
+            aria-label="Quantidade"
+          />
+          {partes.length > 1 && (
+            <button
+              type="button"
+              className="caixa-btn-excluir notas-entrada-parte-remover"
+              onClick={() => onChange(partes.filter((_, j) => j !== i))}
+              aria-label="Remover parte"
+              title="Remover"
+            >
+              ×
+            </button>
+          )}
+        </div>
+      ))}
+      <div className="notas-entrada-parte">
+        <button
+          type="button"
+          className="caixa-btn-editar"
+          onClick={() => onChange([...partes, { produto_id: '', quantidade: '' }])}
+        >
+          + Outro produto
+        </button>
+        <span className={soma === total ? 'notas-entrada-cfop' : 'notas-entrada-cfop notas-entrada-erro'}>
+          {soma} de {total} peça(s)
+        </span>
+      </div>
+    </div>
+  )
+}
+
 export default function NotasEntrada() {
   const [notas, setNotas] = useState([])
   const [recebidas, setRecebidas] = useState(null)
@@ -99,6 +188,8 @@ export default function NotasEntrada() {
   const [notaDetalhe, setNotaDetalhe] = useState(null)
   const [itensDetalhe, setItensDetalhe] = useState([])
   const [devolucoesDetalhe, setDevolucoesDetalhe] = useState([])
+  const [correcao, setCorrecao] = useState(null)
+  const [salvandoCorrecao, setSalvandoCorrecao] = useState(false)
 
   const [devolucao, setDevolucao] = useState(null)
   const [salvandoDevolucao, setSalvandoDevolucao] = useState(false)
@@ -304,7 +395,21 @@ export default function NotasEntrada() {
   }
 
   function atualizarItem(indice, campo, valor) {
-    setItensPrevia((prev) => prev.map((item, i) => (i === indice ? { ...item, [campo]: valor } : item)))
+    setItensPrevia((prev) =>
+      prev.map((item, i) => {
+        if (i !== indice) return item
+        const novo = { ...item, [campo]: valor }
+        // Ao escolher dividir, começa com o produto já vinculado (se houver) e uma segunda linha vazia.
+        if (campo === 'acao' && valor === 'dividir' && !item.partes?.length) {
+          novo.partes = [
+            { produto_id: item.produto_id || '', quantidade: '' },
+            { produto_id: '', quantidade: '' },
+          ]
+          novo.somar_estoque = true
+        }
+        return novo
+      }),
+    )
     setErroPrevia('')
   }
 
@@ -356,7 +461,69 @@ export default function NotasEntrada() {
         setErroPrevia(`Item ${item.numero_item}: informe o preço de venda.`)
         return
       }
+      if (item.acao === 'dividir') {
+        const partes = (item.partes || []).filter((p) => Number(p.quantidade) > 0)
+        const total = Math.round(Number(item.quantidade) || 0)
+        const soma = partes.reduce((s, p) => s + Number(p.quantidade), 0)
+        if (partes.length < 2) {
+          setErroPrevia(`Item ${item.numero_item}: para dividir, informe pelo menos dois produtos com quantidade.`)
+          return
+        }
+        if (soma !== total) {
+          setErroPrevia(`Item ${item.numero_item}: as partes somam ${soma}, mas a nota tem ${total} peça(s).`)
+          return
+        }
+        const ids = partes.filter((p) => p.produto_id !== 'novo').map((p) => p.produto_id)
+        if (ids.some((id) => !id) || new Set(ids).size !== ids.length) {
+          setErroPrevia(`Item ${item.numero_item}: escolha um produto diferente para cada parte.`)
+          return
+        }
+        const nova = partes.find((p) => p.produto_id === 'novo' && (!String(p.nome || '').trim() || parsePreco(p.preco_venda) <= 0))
+        if (nova) {
+          setErroPrevia(`Item ${item.numero_item}: informe nome e preço de venda do produto novo.`)
+          return
+        }
+      }
     }
+
+    // Trava contra duplicados: produto novo com nome parecido com um que já existe pede confirmação.
+    const novosNomes = itensPrevia.flatMap((item) =>
+      item.acao === 'criar'
+        ? [item.nome]
+        : item.acao === 'dividir'
+          ? (item.partes || []).filter((p) => p.produto_id === 'novo').map((p) => p.nome)
+          : [],
+    )
+    if (novosNomes.length > 0) {
+      const parecidos = novosNomes
+        .map((nome) => ({ nome, iguais: produtosParecidos(nome, produtosParaVincular) }))
+        .filter((x) => x.iguais.length > 0)
+      const texto = parecidos.length
+        ? `\n\nAtenção, já existem produtos parecidos:\n${parecidos
+            .map((x) => `• "${x.nome}" parece com ${x.iguais.map((p) => `"${rotuloProduto(p)}"`).join(', ')}`)
+            .join('\n')}\n\nSe for o mesmo produto, cancele e use "Vincular a produto existente".`
+        : ''
+      if (!window.confirm(`Esta importação vai cadastrar ${novosNomes.length} produto(s) novo(s).${texto}\n\nContinuar?`)) {
+        return
+      }
+    }
+
+    // Item dividido vira uma linha por produto, todas com o mesmo número de item da nota.
+    const itensEnvio = itensPrevia.flatMap((item) => {
+      if (item.acao !== 'dividir') return [item]
+      return item.partes
+        .filter((p) => Number(p.quantidade) > 0)
+        .map((p) => ({
+          ...item,
+          quantidade: Number(p.quantidade),
+          valor_total: Math.round(Number(p.quantidade) * Number(item.valor_unitario || 0) * 100) / 100,
+          acao: p.produto_id === 'novo' ? 'criar' : 'vincular',
+          produto_id: p.produto_id === 'novo' ? '' : p.produto_id,
+          nome: p.nome,
+          preco_venda: p.preco_venda,
+          somar_estoque: p.produto_id === 'novo' || item.somar_estoque,
+        }))
+    })
 
     setImportando(true)
     try {
@@ -378,7 +545,7 @@ export default function NotasEntrada() {
         },
         artesao_id: artesaoEscolhido !== 'novo' ? Number(artesaoEscolhido) : null,
         novo_artesao: artesaoEscolhido === 'novo' ? novoArtesaoDoEmitente(nota.emitente) : null,
-        itens: itensPrevia.map((item) => ({
+        itens: itensEnvio.map((item) => ({
           numero_item: item.numero_item,
           codigo: item.codigo,
           descricao: item.descricao,
@@ -411,7 +578,40 @@ export default function NotasEntrada() {
     }
   }
 
+  function iniciarCorrecao(item) {
+    setCorrecao({
+      item,
+      erro: '',
+      partes: [{ produto_id: item.produto_id ? String(item.produto_id) : '', quantidade: String(Math.round(Number(item.quantidade) || 0)) }],
+    })
+  }
+
+  async function salvarCorrecao() {
+    if (!correcao) return
+    setSalvandoCorrecao(true)
+    try {
+      const resultado = await window.electronAPI.corrigirItemNotaEntrada({
+        nota_item_id: correcao.item.id,
+        partes: correcao.partes.map((p) => ({ produto_id: Number(p.produto_id), quantidade: Number(p.quantidade) })),
+      })
+      setCorrecao(null)
+      await Promise.all([carregarNotas(), carregarCadastros()])
+      await abrirDetalhe(notaDetalhe)
+      setMensagem({
+        tipo: 'success',
+        texto: `Item corrigido${resultado.partes > 1 ? ` e dividido em ${resultado.partes} produtos` : ''}.${
+          resultado.moveuEstoque ? ' O estoque foi transferido entre os produtos.' : ''
+        }`,
+      })
+    } catch (err) {
+      setCorrecao((c) => c && { ...c, erro: mensagemErro(err, 'Não foi possível corrigir o item.') })
+    } finally {
+      setSalvandoCorrecao(false)
+    }
+  }
+
   async function abrirDetalhe(nota) {
+    setCorrecao(null)
     setNotaDetalhe(nota)
     setItensDetalhe([])
     setDevolucoesDetalhe([])
@@ -869,8 +1069,40 @@ export default function NotasEntrada() {
                           {item.acao === 'escolher' && <option value="escolher">Escolha: já existe ou é novo?</option>}
                           {regraPrevia.movimentaEstoque && <option value="criar">Cadastrar produto novo</option>}
                           <option value="vincular">Vincular a produto existente</option>
+                          {regraPrevia.movimentaEstoque && Math.round(Number(item.quantidade) || 0) > 1 && (
+                            <option value="dividir">São produtos diferentes (dividir)</option>
+                          )}
                           <option value="ignorar">Não vincular</option>
                         </select>
+                        {item.acao === 'dividir' && (
+                          <>
+                            <EditorPartes
+                              partes={item.partes || []}
+                              onChange={(partes) => atualizarItem(indice, 'partes', partes)}
+                              produtos={produtosParaVincular}
+                              total={Math.round(Number(item.quantidade) || 0)}
+                              permitirNovo
+                            />
+                            <label className="notas-entrada-somar">
+                              <input
+                                type="checkbox"
+                                checked={item.somar_estoque}
+                                onChange={(e) => atualizarItem(indice, 'somar_estoque', e.target.checked)}
+                              />
+                              Somar ao estoque dos produtos existentes
+                            </label>
+                          </>
+                        )}
+                        {item.acao === 'criar' &&
+                          (() => {
+                            const parecidos = produtosParecidos(item.nome, produtosParaVincular)
+                            return parecidos.length > 0 ? (
+                              <p className="config-feedback error">
+                                Já existe produto parecido: {parecidos.map(rotuloProduto).join(', ')}. Se for o mesmo,
+                                use "Vincular a produto existente".
+                              </p>
+                            ) : null
+                          })()}
                         {item.acao === 'criar' && (
                           <div className="notas-entrada-novo">
                             <input
@@ -1054,16 +1286,58 @@ export default function NotasEntrada() {
                 <tbody>
                   {itensDetalhe.map((item) => (
                     <tr key={item.id}>
-                      <td>{item.descricao}</td>
+                      <td>
+                        {item.descricao}
+                        {item.codigo && <span className="notas-entrada-cfop">Item {item.numero_item} · Cód. {item.codigo}</span>}
+                      </td>
                       <td>{item.ncm ? formatarNcm(item.ncm) : '—'}</td>
                       <td>
                         {formatarQuantidade(item.quantidade)} {item.unidade}
                       </td>
                       <td>{formatarMoeda(item.valor_unitario)}</td>
-                      <td>
-                        {item.produto_nome
-                          ? `${item.produto_nome}${item.produto_variacao ? ` (${item.produto_variacao})` : ''}`
-                          : '—'}
+                      <td className="notas-entrada-acao">
+                        {correcao?.item.id === item.id ? (
+                          <>
+                            <EditorPartes
+                              partes={correcao.partes}
+                              onChange={(partes) => setCorrecao((c) => ({ ...c, partes, erro: '' }))}
+                              produtos={produtos
+                                .filter((p) => !notaDetalhe.artesao_id || p.artesao_id === notaDetalhe.artesao_id)
+                                .sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'))}
+                              total={Math.round(Number(item.quantidade) || 0)}
+                            />
+                            {Number(item.quantidade_estoque) > 0 && (
+                              <p className="modal-field-hint">
+                                Esta nota somou {item.quantidade_estoque} peça(s) ao estoque: o estoque passa para os
+                                produtos escolhidos.
+                              </p>
+                            )}
+                            {correcao.erro && <p className="config-feedback error">{correcao.erro}</p>}
+                            <div className="caixa-acoes-cell">
+                              <BotaoAcao icone="cancelar" onClick={() => setCorrecao(null)} disabled={salvandoCorrecao}>
+                                Cancelar
+                              </BotaoAcao>
+                              <BotaoAcao icone="nota" onClick={salvarCorrecao} disabled={salvandoCorrecao}>
+                                {salvandoCorrecao ? 'Salvando...' : 'Salvar'}
+                              </BotaoAcao>
+                            </div>
+                          </>
+                        ) : (
+                          <>
+                            {item.produto_nome
+                              ? `${item.produto_nome}${item.produto_variacao ? ` (${item.produto_variacao})` : ''}`
+                              : '—'}
+                            {Number(item.quantidade_devolvida) > 0 ? (
+                              <span className="notas-entrada-cfop">{item.quantidade_devolvida} devolvida(s)</span>
+                            ) : (
+                              Math.round(Number(item.quantidade) || 0) > 0 && (
+                                <BotaoAcao icone="editar" onClick={() => iniciarCorrecao(item)}>
+                                  Corrigir / dividir
+                                </BotaoAcao>
+                              )
+                            )}
+                          </>
+                        )}
                       </td>
                     </tr>
                   ))}

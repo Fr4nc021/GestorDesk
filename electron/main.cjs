@@ -150,6 +150,8 @@ const {
   listarNotasEntrada,
   listarItensNotaEntrada,
   excluirNotaEntrada,
+  corrigirItemNotaEntrada,
+  juntarProdutos,
   listarVinculosNotaEntrada,
   registrarDevolucaoArtesao,
   registrarDevolucaoArtesaoAvulsa,
@@ -345,6 +347,8 @@ ipcMain.handle('importar-nota-entrada', (_, data) => importarNotaEntrada(data))
 ipcMain.handle('listar-notas-entrada', () => listarNotasEntrada())
 ipcMain.handle('listar-itens-nota-entrada', (_, notaId) => listarItensNotaEntrada(notaId))
 ipcMain.handle('excluir-nota-entrada', (_, id) => excluirNotaEntrada(id))
+ipcMain.handle('corrigir-item-nota-entrada', (_, dados) => corrigirItemNotaEntrada(dados))
+ipcMain.handle('juntar-produtos', (_, dados) => juntarProdutos(dados))
 ipcMain.handle('listar-vinculos-nota-entrada', (_, artesaoId) => listarVinculosNotaEntrada(artesaoId))
 ipcMain.handle('registrar-devolucao-artesao', (_, dados) => registrarDevolucaoArtesao(dados))
 ipcMain.handle('registrar-devolucao-artesao-avulsa', (_, dados) => registrarDevolucaoArtesaoAvulsa(dados))
